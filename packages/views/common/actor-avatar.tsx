@@ -12,7 +12,6 @@ import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
-import { MemberProfileCard } from "../members/member-profile-card";
 import { SquadProfileCard } from "../squads/components/squad-profile-card";
 import { availabilityConfig } from "../agents/presence";
 import { useNavigation } from "../navigation";
@@ -108,15 +107,13 @@ export function ActorAvatar({
   );
   const shouldLinkToProfile =
     profileLink ??
-    (actorType === "member" || actorType === "agent" || actorType === "squad");
+    (actorType === "agent" || actorType === "squad");
   const profileHref = shouldLinkToProfile
-    ? actorType === "member"
-      ? paths.memberDetail(actorId)
-      : actorType === "agent"
-        ? paths.agentDetail(actorId)
-        : actorType === "squad"
-          ? paths.squadDetail(actorId)
-          : null
+    ? actorType === "agent"
+      ? paths.agentDetail(actorId)
+      : actorType === "squad"
+        ? paths.squadDetail(actorId)
+        : null
     : null;
   const content = profileHref ? (
     <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
@@ -134,9 +131,6 @@ export function ActorAvatar({
       </AgentAvatarHoverCard>
     );
   }
-  if (actorType === "member") {
-    return <MemberAvatarHoverCard userId={actorId}>{content}</MemberAvatarHoverCard>;
-  }
   if (actorType === "squad") {
     return <SquadAvatarHoverCard squadId={actorId}>{content}</SquadAvatarHoverCard>;
   }
@@ -150,7 +144,7 @@ function ActorAvatarProfileLink({
   href: string;
   children: React.ReactNode;
 }) {
-  const { push, openInNewTab } = useNavigation();
+  const { push } = useNavigation();
 
   const navigate = (event: React.MouseEvent | React.KeyboardEvent) => {
     const controlAncestor = event.currentTarget.parentElement?.closest(
@@ -158,16 +152,16 @@ function ActorAvatarProfileLink({
     );
     if (controlAncestor) return;
 
-    event.preventDefault();
-    event.stopPropagation();
     if (
       "metaKey" in event &&
-      (event.metaKey || event.ctrlKey || event.shiftKey) &&
-      openInNewTab
+      (event.metaKey || event.ctrlKey || event.shiftKey)
     ) {
-      openInNewTab(href);
+      event.stopPropagation();
+      window.open(href, "_blank", "noopener,noreferrer");
       return;
     }
+    event.preventDefault();
+    event.stopPropagation();
     push(href);
   };
 
@@ -233,20 +227,6 @@ function AgentAvatarHoverCard({
     );
   return (
     <ActorAvatarHoverCardShell content={content}>
-      {children}
-    </ActorAvatarHoverCardShell>
-  );
-}
-
-function MemberAvatarHoverCard({
-  userId,
-  children,
-}: {
-  userId: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <ActorAvatarHoverCardShell content={<MemberProfileCard userId={userId} />}>
       {children}
     </ActorAvatarHoverCardShell>
   );

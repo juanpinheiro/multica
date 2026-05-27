@@ -2,20 +2,62 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Conventions reference
+## Naming Conventions
 
-The single source of truth for **code naming, the i18n translation glossary, and the Chinese voice guide** is the docs site:
+### Routes
 
-- **`apps/docs/content/docs/developers/conventions.mdx`** (English)
-- **`apps/docs/content/docs/developers/conventions.zh.mdx`** (Chinese)
+Pre-workspace routes (the routes that exist before the user is in a workspace) MUST use either a single word or the `/{noun}/{verb}` pattern.
 
-Read that page before:
+- OK: `/login`, `/inbox`, `/workspaces/new`
+- NOT OK: `/new-workspace`, `/create-team`, `/accept-invite`
 
-- Writing or editing translations (`packages/views/locales/`)
-- Naming a new route, package, file, DB column, or TS type
-- Writing Chinese product copy (UI strings, error messages, docs)
+Hyphenated word groups at the root collide with user-chosen workspace slugs and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
 
-The legacy `packages/views/locales/glossary.md` is now a stub redirecting to the docs page; do not rely on it.
+### Workspace-scoped routes
+
+Always live under `/{slug}/{section}` — `/{slug}/issues`, `/{slug}/agents`, `/{slug}/settings`. Use `useNavigation().push()` from shared code, never duplicate workspace routing logic.
+
+### Files and components
+
+- Files: `kebab-case.tsx` / `kebab-case.ts` (e.g. `agent-row-actions.tsx`)
+- Components: `PascalCase` (e.g. `AgentRowActions`)
+- Hooks: `useCamelCase` (e.g. `useWorkspaceId`)
+- Tests: colocated as `<file>.test.ts(x)`
+- Stores (Zustand): `<feature>-store.ts`, exported as `use<Feature>Store`
+
+### Database (Go + sqlc)
+
+- Tables: `snake_case` singular (`user`, `workspace`, `agent_runtime`)
+- Columns: `snake_case` (`workspace_id`, `created_at`, `last_seen_at`)
+- Foreign keys: `<table>_id`
+- Booleans: `is_<state>` or `<state>_at` (timestamp form preferred for state changes)
+- Migration files: `NNN_descriptive_name.up.sql` + `.down.sql` — always provide both directions
+
+### Go
+
+- Standard `gofmt` + `go vet`. No exceptions.
+- Handler files mirror domain: `agent.go`, `auth.go`, `runtime.go`
+- Tests: `<file>_test.go` colocated
+- For UUID parsing in handlers follow the rules in the "Backend Handler UUID Parsing Convention" section below.
+
+### TypeScript
+
+- API responses on the wire are `snake_case`; the api client converts to `camelCase` at the boundary. Inside TS code, **always camelCase**.
+- Types: `PascalCase` (`Issue`, `AgentRuntime`); never `IPrefix`, never `_t` suffix.
+- Enums: prefer string literal unions; reserve `enum` for runtime-iterable cases.
+- TanStack Query keys: factory functions in `<feature>/queries.ts`, e.g. `issueKeys.detail(id)`.
+
+### Issue keys
+
+Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (uppercase letters and digits, typically 3 chars, max 10) + sequence number. Workspace admins can change the prefix in Settings → General; changing it renumbers every existing issue, so external references that embed the old prefix (PR titles, branch names, links in docs and chat) stop resolving.
+
+### Comments in code
+
+English only.
+
+### Commit messages
+
+Conventional format: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `test(scope)`, `chore(scope)`. Atomic commits grouped by intent.
 
 ## Project Context
 
@@ -31,22 +73,18 @@ Multica is an AI-native task management platform — like Linear, but with AI ag
 
 - `server/` — Go backend (Chi router, sqlc for DB, gorilla/websocket for real-time)
 - `apps/web/` — Next.js frontend (App Router)
-- `apps/desktop/` — Electron desktop app (electron-vite)
-- `apps/mobile/` — Expo / React Native iOS app. See `apps/mobile/CLAUDE.md`.
 - `packages/core/` — Headless business logic (zero react-dom)
 - `packages/ui/` — Atomic UI components (zero business logic)
-- `packages/views/` — Shared business pages/components (zero next/* imports, zero react-router imports)
+- `packages/views/` — Shared business pages/components (web only)
 - `packages/tsconfig/` — Shared TypeScript configuration
-
-What lives where for sharing purposes is documented in *Sharing Principles* below — read it once.
 
 ### Key Architectural Decisions
 
 **Internal Packages pattern** — all shared packages export raw `.ts`/`.tsx` files (no pre-compilation). The consuming app's bundler compiles them directly. This gives zero-config HMR and instant go-to-definition.
 
-**Dependency direction:** `views/ → core/ + ui/`. Core and UI are independent of each other. No package imports from `next/*`, `react-router-dom`, or app-specific code.
+**Dependency direction:** `views/ → core/ + ui/`. Core and UI are independent of each other. `packages/views/` is web-only and may import `next/navigation` and `next/link` directly.
 
-**Platform bridge:** `packages/core/platform/` provides `CoreProvider` — initializes API client, auth/workspace stores, WS connection, and QueryClient. Each app wraps its root with `<CoreProvider>` and provides its own `NavigationAdapter` for routing.
+**Platform bridge:** `packages/core/platform/` provides `CoreProvider` — initializes API client, auth/workspace stores, WS connection, and QueryClient. The web app wraps its root with `<CoreProvider>` and `<NavigationProvider>` (from `@multica/views/navigation`).
 
 **pnpm catalog** — `pnpm-workspace.yaml` defines `catalog:` for version pinning. All shared deps use `catalog:` references to guarantee a single version across all packages. When adding new shared deps (including test deps), add to catalog first.
 
@@ -56,7 +94,7 @@ The architecture relies on a strict split between server state and client state.
 
 - **TanStack Query owns all server state.** Issues, users, workspaces, inbox — anything fetched from the API lives in the Query cache. WS events keep it fresh via invalidation; no polling, no `staleTime` workarounds.
 - **Zustand owns all client state.** UI selections, filters, drafts, modal state, navigation history. Stores live in `packages/core/` (never in `packages/views/`) so they're shared.
-- **React Context** is reserved for cross-cutting platform plumbing — `WorkspaceIdProvider`, `NavigationProvider`. Don't reach for it for general state.
+- **React Context** is reserved for cross-cutting platform plumbing — `WorkspaceIdProvider`, navigation transition state. Don't reach for it for general state.
 - **Auth and workspace stores are the only stores allowed to call `api.*` directly**, because they manage critical state that must exist before queries can run. They're created via factory + injected dependencies, registered by the platform layer.
 
 **Hard rules — these are how the architecture stays coherent:**
@@ -71,17 +109,6 @@ The architecture relies on a strict split between server state and client state.
 
 - Selectors must return stable references. Returning a freshly built object or array on every call (e.g. `s => ({ a: s.a, b: s.b })` or `s => s.items.map(...)`) triggers infinite re-renders. Either select primitives separately or use shallow comparison.
 - Hooks that need workspace context should accept `wsId` as a parameter, not call `useWorkspaceId()` internally — this lets them work outside the `WorkspaceIdProvider` (e.g. in a sidebar that renders before workspace is loaded).
-
-## Sharing Principles
-
-The monorepo splits into two share zones:
-
-- **Web and desktop** share business logic, components, hooks, stores, and views through `packages/core/`, `packages/ui/`, and `packages/views/`. Existing model — keep using it.
-- **Mobile (`apps/mobile/`) is independent.** It shares only **types and pure functions** from `@multica/core/`, with `import type` for types (zero runtime coupling). UI, state, hooks, providers, i18n, React version, build pipeline, release cadence — all mobile-owned.
-
-Mobile is locked to the React version that Expo SDK / React Native ships (which lags React main by 6-12 months). Coupling mobile to the root `catalog:` React would block mobile from upgrading on its own schedule.
-
-See `apps/mobile/CLAUDE.md` for the mobile rules and tech-stack baseline.
 
 ## Commands
 
@@ -98,7 +125,6 @@ make db-down          # Stop the shared PostgreSQL container
 # Frontend (all commands go through Turborepo)
 pnpm install
 pnpm dev:web          # Next.js dev server (port 3000)
-pnpm dev:desktop      # Electron dev (electron-vite, HMR)
 pnpm build            # Build all frontend apps
 pnpm typecheck        # TypeScript check (all packages + apps via turbo)
 pnpm lint             # ESLint
@@ -124,20 +150,6 @@ cd server && go test ./internal/handler/ -run TestName
 
 # Run a single E2E test (requires backend + frontend running)
 pnpm exec playwright test e2e/tests/specific-test.spec.ts
-
-# Mobile (Expo) — two environments only: dev and staging
-pnpm dev:mobile                  # Metro, dev env       (reads apps/mobile/.env.development.local)
-pnpm dev:mobile:staging          # Metro, staging env   (reads apps/mobile/.env.staging)
-pnpm ios:mobile                  # Native build + install dev-client to iOS Simulator, dev env
-pnpm ios:mobile:staging          # Native build + install dev-client to iOS Simulator, staging env
-pnpm ios:mobile:device           # Native build + install dev-client to USB iPhone, dev env
-pnpm ios:mobile:device:staging   # Native build + install dev-client to USB iPhone, staging env
-# Daily flow: run `pnpm dev:mobile:staging` (or :dev). Only re-run `ios:mobile*` when
-# native code or any expo-*/react-native-* dependency changes (lockfile drift counts).
-
-# Desktop build & package
-pnpm --filter @multica/desktop build      # Compile TS → JS (reads .env.production)
-pnpm --filter @multica/desktop package    # Package into .app/.dmg/.exe (current platform only)
 
 # shadcn — config lives in packages/ui/components.json (Base UI variant, base-nova style)
 pnpm ui:add badge                # Adds component to packages/ui/components/ui/
@@ -171,7 +183,6 @@ make start-worktree     # Start using .env.worktree
 - Keep comments in code **English only**.
 - Prefer existing patterns/components over introducing parallel abstractions.
 - Unless the user explicitly asks for backwards compatibility, do **not** add compatibility layers, fallback paths, dual-write logic, legacy adapters, or temporary shims **for internal, non-boundary code** (a function calling another function in the same package, a component reading its own state, a store helper, etc.).
-- This rule does **not** apply at API boundaries: the desktop app cannot assume the backend it talks to has the same shape as the one it was built against (older desktop installs will outlive any given server build). API response handling must follow the rules in **API Response Compatibility** below — that is a defensive boundary, not a legacy shim.
 - If a flow or API is being replaced and the product is not yet live, prefer removing the old path instead of preserving both old and new behavior.
 - Avoid broad refactors unless required by the task.
 - New global (pre-workspace) routes MUST use a single word (`/login`, `/inbox`) or a `/{noun}/{verb}` pair (`/workspaces/new`). NEVER add hyphenated word-group root routes (`/new-workspace`, `/create-team`) — they collide with common user workspace names and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
@@ -179,18 +190,14 @@ make start-worktree     # Start using .env.worktree
 
 ### API Response Compatibility
 
-The desktop app installed on a user's machine is older than any backend it talks to: a user on 0.2.26 will hit a server running 0.3.x, then 0.4.x, then beyond. Every response shape is a contract that **will** drift, and the frontend must survive drift without white-screening. Three concrete incidents already happened from violating this — #2143, #2147, #2192.
+Untyped JSON crossing the network is not `T`. Defensive parsing keeps the frontend resilient to backend drift and avoids white-screens when a response shape changes:
 
-When writing code that consumes an API response, follow these rules:
-
-- **Parse, don't cast.** Untyped JSON crossing the network is not `T`. Use `parseWithFallback` in `packages/core/api/schema.ts` with a `zod` schema and an explicit fallback. On validation failure it logs a warning and returns the fallback; it never throws into the UI.
+- **Parse, don't cast.** Use `parseWithFallback` in `packages/core/api/schema.ts` with a `zod` schema and an explicit fallback. On validation failure it logs a warning and returns the fallback; it never throws into the UI.
 - **No bare `as` casts on response bodies.** Every endpoint method whose response is consumed by UI logic must run through a schema before returning.
 - **Optional-chain and default everywhere downstream.** Treat every field as possibly missing. Use explicit boolean checks (`=== true`) over truthy/falsy negation, which silently treats `undefined` and `null` as `false`.
 - **Don't pin a UI affordance to a single backend field.** If a button or indicator depends on exactly one boolean from the server, a backend bug deletes it. Combine signals (cursor presence, page length, etc.) so the affordance stays available in the worst case.
 - **Enum drift downgrades, not crashes.** A new server-side enum value should render a generic fallback. `switch` statements on server-driven strings must have a `default` branch.
 - **When you add or change an endpoint:** add the schema in the same PR, and write at least one test that feeds a malformed response through it (missing field, wrong type, `null` array). The test fails closed if a future change breaks the contract.
-
-This is not premature defense — it is the *only* defense for an installed-app architecture. CSR-only browser apps can ship a fix in minutes; an Electron build sitting on a developer's laptop cannot.
 
 ### Backend Handler UUID Parsing Convention
 
@@ -209,89 +216,30 @@ Every workspace (`apps/` and `packages/` directories) must explicitly declare al
 
 - Use `"pkg": "catalog:"` to reference the shared version from `pnpm-workspace.yaml`.
 - CI enforces this via `eslint-plugin-import-x/no-extraneous-dependencies`.
-- Exception: `apps/mobile/` uses pinned versions (not `catalog:`) for packages tied to its own React/Expo version.
 
 ### Package Boundary Rules
 
-These are hard constraints. Violating them breaks the cross-platform architecture:
+These are hard constraints. Violating them breaks the architecture:
 
-- `packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries. **Shared Zustand stores live here**, even view-related ones (filters, view modes) — stores are pure state, not UI.
-- `packages/ui/` — zero `@multica/core` imports (pure UI, no business logic).
-- `packages/views/` — zero `next/*` imports, zero `react-router-dom` imports, zero stores. Use `NavigationAdapter` for all routing.
-- `apps/web/platform/` — the only place for Next.js APIs (`next/navigation`).
-- `apps/desktop/src/renderer/src/platform/` — the only place for react-router-dom navigation wiring.
+- `packages/core/` — zero react-dom, zero localStorage (use StorageAdapter), zero process.env, zero UI libraries, zero `next/*` imports. **Shared Zustand stores live here**, even view-related ones (filters, view modes) — stores are pure state, not UI.
+- `packages/ui/` — zero `@multica/core` imports (pure UI, no business logic), zero `next/*` imports.
+- `packages/views/` — web-only. May import `next/navigation` and `next/link` directly. Stores still live in `packages/core/`.
 
-### The No-Duplication Rule (web + desktop)
+### Web Development Rules
 
-**If the same logic exists in both web and desktop, it must be extracted to a shared package.**
+When adding a new page or feature:
 
-This applies to everything between web and desktop: components, hooks, guards, providers, utility functions. The decision process:
+1. **New page component** → add to `packages/views/<domain>/`. Use `next/navigation` directly (or the `useNavigation()` / `<AppLink>` helpers in `@multica/views/navigation` if you want the global transition signal).
+2. **Wire it** → add a route in `apps/web/app/` (Next.js page file) that renders the view.
+3. **Navigation transition signal** → `useNavigation()` from `@multica/views/navigation` wraps `router.push/replace` in `useTransition` so the global `<NavigationProgress />` bar lights up. Plain `router.push` from `next/navigation` bypasses it.
+4. **Shared guards/providers** → use `DashboardGuard` from `packages/views/layout/`.
+5. **New hooks that need workspace context** → accept `wsId` as parameter instead of reading from `useWorkspaceId()` Context, so they work both inside and outside `WorkspaceIdProvider`.
 
-1. Does this code depend on Next.js or Electron APIs? → Keep in the respective app.
-2. Does it depend on `react-router-dom` or `next/navigation`? → Keep in app's `platform/` layer.
-3. Everything else → belongs in `packages/core/` (headless logic) or `packages/views/` (UI components).
-
-When the two apps need different behavior for the same concept (e.g., different loading UI), extract the shared logic into a component with props/slots for the differences. Don't duplicate the logic.
-
-### Cross-Platform Development Rules (web + desktop)
-
-When adding a new page or feature for web/desktop:
-
-1. **New page component** → add to `packages/views/<domain>/`. Never import from `next/*` or `react-router-dom`.
-2. **Wire it in both apps** → add a route in `apps/web/app/` (Next.js page file) AND in the desktop router. **Exception**: pre-workspace transition flows (create workspace, accept invite) are NOT routes on desktop — they're `WindowOverlay` state. See *Desktop-specific Rules → Route categories*.
-3. **Navigation** → use `useNavigation().push()` or `<AppLink>`. Never use framework-specific link/router APIs in shared code.
-4. **Shared guards/providers** → use `DashboardGuard` from `packages/views/layout/`. Don't create separate guard logic per app.
-5. **Platform-specific UI** → if a feature is web-only or desktop-only, keep it in the respective app. Use props slots (`extra`, `topSlot`) on shared layout components to inject platform-specific UI.
-6. **New hooks that need workspace context** → accept `wsId` as parameter instead of reading from `useWorkspaceId()` Context, so they work both inside and outside `WorkspaceIdProvider`.
-
-### CSS Architecture (web + desktop)
-
-Web and desktop share the same CSS foundation from `packages/ui/styles/`.
+### CSS Architecture
 
 - **Design tokens** → use semantic tokens (`bg-background`, `text-muted-foreground`). Never use hardcoded Tailwind colors (`text-red-500`, `bg-gray-100`).
 - **Shared styles** → `packages/ui/styles/`. Never duplicate scrollbar styling, keyframes, or base layer rules in app CSS.
-- **`@source` directives** → both apps scan shared packages so Tailwind sees all class names.
-
-## Mobile-specific Rules
-
-Rules for `apps/mobile/` live in `apps/mobile/CLAUDE.md`. Read it before touching anything in `apps/mobile/` — it covers what may be imported from `@multica/core/`, the React version policy, the build/release pipeline, and the locked tech-stack baseline.
-
-## Desktop-specific Rules
-
-These rules apply to `apps/desktop/` only. Web has different constraints (URL bar, SSR, no tabs) and doesn't share these concerns. Every rule in this section was added after a concrete bug — treat them as enforced, not suggestions.
-
-### Route categories
-
-Every path in the desktop app falls into exactly one category. Choosing the wrong one reproduces bugs we've already fixed.
-
-- **Session routes** — workspace-scoped pages (`/:slug/issues`, `/:slug/settings`). Rendered by the per-tab memory router under `WorkspaceRouteLayout`. These are legitimate tab destinations.
-- **Transition flows** — pre-workspace / one-shot actions (create workspace, accept invite). **NOT routes.** They live as `WindowOverlay` state, dispatched when the navigation adapter sees `push('/workspaces/new')` or `push('/invite/<id>')`. The shared view (`NewWorkspacePage`, `InvitePage`) is the content; the overlay wrapper supplies platform chrome.
-- **Error / stale states** — "workspace not available", tabs pointing at a revoked workspace. **NOT pages.** `WorkspaceRouteLayout` auto-heals by dropping the stale tab group from the store; the user never lands on an explicit error screen. Web keeps `NoAccessPage` (shareable URL makes the error state meaningful); desktop has no URL bar so stale = heal silently.
-
-**Adding a new pre-workspace flow on desktop**: register a new `WindowOverlay` type in `stores/window-overlay-store.ts`. Do NOT add it to `routes.tsx`. If a shared view needs the flow on both platforms, add the route on web (`apps/web/app/(auth)/...`) AND the overlay type on desktop — the shared view component is identical.
-
-### Workspace context
-
-`setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` is the single source of truth for the active workspace. `WorkspaceRouteLayout` sets it on mount; unmount does NOT clear it. Code that leaves workspace context (leave/delete workspace, force-navigate to overlay) must call `setCurrentWorkspace(null, null)` explicitly.
-
-### Workspace destructive operations
-
-Leave / Delete workspace flows must follow this order, otherwise concurrent refetches race and the renderer hard-reloads:
-
-1. Read destination from cached workspace list.
-2. `setCurrentWorkspace(null, null)`.
-3. `navigation.push(destination)`.
-4. THEN `await mutation.mutateAsync(workspaceId)`.
-
-### Tab isolation
-
-Tabs are grouped per workspace in `stores/tab-store.ts`. The TabBar shows only the active workspace's tabs; cross-workspace tab leakage is impossible by construction (no flat global tabs array).
-
-Cross-workspace `push(path)` is detected by the navigation adapter (`platform/navigation.tsx`) and translated into `switchWorkspace(slug, targetPath)` — NOT a navigation within the current tab's router. Don't bypass the adapter; always go through `useNavigation()` from shared code.
-
-### Drag region (macOS)
-
-Every full-window desktop view (anything outside the dashboard shell) must mount `<DragStrip />` from `@multica/views/platform` as the first flex child of the page root, otherwise users can't drag the window. Interactive UI inside the top 48px needs `WebkitAppRegion: "no-drag"` to stay clickable.
+- **`@source` directives** → the web app scans shared packages so Tailwind sees all class names.
 
 ## UI/UX Rules
 
@@ -299,7 +247,6 @@ Every full-window desktop view (anything outside the dashboard shell) must mount
 - Use shadcn design tokens for styling. Avoid hardcoded color values.
 - Do not introduce extra state (useState, context, reducers) unless explicitly required by the design.
 - Pay close attention to **overflow** (truncate long text, scrollable containers), **alignment**, and **spacing** consistency.
-- **If a component is identical between web and desktop, it belongs in a shared package.** Do not copy-paste between apps.
 
 ## Testing Rules
 
@@ -311,10 +258,10 @@ Tests follow the code, not the app. This is the most important testing principle
 |---|---|---|
 | Shared business logic (stores, queries, hooks) | `packages/core/*.test.ts` | No DOM needed, pure logic |
 | Shared UI components (pages, forms, modals) | `packages/views/*.test.tsx` | jsdom, no framework mocks |
-| Platform-specific wiring (cookies, redirects, searchParams) | `apps/web/*.test.tsx` or `apps/desktop/` | Needs framework-specific mocks |
+| Platform-specific wiring (cookies, redirects, searchParams) | `apps/web/*.test.tsx` | Needs framework-specific mocks |
 | End-to-end user flows | `e2e/*.spec.ts` | Real browser, real backend |
 
-**Never test shared component behavior in an app's test file.** If a test requires mocking `next/navigation` or `react-router-dom` to test a component from `@multica/views`, the test is in the wrong place — move it to `packages/views/` and mock `@multica/core` instead.
+**Never test shared component behavior in an app's test file.** If a test requires mocking framework-specific behavior (cookies, server actions) to test a component from `@multica/views`, the test is in the wrong place — move it to `packages/views/` and mock `@multica/core` instead.
 
 ### Test infrastructure
 
@@ -407,16 +354,6 @@ make check
 
 **Quick iteration:** If you know only TypeScript or Go is affected, run individual checks first for faster feedback, then finish with a full `make check` before marking work complete.
 
-## CLI Release
-
-**Prerequisite:** A CLI release must accompany every Production deployment.
-
-1. Create a tag on the `main` branch: `git tag v0.x.x`
-2. Push the tag: `git push origin v0.x.x`
-3. GitHub Actions automatically triggers `release.yml`: runs Go tests → GoReleaser builds multi-platform binaries → publishes to GitHub Releases + Homebrew tap
-
-By default, bump the patch version each release (e.g. `v0.1.12` → `v0.1.13`), unless the user specifies a specific version.
-
 ## Multi-tenancy
 
 All queries filter by `workspace_id`. Membership checks gate access. `X-Workspace-ID` header routes requests to the correct workspace.
@@ -424,3 +361,17 @@ All queries filter by `workspace_id`. Membership checks gate access. `X-Workspac
 ## Agent Assignees
 
 Assignees are polymorphic — can be a member or an agent. `assignee_type` + `assignee_id` on issues. Agents render with distinct styling (purple background, robot icon).
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage roles (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`) used verbatim as `Status:` values in issue files. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Multi-context monorepo: `CONTEXT-MAP.md` at root points to per-area `CONTEXT.md` files (server, apps/*, packages/*). See `docs/agents/domain.md`.

@@ -7,10 +7,6 @@ import (
 )
 
 // Metrics collects lightweight counters describing the realtime subsystem.
-//
-// Phase 1 (MUL-1138) extends the phase-0 counter set with subscribe / Redis /
-// per-scope-room counters. We keep using std-library atomics rather than a
-// Prometheus dependency; a future phase can re-export the same numbers.
 type Metrics struct {
 	ConnectsTotal        atomic.Int64
 	DisconnectsTotal     atomic.Int64
@@ -30,26 +26,6 @@ type Metrics struct {
 	unsubscribeTotal     sync.Map
 	subscribeDeniedTotal sync.Map
 	scopeRooms           sync.Map
-
-	// Redis relay counters. Zero unless the Redis broadcaster is enabled.
-	RedisXAddTotal             atomic.Int64
-	RedisXAddErrors            atomic.Int64
-	RedisXReadTotal            atomic.Int64
-	RedisXReadErrors           atomic.Int64
-	RedisAckTotal              atomic.Int64
-	RedisLastXAddLagMicros     atomic.Int64
-	RedisMirrorPrimaryErrors   atomic.Int64
-	RedisMirrorSecondaryErrors atomic.Int64
-	RedisMirrorDivergenceTotal atomic.Int64
-
-	// RedisConnected is set by the relay on startup / reconnect.
-	RedisConnected atomic.Bool
-	// RedisLastError stores the most recent consumer error message.
-	redisLastErrMu sync.RWMutex
-	redisLastErr   string
-
-	// NodeID is set once at boot by the relay (or empty in single-node mode).
-	NodeID atomic.Value // string
 }
 
 // M is the package-level metrics singleton.
@@ -93,20 +69,6 @@ func (m *Metrics) SubscribeDeniedTotal(scopeType string) *atomic.Int64 {
 func (m *Metrics) IncRoom(scopeType string) { loadOrInitCounter(&m.scopeRooms, scopeType).Add(1) }
 func (m *Metrics) DecRoom(scopeType string) { loadOrInitCounter(&m.scopeRooms, scopeType).Add(-1) }
 
-// SetRedisLastError stores msg as the most recent Redis consumer error. An
-// empty msg clears it.
-func (m *Metrics) SetRedisLastError(msg string) {
-	m.redisLastErrMu.Lock()
-	m.redisLastErr = msg
-	m.redisLastErrMu.Unlock()
-}
-
-func (m *Metrics) lastRedisErr() string {
-	m.redisLastErrMu.RLock()
-	defer m.redisLastErrMu.RUnlock()
-	return m.redisLastErr
-}
-
 func snapshotCounters(s *sync.Map) map[string]int64 {
 	out := map[string]int64{}
 	s.Range(func(k, v any) bool {
@@ -127,10 +89,6 @@ func snapshotCounters(s *sync.Map) map[string]int64 {
 
 // Snapshot returns a JSON-friendly copy of the current counter values.
 func (m *Metrics) Snapshot() map[string]any {
-	nodeID := ""
-	if v := m.NodeID.Load(); v != nil {
-		nodeID, _ = v.(string)
-	}
 	return map[string]any{
 		"connects_total":         m.ConnectsTotal.Load(),
 		"disconnects_total":      m.DisconnectsTotal.Load(),
@@ -143,20 +101,6 @@ func (m *Metrics) Snapshot() map[string]any {
 		"unsubscribes_total":     snapshotCounters(&m.unsubscribeTotal),
 		"subscribe_denied_total": snapshotCounters(&m.subscribeDeniedTotal),
 		"active_scope_rooms":     snapshotCounters(&m.scopeRooms),
-		"redis": map[string]any{
-			"connected":               m.RedisConnected.Load(),
-			"node_id":                 nodeID,
-			"xadd_total":              m.RedisXAddTotal.Load(),
-			"xadd_errors":             m.RedisXAddErrors.Load(),
-			"xread_total":             m.RedisXReadTotal.Load(),
-			"xread_errors":            m.RedisXReadErrors.Load(),
-			"ack_total":               m.RedisAckTotal.Load(),
-			"last_xadd_lag_micros":    m.RedisLastXAddLagMicros.Load(),
-			"mirror_primary_errors":   m.RedisMirrorPrimaryErrors.Load(),
-			"mirror_secondary_errors": m.RedisMirrorSecondaryErrors.Load(),
-			"mirror_divergence_total": m.RedisMirrorDivergenceTotal.Load(),
-			"last_error":              m.lastRedisErr(),
-		},
 	}
 }
 
@@ -173,15 +117,4 @@ func (m *Metrics) Reset() {
 	m.unsubscribeTotal.Range(func(k, _ any) bool { m.unsubscribeTotal.Delete(k); return true })
 	m.subscribeDeniedTotal.Range(func(k, _ any) bool { m.subscribeDeniedTotal.Delete(k); return true })
 	m.scopeRooms.Range(func(k, _ any) bool { m.scopeRooms.Delete(k); return true })
-	m.RedisXAddTotal.Store(0)
-	m.RedisXAddErrors.Store(0)
-	m.RedisXReadTotal.Store(0)
-	m.RedisXReadErrors.Store(0)
-	m.RedisAckTotal.Store(0)
-	m.RedisLastXAddLagMicros.Store(0)
-	m.RedisMirrorPrimaryErrors.Store(0)
-	m.RedisMirrorSecondaryErrors.Store(0)
-	m.RedisMirrorDivergenceTotal.Store(0)
-	m.RedisConnected.Store(false)
-	m.SetRedisLastError("")
 }

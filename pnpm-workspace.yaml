@@ -6,6 +6,7 @@ catalog:
   # Core React
   react: "19.2.3"
   react-dom: "19.2.3"
+  next: "^16.2.5"
   "@types/react": "^19.2.0"
   "@types/react-dom": "^19.2.0"
 

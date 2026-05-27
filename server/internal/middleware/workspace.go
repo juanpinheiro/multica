@@ -156,43 +156,39 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 // RequireWorkspaceMember resolves the workspace from slug (preferred) or UUID
-// (fallback), validates membership, and injects the member and workspace ID
-// into the request context.
+// (fallback) and injects workspace context. The singleton user is implicitly a
+// member of every workspace; no membership check is performed.
 func RequireWorkspaceMember(queries *db.Queries) func(http.Handler) http.Handler {
-	return buildMiddleware(queries, resolveWorkspaceUUID(queries), nil)
+	return buildMiddleware(resolveWorkspaceUUID(queries))
 }
 
-// RequireWorkspaceRole is like RequireWorkspaceMember but additionally checks
-// that the member has one of the specified roles.
-func RequireWorkspaceRole(queries *db.Queries, roles ...string) func(http.Handler) http.Handler {
-	return buildMiddleware(queries, resolveWorkspaceUUID(queries), roles)
+// RequireWorkspaceRole is a no-op pass-through that delegates to
+// RequireWorkspaceMember. Role checks have been removed; the singleton user
+// is implicitly the owner of every workspace.
+func RequireWorkspaceRole(queries *db.Queries, _ ...string) func(http.Handler) http.Handler {
+	return RequireWorkspaceMember(queries)
 }
 
 // RequireWorkspaceMemberFromURL resolves the workspace ID from a chi URL
-// parameter, validates membership, and injects into context.
+// parameter and injects workspace context.
 func RequireWorkspaceMemberFromURL(queries *db.Queries, param string) func(http.Handler) http.Handler {
-	return buildMiddleware(queries, func(r *http.Request) (string, error) {
+	return buildMiddleware(func(r *http.Request) (string, error) {
 		id := chi.URLParam(r, param)
 		if id == "" {
 			return "", nil
 		}
 		return id, nil
-	}, nil)
+	})
 }
 
-// RequireWorkspaceRoleFromURL is like RequireWorkspaceMemberFromURL but
-// additionally checks that the member has one of the specified roles.
-func RequireWorkspaceRoleFromURL(queries *db.Queries, param string, roles ...string) func(http.Handler) http.Handler {
-	return buildMiddleware(queries, func(r *http.Request) (string, error) {
-		id := chi.URLParam(r, param)
-		if id == "" {
-			return "", nil
-		}
-		return id, nil
-	}, roles)
+// RequireWorkspaceRoleFromURL is a no-op pass-through that delegates to
+// RequireWorkspaceMemberFromURL. Role checks have been removed; the singleton
+// user is implicitly the owner of every workspace.
+func RequireWorkspaceRoleFromURL(queries *db.Queries, param string, _ ...string) func(http.Handler) http.Handler {
+	return RequireWorkspaceMemberFromURL(queries, param)
 }
 
-func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []string) func(http.Handler) http.Handler {
+func buildMiddleware(resolve workspaceResolver) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			workspaceID, resolveErr := resolve(r)
@@ -235,27 +231,15 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 				writeError(w, http.StatusBadRequest, "invalid workspace_id")
 				return
 			}
-			member, err := queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+
+			// Synthesise a member with the owner role. Membership and role checks
+			// have been removed; the singleton user is implicitly the owner of
+			// every workspace. Issue 09 (loopback auth + singleton user) will
+			// replace auth entirely; issue 17 will drop the workspace_member table.
+			member := db.Member{
 				UserID:      userUUID,
 				WorkspaceID: wsUUID,
-			})
-			if err != nil {
-				writeError(w, http.StatusNotFound, "workspace not found")
-				return
-			}
-
-			if len(roles) > 0 {
-				allowed := false
-				for _, role := range roles {
-					if member.Role == role {
-						allowed = true
-						break
-					}
-				}
-				if !allowed {
-					writeError(w, http.StatusForbidden, "insufficient permissions")
-					return
-				}
+				Role:        "owner",
 			}
 
 			ctx := SetMemberContext(r.Context(), workspaceID, member)

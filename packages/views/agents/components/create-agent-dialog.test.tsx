@@ -6,18 +6,20 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
-import { NavigationProvider, type NavigationAdapter } from "../../navigation";
+import { NavigationProvider } from "../../navigation";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
 
-const navigationStub: NavigationAdapter = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  back: vi.fn(),
-  pathname: "/",
-  searchParams: new URLSearchParams(),
-  getShareableUrl: (path: string) => path,
-};
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
@@ -129,7 +131,7 @@ function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
         <WorkspaceSlugProvider slug="test-ws">
-        <NavigationProvider value={navigationStub}>
+        <NavigationProvider>
           <CreateAgentDialog
             runtimes={runtimes}
             members={members}

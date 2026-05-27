@@ -28,11 +28,7 @@ server/tmp
 Thumbs.db
 
 # Test
-e2e/test-results
 coverage
 
 # Docs
 docs/
-
-# Desktop app (not needed for web self-hosting)
-apps/desktop

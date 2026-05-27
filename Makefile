@@ -94,9 +94,9 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
 		echo "        or read the generated code from backend logs when Resend is unset."; \
 		echo ""; \
-		echo "Next — install the CLI and connect your machine:"; \
-		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
+		echo "Next — build the CLI and connect your machine:"; \
+		echo "  cd server && go build -o ../bin/multica ./cmd/multica"; \
+		echo "  multica setup"; \
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \
@@ -136,9 +136,9 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 		echo "Built images locally via docker-compose.selfhost.build.yml."; \
 		echo "Local tags: multica-backend:dev and multica-web:dev."; \
 		echo ""; \
-		echo "Next — install the CLI and connect your machine:"; \
-		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
+		echo "Next — build the CLI and connect your machine:"; \
+		echo "  cd server && go build -o ../bin/multica ./cmd/multica"; \
+		echo "  multica setup"; \
 	else \
 		echo ""; \
 		echo "Services are still starting. Check logs:"; \

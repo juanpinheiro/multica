@@ -12,7 +12,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -705,93 +704,15 @@ func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRu
 }
 
 func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run *db.AutopilotRun, issue db.Issue, leaderID pgtype.UUID) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
-		return
-	}
-	// For PostHog the agent_id should be the agent that will actually run
-	// the work (the resolved leader for squad autopilots) so per-agent task
-	// counts line up with what daemons report.
-	s.TaskSvc.Analytics.Capture(analytics.IssueCreated(
-		autopilotActorID(ap),
-		util.UUIDToString(ap.WorkspaceID),
-		util.UUIDToString(issue.ID),
-		util.UUIDToString(leaderID),
-		"",
-		util.UUIDToString(run.ID),
-		analytics.SourceAutopilot,
-	))
 }
 
 func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.AutopilotRun, triggerSource string) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
-		return
-	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunStarted(
-		autopilotActorID(ap),
-		util.UUIDToString(ap.WorkspaceID),
-		util.UUIDToString(ap.ID),
-		util.UUIDToString(run.ID),
-		s.autopilotAssigneeAnalytics(ap),
-		triggerSource,
-	))
 }
 
 func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.AutopilotRun) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
-		return
-	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunCompleted(
-		autopilotActorID(ap),
-		util.UUIDToString(ap.WorkspaceID),
-		util.UUIDToString(ap.ID),
-		util.UUIDToString(run.ID),
-		s.autopilotAssigneeAnalytics(ap),
-		run.Source,
-		autopilotRunDurationMS(run),
-	))
 }
 
 func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.AutopilotRun, triggerSource, reason string) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
-		return
-	}
-	if reason == "" {
-		reason = "unknown"
-	}
-	s.TaskSvc.Analytics.Capture(analytics.AutopilotRunFailed(
-		autopilotActorID(ap),
-		util.UUIDToString(ap.WorkspaceID),
-		util.UUIDToString(ap.ID),
-		util.UUIDToString(run.ID),
-		s.autopilotAssigneeAnalytics(ap),
-		triggerSource,
-		reason,
-		autopilotErrorType(reason),
-		false,
-		autopilotRunDurationMS(run),
-	))
-}
-
-// autopilotAssigneeAnalytics builds the PostHog assignee descriptor for an
-// autopilot. For squad autopilots agent_id is best-effort the resolved
-// leader (so per-agent funnels stay consistent); a resolve error degrades
-// to the raw assignee_id rather than dropping the event — incomplete data
-// in the dashboard is preferable to silent attribution gaps.
-func (s *AutopilotService) autopilotAssigneeAnalytics(ap db.Autopilot) analytics.AutopilotAssignee {
-	assignee := analytics.AutopilotAssignee{
-		AssigneeType: ap.AssigneeType,
-	}
-	if ap.AssigneeType == "squad" {
-		assignee.SquadID = util.UUIDToString(ap.AssigneeID)
-		if leader, _, err := s.resolveAutopilotLeader(context.Background(), ap); err == nil {
-			assignee.AgentID = util.UUIDToString(leader.ID)
-		} else {
-			assignee.AgentID = util.UUIDToString(ap.AssigneeID)
-		}
-	} else {
-		assignee.AgentID = util.UUIDToString(ap.AssigneeID)
-	}
-	return assignee
 }
 
 func autopilotErrorType(reason string) string {

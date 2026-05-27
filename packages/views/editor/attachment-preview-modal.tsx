@@ -8,8 +8,7 @@
  *   - image : <img className="object-contain"> centered in the modal frame.
  *             Replaces the previous standalone ImageLightbox.
  *   - pdf   : <iframe src={download_url}> — relies on Chromium's PDFium
- *             plugin. On desktop, requires webPreferences.plugins=true
- *             (see apps/desktop/src/main/index.ts).
+ *             plugin.
  *   - video : <video controls src={download_url}>
  *   - audio : <audio controls src={download_url}>
  *
@@ -47,7 +46,6 @@ import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
-import { openExternal } from "../platform";
 import { ReadonlyContent } from "./readonly-content";
 import {
   extensionToLanguage,
@@ -205,7 +203,7 @@ export function AttachmentPreviewModal({
     if (state.attachmentId) {
       download(state.attachmentId);
     } else {
-      openExternal(state.mediaUrl);
+      window.open(state.mediaUrl, "_blank", "noopener,noreferrer");
     }
   };
 
@@ -220,12 +218,8 @@ export function AttachmentPreviewModal({
       ? `?name=${encodeURIComponent(state.filename)}`
       : "";
     const path = `${paths.workspace(slug).attachmentPreview(state.attachmentId)}${nameQuery}`;
-    if (navigation.openInNewTab) {
-      navigation.openInNewTab(path, state.filename, { activate: true });
-    } else {
-      const url = navigation.getShareableUrl(path);
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
+    const url = navigation.getShareableUrl(path);
+    window.open(url, "_blank", "noopener,noreferrer");
     onClose();
   };
 

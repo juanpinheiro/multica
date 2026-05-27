@@ -6,7 +6,6 @@ import {
   SlidersHorizontal,
   Key,
   Settings,
-  Users,
   FolderGit2,
   FlaskConical,
   Bell,
@@ -20,7 +19,6 @@ import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
-import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
 import { GitHubTab } from "./github-tab";
 import { IntegrationsTab } from "./integrations-tab";
@@ -42,7 +40,6 @@ const WORKSPACE_TAB_KEYS = [
   "github",
   "integrations",
   "labs",
-  "members",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
@@ -50,7 +47,6 @@ const WORKSPACE_TAB_VALUES = {
   github: "github",
   integrations: "integrations",
   labs: "labs",
-  members: "members",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
@@ -58,7 +54,6 @@ const WORKSPACE_TAB_ICONS = {
   github: GitHubMark,
   integrations: Plug,
   labs: FlaskConical,
-  members: Users,
 } as const;
 
 const DEFAULT_TAB = "profile";
@@ -165,7 +160,6 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="github"><GitHubTab /></TabsContent>
           <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
-          <TabsContent value="members"><MembersTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}

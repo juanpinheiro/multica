@@ -2,8 +2,12 @@
 
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { Attachment } from "@multica/core/types";
-import { openExternal } from "../platform";
 import { useDownloadAttachment } from "./use-download-attachment";
+
+function openExternal(url: string): void {
+  if (typeof window === "undefined") return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
 
 interface ResolvedDownload {
   // Returns the attachment id for a URL referenced in the markdown, or
@@ -30,7 +34,7 @@ interface ProviderProps {
 /**
  * Provides a click-time download handler to Tiptap NodeViews mounted inside
  * `ContentEditor`. Without a provider the consumer falls back to opening the
- * raw URL via `openExternal` — same behaviour as before this hook existed.
+ * raw URL in a new tab — same behaviour as before this hook existed.
  */
 export function AttachmentDownloadProvider({ attachments, children }: ProviderProps) {
   const download = useDownloadAttachment();

@@ -471,11 +471,10 @@ export function SearchCommand() {
   );
 
   const handleMemberSelect = useCallback(
-    (userId: string) => {
-      push(p.memberDetail(userId));
+    (_userId: string) => {
       setOpen(false);
     },
-    [push, setOpen, p],
+    [setOpen],
   );
 
   return (

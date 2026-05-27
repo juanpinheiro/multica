@@ -7,17 +7,13 @@ import (
 	"net/netip"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 
-	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -87,14 +83,8 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-// rdb is optional: when non-nil the runtime local-skill request stores are
-// swapped for Redis-backed implementations so multiple API nodes share the
-// same pending queue (required for multi-node prod). This should be a request
-// path Redis client, not the realtime relay's blocking read client. A nil rdb
-// keeps the default in-memory stores which are fine for single-node dev and
-// tests.
-func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client) chi.Router {
-	return NewRouterWithOptions(pool, hub, bus, analyticsClient, rdb, RouterOptions{})
+func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
+	return NewRouterWithOptions(pool, hub, bus, RouterOptions{})
 }
 
 type RouterOptions struct {
@@ -108,9 +98,8 @@ type RouterOptions struct {
 	HeartbeatScheduler handler.HeartbeatScheduler
 }
 
-func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analyticsClient analytics.Client, rdb *redis.Client, opts RouterOptions) chi.Router {
+func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, opts RouterOptions) chi.Router {
 	queries := db.New(pool)
-	emailSvc := service.NewEmailService()
 	daemonHub := opts.DaemonHub
 	if daemonHub == nil {
 		daemonHub = daemonws.NewHub()
@@ -128,49 +117,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 	}
 
-	cfSigner := auth.NewCloudFrontSignerFromEnv()
-
 	signupConfig := handler.Config{
-		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
-		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
-		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
-		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
-		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
-		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
-		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
+		PublicURL:      strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		TrustedProxies: parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 	}
-	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h := handler.New(queries, pool, hub, bus, store, signupConfig, daemonHub)
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
-	}
-	if rdb != nil {
-		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
-		h.ModelListStore = handler.NewRedisModelListStore(rdb)
-		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
-		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
-		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
-		h.WebhookRateLimiter = handler.NewRedisWebhookRateLimiter(rdb, handler.DefaultWebhookRateLimit())
-		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 	}
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
-	// Auth caches: PAT cache is shared between the regular Auth middleware,
-	// the DaemonAuth fallback (mul_) path, and the revoke handler
-	// (invalidate). DaemonTokenCache backs the DaemonAuth mdt_ path. Both
-	// constructors return nil when rdb is nil — every consumer handles that
-	// as "no cache, always hit DB".
-	patCache := auth.NewPATCache(rdb)
-	daemonTokenCache := auth.NewDaemonTokenCache(rdb)
-	h.PATCache = patCache
-	h.DaemonTokenCache = daemonTokenCache
-	h.MembershipCache = auth.NewMembershipCache(rdb)
-
-	// Empty-claim cache: lets the daemon poll path skip a Postgres
-	// scan when a recent check confirmed the runtime had no queued
-	// task. Returns nil when rdb is nil — TaskService treats that
-	// as "no cache, always hit DB" (existing behavior).
-	h.TaskService.EmptyClaim = service.NewEmptyClaimCache(rdb)
 
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
@@ -206,20 +163,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/readyz", health.readyHandler)
 	r.Get("/healthz", health.readyHandler)
 
-	// Realtime subsystem metrics — connection counts, slow-client evictions,
-	// and per-event-type send QPS counters. Exposed as JSON so it can be
-	// scraped by ops or surfaced in the admin UI without adding a Prometheus
-	// dependency. See MUL-1138 (Phase 0).
-	//
-	// Access is restricted (MUL-1342): when REALTIME_METRICS_TOKEN is set,
-	// callers must present it via Authorization: Bearer <token>. When the
-	// env var is unset the handler only serves loopback callers so local
-	// dev keeps working without exposing the metrics on a public listener.
-	r.Get("/health/realtime", realtimeMetricsHandler(os.Getenv("REALTIME_METRICS_TOKEN")))
-
 	// WebSocket
 	mc := &membershipChecker{queries: queries}
-	pr := &patResolver{queries: queries, cache: patCache}
+	pr := &patResolver{}
 	slugResolver := realtime.SlugResolver(func(ctx context.Context, slug string) (string, error) {
 		ws, err := queries.GetWorkspaceBySlug(ctx, slug)
 		if err != nil {
@@ -239,22 +185,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 	}
 
-	// Auth (public) — per-IP rate limiting.
-	if rdb == nil {
-		slog.Warn("rate limiting disabled: REDIS_URL not configured")
-	}
-	trustedProxies := middleware.ParseTrustedProxies(os.Getenv("RATE_LIMIT_TRUSTED_PROXIES"))
-	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
-	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
-	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
-	r.With(authRL).Post("/auth/send-code", h.SendCode)
-	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
-	r.With(authRL).Post("/auth/google", h.GoogleLogin)
-	r.Post("/auth/logout", h.Logout)
-
 	// Public API
 	r.Get("/api/config", h.GetConfig)
-	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on
 	// purpose: the bearer token in the URL path IS the credential. Workspace
@@ -267,7 +199,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache))
+		r.Use(middleware.DaemonAuth(queries))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -302,80 +234,29 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.Auth(queries, patCache))
-		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
+		r.Use(middleware.Auth(queries, parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES"))))
 
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
-		r.Patch("/api/me/onboarding", h.PatchOnboarding)
-		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
-		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
-		// DEPRECATED — shim routes for desktop < v3 during the rollout
-		// window. v3 frontend creates the Helper agent + starter issue
-		// via generic CreateAgent / CreateIssue and only calls /complete
-		// here. Remove once X-Client-Version telemetry confirms zero
-		// pre-v3 desktops are still calling these. Handlers live in
-		// server/internal/handler/onboarding_shim.go.
-		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
-		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
-		r.Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
-		r.Post("/api/feedback", h.CreateFeedback)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
 			r.Route("/{id}", func(r chi.Router) {
-				// Member-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
 					r.Get("/members", h.ListMembersWithUser)
-					r.Post("/leave", h.LeaveWorkspace)
-					r.Get("/invitations", h.ListWorkspaceInvitations)
-					// Listing GitHub installations is member-visible so the
-					// integrations tab no longer renders blank for non-admins;
-					// the handler strips the management handle and adds a
-					// can_manage hint so the UI can gate connect/disconnect.
-					r.Get("/github/installations", h.ListGitHubInstallations)
-				})
-				// Admin-level access
-				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
-					r.Post("/members", h.CreateInvitation)
-					r.Route("/members/{memberId}", func(r chi.Router) {
-						r.Patch("/", h.UpdateMember)
-						r.Delete("/", h.DeleteMember)
-					})
-					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
-				})
-				// Owner-only access
-				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
-
-				// GitHub integration — connect / disconnect remain admin-only;
-				// the read-only list endpoint lives in the member-level group
-				// above so non-admins can see the workspace's connection state.
-				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/", h.DeleteWorkspace)
+					r.Get("/github/installations", h.ListGitHubInstallations)
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
 				})
 			})
-		})
-
-		// User-scoped invitation routes (no workspace context required)
-		r.Get("/api/invitations", h.ListMyInvitations)
-		r.Get("/api/invitations/{id}", h.GetMyInvitation)
-		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
-		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
-
-		r.Route("/api/tokens", func(r chi.Router) {
-			r.Get("/", h.ListPersonalAccessTokens)
-			r.Post("/", h.CreatePersonalAccessToken)
-			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
 		// --- Workspace-scoped routes (all require workspace membership) ---
@@ -607,22 +488,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Cloud Runtime fleet proxy. The remote service URL is configured
-			// on SaaS API nodes only; self-hosted deployments return 503.
-			r.Route("/api/cloud-runtime", func(r chi.Router) {
-				r.Get("/", h.GetCloudRuntimeService)
-				r.Get("/healthz", h.GetCloudRuntimeHealth)
-				r.Get("/readyz", h.GetCloudRuntimeReady)
-				r.Get("/nodes", h.ListCloudRuntimeNodes)
-				r.Post("/nodes", h.CreateCloudRuntimeNode)
-				r.Delete("/nodes", h.DeleteCloudRuntimeNode)
-				r.Post("/nodes/start", h.StartCloudRuntimeNode)
-				r.Post("/nodes/stop", h.StopCloudRuntimeNode)
-				r.Post("/nodes/reboot", h.RebootCloudRuntimeNode)
-				r.Post("/nodes/status", h.GetCloudRuntimeNodeStatus)
-				r.Post("/nodes/exec", h.ExecCloudRuntimeNode)
-			})
-
 			// Tasks (user-facing, with ownership check)
 			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
 
@@ -689,40 +554,13 @@ func (mc *membershipChecker) IsMember(ctx context.Context, userID, workspaceID s
 	return err == nil
 }
 
-// patResolver implements realtime.PATResolver using database queries.
-// patCache is shared with the Auth and DaemonAuth middlewares so a token
-// revoke through any path invalidates the cache for all of them. Nil
-// cache is supported and degrades to direct DB lookups.
-type patResolver struct {
-	queries *db.Queries
-	cache   *auth.PATCache
-}
+// patResolver implements realtime.PATResolver. PATs are removed in the
+// personal fork; WebSocket connections authenticate via the loopback/token
+// path established by LoopbackAuth. No token can resolve here.
+type patResolver struct{}
 
-func (pr *patResolver) ResolveToken(ctx context.Context, token string) (string, bool) {
-	hash := auth.HashToken(token)
-
-	if userID, ok := pr.cache.Get(ctx, hash); ok {
-		return userID, true
-	}
-
-	pat, err := pr.queries.GetPersonalAccessTokenByHash(ctx, hash)
-	if err != nil {
-		return "", false
-	}
-
-	userID := util.UUIDToString(pat.UserID)
-
-	var expiresAt time.Time
-	if pat.ExpiresAt.Valid {
-		expiresAt = pat.ExpiresAt.Time
-	}
-	pr.cache.Set(ctx, hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
-
-	// Cache miss = first WS auth in this TTL window. Refresh last_used_at;
-	// subsequent connects within the window skip the write.
-	go pr.queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
-
-	return userID, true
+func (pr *patResolver) ResolveToken(_ context.Context, _ string) (string, bool) {
+	return "", false
 }
 
 // parseUUID is a thin alias for util.MustParseUUID. Call sites here are all
@@ -759,9 +597,3 @@ func splitAndTrim(s string) []string {
 	return res
 }
 
-func cloudRuntimeFleetURLFromEnv() string {
-	if url := strings.TrimSpace(os.Getenv("MULTICA_CLOUD_FLEET_URL")); url != "" {
-		return url
-	}
-	return strings.TrimSpace(os.Getenv("MULTICA_FLEET_URL"))
-}

@@ -35,12 +35,10 @@ import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
 import type { Workspace } from "../types/workspace";
 import { chatKeys } from "../chat/queries";
 import { useChatStore } from "../chat";
-import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
+import { resolvePostAuthDestination } from "../paths";
 import type {
-  MemberAddedPayload,
   WorkspaceDeletedPayload,
   WorkspaceUpdatedPayload,
-  MemberRemovedPayload,
   IssueUpdatedPayload,
   IssueCreatedPayload,
   IssueDeletedPayload,
@@ -68,7 +66,6 @@ import type {
   ChatDonePayload,
   ChatMessage,
   ChatPendingTask,
-  InvitationCreatedPayload,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
@@ -207,13 +204,6 @@ export function useRealtimeSync(
 ) {
   const { authStore } = stores;
   const qc = useQueryClient();
-
-  // Captured via ref so the (rare) hasOnboarded change doesn't re-subscribe
-  // every WS handler in this effect. The resolver reads `.current` at the
-  // moment workspace-loss fires, which is what we want.
-  const hasOnboarded = useHasOnboarded();
-  const hasOnboardedRef = useRef(hasOnboarded);
-  hasOnboardedRef.current = hasOnboarded;
 
   // Main sync: onAny -> refreshMap with debounce
   useEffect(() => {
@@ -590,10 +580,7 @@ export function useRealtimeSync(
         staleTime: 0,
       });
       const remaining = wsList.filter((w) => w.id !== lostWsId);
-      const target = resolvePostAuthDestination(
-        remaining,
-        hasOnboardedRef.current,
-      );
+      const target = resolvePostAuthDestination(remaining);
       if (typeof window !== "undefined") {
         window.location.assign(target);
       }
@@ -615,62 +602,6 @@ export function useRealtimeSync(
         onToast?.("This workspace was deleted", "info");
         relocateAfterWorkspaceLoss(workspace_id);
       }
-    });
-
-    const unsubMemberRemoved = ws.on("member:removed", (p) => {
-      const { user_id } = p as MemberRemovedPayload;
-      const myUserId = authStore.getState().user?.id;
-      if (user_id === myUserId) {
-        const slug = getCurrentSlug();
-        const wsId = getCurrentWsId();
-        if (slug && wsId) {
-          clearWorkspaceStorage(defaultStorage, slug);
-          logger.warn("removed from workspace, switching");
-          onToast?.("You were removed from this workspace", "info");
-          relocateAfterWorkspaceLoss(wsId);
-        }
-      }
-    });
-
-    const unsubMemberAdded = ws.on("member:added", (p) => {
-      const { member, workspace_name } = p as MemberAddedPayload;
-      const myUserId = authStore.getState().user?.id;
-      if (member.user_id === myUserId) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.list() });
-        qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-        onToast?.(
-          `You joined ${workspace_name ?? "a workspace"}`,
-          "info",
-        );
-      }
-    });
-
-    // invitation:created — notify the invitee of a new pending invitation
-    const unsubInvitationCreated = ws.on("invitation:created", (p) => {
-      const { workspace_name } = p as InvitationCreatedPayload;
-      qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-      onToast?.(
-        `You were invited to ${workspace_name ?? "a workspace"}`,
-        "info",
-      );
-    });
-
-    // invitation:accepted / declined / revoked — refresh invitation lists
-    const unsubInvitationAccepted = ws.on("invitation:accepted", () => {
-      const currentWsId = getCurrentWsId();
-      if (currentWsId) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
-        qc.invalidateQueries({ queryKey: workspaceKeys.members(currentWsId) });
-      }
-    });
-    const unsubInvitationDeclined = ws.on("invitation:declined", () => {
-      const currentWsId = getCurrentWsId();
-      if (currentWsId) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
-      }
-    });
-    const unsubInvitationRevoked = ws.on("invitation:revoked", () => {
-      qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     });
 
     // --- Chat / task events (global, survives ChatWindow unmount) ---
@@ -915,12 +846,6 @@ export function useRealtimeSync(
       unsubSubscriberRemoved();
       unsubWsUpdated();
       unsubWsDeleted();
-      unsubMemberRemoved();
-      unsubMemberAdded();
-      unsubInvitationCreated();
-      unsubInvitationAccepted();
-      unsubInvitationDeclined();
-      unsubInvitationRevoked();
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();

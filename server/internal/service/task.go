@@ -8,12 +8,10 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -28,18 +26,7 @@ type TaskService struct {
 	TxStarter TxStarter
 	Hub       *realtime.Hub
 	Bus       *events.Bus
-	Analytics analytics.Client
 	Wakeup    TaskWakeupNotifier
-	// EmptyClaim caches "this runtime has no queued task" so the daemon
-	// poll path can skip a Postgres scan on the steady-state empty case.
-	// Optional — a nil cache disables the fast path and every claim
-	// goes through the DB. Wired in router.go from the shared Redis
-	// client.
-	EmptyClaim *EmptyClaimCache
-
-	analyticsContextMu    sync.Mutex
-	analyticsContextCache map[string]analytics.TaskContext
-	analyticsContextOrder []string
 }
 
 type TaskWakeupNotifier interface {
@@ -78,7 +65,6 @@ func truncateForSummary(s string, maxRunes int) string {
 }
 
 const (
-	taskAnalyticsContextCacheMax = 4096
 	// claimResponseRecoveryWindow must exceed daemon client.Timeout for
 	// /tasks/claim (30s) plus /tasks/{id}/start (30s) plus scheduling slack, so
 	// an in-flight StartTask cannot be reclaimed and double-dispatched.
@@ -133,44 +119,25 @@ func isTrivialDoneOutput(output string) bool {
 }
 
 func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQueue) {
-	s.captureTaskEvent(ctx, analytics.AgentTaskQueued(s.taskAnalyticsContext(ctx, task)))
 }
 
 func (s *TaskService) captureTaskDispatched(ctx context.Context, task db.AgentTaskQueue) {
-	s.captureTaskEvent(ctx, analytics.AgentTaskDispatched(s.taskAnalyticsContext(ctx, task)))
 }
 
-func (s *TaskService) AnalyticsContextForTask(ctx context.Context, task db.AgentTaskQueue) analytics.TaskContext {
-	return s.taskAnalyticsContext(ctx, task)
+func (s *TaskService) AnalyticsContextForTask(ctx context.Context, task db.AgentTaskQueue) interface{} {
+	return nil
 }
 
 func (s *TaskService) captureTaskStarted(ctx context.Context, task db.AgentTaskQueue) {
-	s.captureTaskEvent(ctx, analytics.AgentTaskStarted(s.taskAnalyticsContext(ctx, task)))
 }
 
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
-	s.captureTaskEvent(ctx, analytics.AgentTaskCompleted(
-		s.taskAnalyticsContext(ctx, task),
-		taskDurationMS(task),
-	))
 }
 
 func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQueue) {
-	failureReason := taskFailureReason(task)
-	s.captureTaskEvent(ctx, analytics.AgentTaskFailed(
-		s.taskAnalyticsContext(ctx, task),
-		taskDurationMS(task),
-		failureReason,
-		taskErrorType(failureReason),
-		s.willRetryTask(task),
-	))
 }
 
 func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTaskQueue) {
-	s.captureTaskEvent(ctx, analytics.AgentTaskCancelled(
-		s.taskAnalyticsContext(ctx, task),
-		taskDurationMS(task),
-	))
 	// Revoke any mat_ task tokens minted for this task. Cancellation is
 	// a terminal transition, so the running agent process no longer
 	// needs to call back; eagerly deleting the token closes the
@@ -181,153 +148,6 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 		slog.Warn("cancel task: failed to revoke task tokens",
 			"task_id", util.UUIDToString(task.ID), "error", err)
 	}
-}
-
-func (s *TaskService) captureTaskEvent(ctx context.Context, event analytics.Event) {
-	if s.Analytics == nil {
-		return
-	}
-	if event.WorkspaceID == "" {
-		return
-	}
-	s.Analytics.Capture(event)
-}
-
-func (s *TaskService) cachedTaskAnalyticsContext(task db.AgentTaskQueue) (analytics.TaskContext, bool) {
-	key := taskAnalyticsContextKey(task)
-	if key == "" {
-		return analytics.TaskContext{}, false
-	}
-	s.analyticsContextMu.Lock()
-	defer s.analyticsContextMu.Unlock()
-	if s.analyticsContextCache == nil {
-		return analytics.TaskContext{}, false
-	}
-	tc, ok := s.analyticsContextCache[key]
-	return tc, ok
-}
-
-func (s *TaskService) storeTaskAnalyticsContext(task db.AgentTaskQueue, tc analytics.TaskContext) {
-	if tc.WorkspaceID == "" {
-		return
-	}
-	key := taskAnalyticsContextKey(task)
-	if key == "" {
-		return
-	}
-	s.analyticsContextMu.Lock()
-	defer s.analyticsContextMu.Unlock()
-	if s.analyticsContextCache == nil {
-		s.analyticsContextCache = make(map[string]analytics.TaskContext)
-	}
-	if _, ok := s.analyticsContextCache[key]; !ok {
-		s.analyticsContextOrder = append(s.analyticsContextOrder, key)
-		if len(s.analyticsContextOrder) > taskAnalyticsContextCacheMax {
-			oldest := s.analyticsContextOrder[0]
-			s.analyticsContextOrder = s.analyticsContextOrder[1:]
-			delete(s.analyticsContextCache, oldest)
-		}
-	}
-	s.analyticsContextCache[key] = tc
-}
-
-func taskAnalyticsContextKey(task db.AgentTaskQueue) string {
-	taskID := util.UUIDToString(task.ID)
-	if taskID == "" {
-		return ""
-	}
-	return strings.Join([]string{
-		taskID,
-		util.UUIDToString(task.RuntimeID),
-		util.UUIDToString(task.IssueID),
-		util.UUIDToString(task.ChatSessionID),
-		util.UUIDToString(task.AutopilotRunID),
-	}, "|")
-}
-
-func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTaskQueue) analytics.TaskContext {
-	if tc, ok := s.cachedTaskAnalyticsContext(task); ok {
-		return tc
-	}
-	tc := analytics.TaskContext{
-		AgentID: util.UUIDToString(task.AgentID),
-		TaskID:  util.UUIDToString(task.ID),
-		Source:  analytics.SourceManual,
-	}
-	if task.IssueID.Valid {
-		tc.IssueID = util.UUIDToString(task.IssueID)
-	}
-	if task.ChatSessionID.Valid {
-		tc.ChatSessionID = util.UUIDToString(task.ChatSessionID)
-		tc.Source = analytics.SourceChat
-	}
-	if task.AutopilotRunID.Valid {
-		tc.AutopilotRunID = util.UUIDToString(task.AutopilotRunID)
-		tc.Source = analytics.SourceAutopilot
-	}
-
-	if task.RuntimeID.Valid {
-		if rt, err := s.Queries.GetAgentRuntime(ctx, task.RuntimeID); err == nil {
-			tc.WorkspaceID = util.UUIDToString(rt.WorkspaceID)
-			tc.RuntimeMode = rt.RuntimeMode
-			tc.Provider = rt.Provider
-		}
-	}
-	if tc.WorkspaceID == "" || tc.RuntimeMode == "" {
-		if agent, err := s.Queries.GetAgent(ctx, task.AgentID); err == nil {
-			if tc.WorkspaceID == "" {
-				tc.WorkspaceID = util.UUIDToString(agent.WorkspaceID)
-			}
-			if tc.RuntimeMode == "" {
-				tc.RuntimeMode = agent.RuntimeMode
-			}
-		}
-	}
-
-	if task.IssueID.Valid {
-		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
-			tc.WorkspaceID = util.UUIDToString(issue.WorkspaceID)
-			if issue.CreatorType == "member" {
-				tc.UserID = util.UUIDToString(issue.CreatorID)
-			}
-			if issue.OriginType.Valid {
-				switch issue.OriginType.String {
-				case "autopilot":
-					tc.Source = analytics.SourceAutopilot
-					if ap, err := s.Queries.GetAutopilot(ctx, issue.OriginID); err == nil {
-						if ap.CreatedByType == "member" {
-							tc.UserID = util.UUIDToString(ap.CreatedByID)
-						}
-					}
-				case "quick_create":
-					tc.Source = analytics.SourceManual
-				}
-			}
-		}
-	}
-	if task.ChatSessionID.Valid {
-		if cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
-			tc.WorkspaceID = util.UUIDToString(cs.WorkspaceID)
-			tc.UserID = util.UUIDToString(cs.CreatorID)
-		}
-	}
-	if task.AutopilotRunID.Valid {
-		if run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID); err == nil {
-			if ap, err := s.Queries.GetAutopilot(ctx, run.AutopilotID); err == nil {
-				tc.WorkspaceID = util.UUIDToString(ap.WorkspaceID)
-				if ap.CreatedByType == "member" {
-					tc.UserID = util.UUIDToString(ap.CreatedByID)
-				}
-			}
-		}
-	}
-	if qc, ok := s.parseQuickCreateContext(task); ok {
-		tc.WorkspaceID = qc.WorkspaceID
-		tc.UserID = qc.RequesterID
-		tc.Source = analytics.SourceManual
-	}
-	s.storeTaskAnalyticsContext(task, tc)
-	return tc
 }
 
 func taskDurationMS(task db.AgentTaskQueue) int64 {
@@ -815,12 +635,6 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 // ClaimTaskForRuntime claims the next runnable task for a runtime while
 // still respecting each agent's max_concurrent_tasks limit.
-//
-// Empty-claim fast path: when EmptyClaim is configured and a recent
-// check verified the runtime had no queued tasks, returns immediately
-// without touching Postgres. The cache is invalidated synchronously on
-// every enqueue (notifyTaskAvailable), so a queued task becomes
-// claimable on the next call rather than waiting for the TTL.
 func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
@@ -847,8 +661,6 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}()
 
 	runtimeKey := util.UUIDToString(runtimeID)
-	// Check this before EmptyClaim: a lost claim response moves the task out of
-	// `queued`, so the empty-queued cache cannot represent recoverability.
 	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
 		RuntimeID:         runtimeID,
 		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
@@ -868,19 +680,6 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
 	}
 
-	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
-		outcome = "empty_cache_hit"
-		return nil, nil
-	}
-
-	// Sample the invalidation version BEFORE the SELECT. If a
-	// concurrent enqueue Bumps between this read and the post-SELECT
-	// MarkEmpty, the next IsEmpty will see the empty key tagged with
-	// a stale version and reject it — closing the race that would
-	// otherwise stall the just-queued task until the empty key's TTL
-	// expired.
-	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
-
 	t0 := time.Now()
 	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
 	listMs = time.Since(t0).Milliseconds()
@@ -891,7 +690,6 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	}
 
 	if len(tasks) == 0 {
-		s.EmptyClaim.MarkEmpty(ctx, runtimeKey, preSelectVersion)
 		outcome = "empty_db"
 		return nil, nil
 	}
@@ -1728,13 +1526,6 @@ func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
 		return
 	}
 	runtimeKey := util.UUIDToString(task.RuntimeID)
-	// Use a background context: the cache bump / wakeup must outlive
-	// the request that created the task, otherwise an early client
-	// disconnect could leave the empty verdict in place and stall the
-	// just-queued task until the TTL expires. The cache itself bounds
-	// every Redis call with a short timeout so a wedged Redis cannot
-	// block enqueue.
-	s.EmptyClaim.Bump(context.Background(), runtimeKey)
 	if s.Wakeup == nil {
 		return
 	}

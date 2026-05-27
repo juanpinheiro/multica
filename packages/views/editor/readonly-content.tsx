@@ -103,21 +103,20 @@ function urlTransform(url: string): string {
 // ---------------------------------------------------------------------------
 
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { push, openInNewTab } = useNavigation();
+  const { push } = useNavigation();
   const p = useWorkspacePaths();
   const path = p.issueDetail(issueId);
   return (
     <span
       className="inline align-middle"
       onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
         if (e.metaKey || e.ctrlKey || e.shiftKey) {
-          if (openInNewTab) {
-            openInNewTab(path, label);
-          }
+          e.stopPropagation();
+          window.open(path, "_blank", "noopener,noreferrer");
           return;
         }
+        e.preventDefault();
+        e.stopPropagation();
         push(path);
       }}
     >

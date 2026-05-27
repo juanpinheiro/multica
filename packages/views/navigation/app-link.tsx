@@ -12,16 +12,10 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     { href, children, onClick, onMouseEnter, onFocus, ...props },
     ref,
   ) {
-    const { push, openInNewTab, prefetch } = useNavigation();
+    const { push, prefetch } = useNavigation();
 
     const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey) {
-        if (openInNewTab) {
-          e.preventDefault();
-          openInNewTab(href);
-        }
-        return;
-      }
+      if (e.metaKey || e.ctrlKey || e.shiftKey) return;
       e.preventDefault();
       // Caller's onClick runs BEFORE push so any synchronous side effect
       // (close popover, clear selection, blur the trigger) lands in the
@@ -31,12 +25,12 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     };
 
     const handleMouseEnter = (e: React.MouseEvent<HTMLAnchorElement>) => {
-      prefetch?.(href);
+      prefetch(href);
       onMouseEnter?.(e);
     };
 
     const handleFocus = (e: React.FocusEvent<HTMLAnchorElement>) => {
-      prefetch?.(href);
+      prefetch(href);
       onFocus?.(e);
     };
 

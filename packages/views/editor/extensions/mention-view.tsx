@@ -46,16 +46,16 @@ function IssueMention({
   fallbackLabel?: string;
 }) {
   const p = useWorkspacePaths();
-  const { push, openInNewTab } = useNavigation();
+  const { push } = useNavigation();
   const issuePath = p.issueDetail(issueId);
 
   const handleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
     if (e.metaKey || e.ctrlKey || e.shiftKey) {
-      if (openInNewTab) openInNewTab(issuePath, fallbackLabel);
+      e.stopPropagation();
       return;
     }
+    e.preventDefault();
+    e.stopPropagation();
     push(issuePath);
   };
 

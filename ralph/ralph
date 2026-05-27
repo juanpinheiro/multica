@@ -1,0 +1,40 @@
+#!/bin/bash
+set -eo pipefail
+
+# Resolve the real ralph dir even if invoked via symlink
+script_path="$(readlink "$0" || echo "$0")"
+case "$script_path" in
+  /*) ;;
+  *)  script_path="$(dirname "$0")/$script_path" ;;
+esac
+ralph_dir="$(cd "$(dirname "$script_path")" && pwd)"
+
+cmd="$1"
+shift || true
+
+case "$cmd" in
+  afk)
+    exec "$ralph_dir/afk.sh" "$@"
+    ;;
+  once)
+    exec "$ralph_dir/once.sh" "$@"
+    ;;
+  ""|-h|--help|help)
+    cat <<EOF
+Usage:
+  ralph afk <feature> [iterations]
+  ralph once <feature>
+
+Runs in the current working directory.
+
+<feature> refers to a folder under <workspace>/.scratch/<feature>/
+containing the PRD and issue markdowns for the feature.
+EOF
+    [ -z "$cmd" ] && exit 1 || exit 0
+    ;;
+  *)
+    echo "ralph: unknown command '$cmd'" >&2
+    echo "Run 'ralph help' for usage." >&2
+    exit 1
+    ;;
+esac

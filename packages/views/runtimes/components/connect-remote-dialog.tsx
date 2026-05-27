@@ -22,7 +22,7 @@ import { useT } from "../../i18n";
 type Step = "instructions" | "success";
 
 const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
+  "git clone https://github.com/multica-ai/multica.git && cd multica && make build && cp server/bin/multica /usr/local/bin/";
 const SETUP_CMD = "multica setup";
 const TOKEN_CMD = `multica config set server_url https://api.multica.ai
 multica config set app_url https://multica.ai

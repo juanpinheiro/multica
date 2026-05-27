@@ -26,34 +26,23 @@ let chatStore: ReturnType<typeof createChatStore>;
 function initCore(
   apiBaseUrl: string,
   storage: StorageAdapter,
-  onLogin?: () => void,
-  onLogout?: () => void,
-  cookieAuth?: boolean,
   identity?: ClientIdentity,
 ) {
   if (initialized) return;
 
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),
-    onUnauthorized: () => {
-      storage.removeItem("multica_token");
-    },
     identity,
   });
   setApiInstance(api);
   setSchemaLogger(createLogger("api-schema"));
 
-  // In token mode, hydrate token from storage.
-  if (!cookieAuth) {
-    const token = storage.getItem("multica_token");
-    if (token) api.setToken(token);
-  }
   // Workspace identity is URL-driven: the [workspaceSlug] layout resolves
   // the slug and calls setCurrentWorkspace(slug, wsId) on mount. The api
   // client reads the slug from that singleton for the X-Workspace-Slug
   // header. No boot-time hydration from storage is required.
 
-  authStore = createAuthStore({ api, storage, onLogin, onLogout, cookieAuth });
+  authStore = createAuthStore({ api });
   registerAuthStore(authStore);
 
   chatStore = createChatStore({ storage });
@@ -78,7 +67,7 @@ export function CoreProvider({
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
+  useMemo(() => initCore(apiBaseUrl, storage, identity), []);
 
   // I18nProvider wraps everything else: server and client must use the same
   // (locale, resources) to avoid hydration mismatch. Language switching goes
@@ -88,9 +77,6 @@ export function CoreProvider({
       <AuthInitializer
         onLogin={onLogin}
         onLogout={onLogout}
-        storage={storage}
-        cookieAuth={cookieAuth}
-        identity={identity}
       >
         <WSProvider
           wsUrl={wsUrl}

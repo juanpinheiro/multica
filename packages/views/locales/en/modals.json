@@ -20,18 +20,6 @@
     "toast_deleted": "Issue deleted",
     "toast_delete_failed": "Failed to delete issue"
   },
-  "feedback": {
-    "title": "Feedback",
-    "placeholder": "Tell us about your experience, bugs you've found, or features you'd like to see…",
-    "toast_uploading": "Please wait for uploads to finish…",
-    "toast_too_long": "Message is too long",
-    "toast_sent": "Thanks for the feedback!",
-    "toast_failed": "Failed to send feedback",
-    "send": "Send feedback",
-    "sending": "Sending…",
-    "github_hint_prefix": "Want faster handling and open discussion? Head to ",
-    "github_hint_link": "GitHub"
-  },
   "issue_picker": {
     "search_placeholder": "Search issues...",
     "searching": "Searching...",

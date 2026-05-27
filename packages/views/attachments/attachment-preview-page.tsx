@@ -3,8 +3,8 @@
 /**
  * AttachmentPreviewPage — full-page HTML attachment viewer.
  *
- * Destination for `openInNewTab` from HtmlAttachmentPreview's toolbar. The
- * inline preview (HtmlAttachmentPreview) renders the same content in a 480px
+ * Destination for the "open in new tab" button on HtmlAttachmentPreview's
+ * toolbar. The inline preview (HtmlAttachmentPreview) renders the same content in a 480px
  * card with a hover toolbar; this is the same content edge-to-edge so the
  * user can resize / interact with the document at full size.
  *
@@ -37,8 +37,6 @@ export function AttachmentPreviewPage({
   const { t } = useT("editor");
   const query = useAttachmentHtmlText(attachmentId);
 
-  // Set document.title so desktop's MutationObserver-based tab title picks
-  // up the filename. Web shows the same string in the browser tab.
   useEffect(() => {
     if (filename) document.title = filename;
   }, [filename]);

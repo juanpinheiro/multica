@@ -7,8 +7,6 @@ import type {
   SearchIssuesResponse,
   SearchProjectsResponse,
   UpdateMeRequest,
-  CreateMemberRequest,
-  UpdateMemberRequest,
   ListIssuesParams,
   ListGroupedIssuesParams,
   Agent,
@@ -80,7 +78,6 @@ import type {
   CreatePinRequest,
   PinnedItemType,
   ReorderPinsRequest,
-  Invitation,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -102,12 +99,6 @@ import type {
   SquadMember,
   SquadMemberStatusListResponse,
 } from "../types";
-import type { OnboardingCompletionPath } from "../onboarding/types";
-import type {
-  CloudRuntimeNode,
-  CreateCloudRuntimeNodeRequest,
-  ListCloudRuntimeNodesParams,
-} from "../runtimes/cloud-runtime";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -118,8 +109,6 @@ import {
   AttachmentResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
-  CloudRuntimeNodeListSchema,
-  CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -128,8 +117,6 @@ import {
   EMPTY_AGENT_TEMPLATE_DETAIL,
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
-  EMPTY_CLOUD_RUNTIME_NODE,
-  EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -174,11 +161,6 @@ export interface ApiClientOptions {
   onUnauthorized?: () => void;
   /** Identifies the client to the server. Sent as X-Client-* headers. */
   identity?: ApiClientIdentity;
-}
-
-export interface LoginResponse {
-  token: string;
-  user: User;
 }
 
 export class ApiError extends Error {
@@ -345,78 +327,10 @@ export class ApiClient {
     return res.json() as Promise<T>;
   }
 
-  // Auth
-  async sendCode(email: string): Promise<void> {
-    await this.fetch("/auth/send-code", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    });
-  }
-
-  async verifyCode(email: string, code: string): Promise<LoginResponse> {
-    return this.fetch("/auth/verify-code", {
-      method: "POST",
-      body: JSON.stringify({ email, code }),
-    });
-  }
-
-  async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
-    return this.fetch("/auth/google", {
-      method: "POST",
-      body: JSON.stringify({ code, redirect_uri: redirectUri }),
-    });
-  }
-
-  async logout(): Promise<void> {
-    await this.fetch("/auth/logout", { method: "POST" });
-  }
-
-  async issueCliToken(): Promise<{ token: string }> {
-    return this.fetch("/api/cli-token", { method: "POST" });
-  }
-
   async getMe(): Promise<User> {
     const raw = await this.fetch<unknown>("/api/me");
     return parseWithFallback(raw, UserSchema, EMPTY_USER, {
       endpoint: "GET /api/me",
-    });
-  }
-
-  async markOnboardingComplete(payload?: {
-    completion_path?: OnboardingCompletionPath;
-    workspace_id?: string;
-  }): Promise<User> {
-    const raw = await this.fetch<unknown>("/api/me/onboarding/complete", {
-      method: "POST",
-      body: payload ? JSON.stringify(payload) : undefined,
-    });
-    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
-      endpoint: "POST /api/me/onboarding/complete",
-    });
-  }
-
-  async joinCloudWaitlist(payload: {
-    email: string;
-    reason?: string;
-  }): Promise<User> {
-    const raw = await this.fetch<unknown>("/api/me/onboarding/cloud-waitlist", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
-      endpoint: "POST /api/me/onboarding/cloud-waitlist",
-    });
-  }
-
-  async patchOnboarding(payload: {
-    questionnaire?: Record<string, unknown>;
-  }): Promise<User> {
-    const raw = await this.fetch<unknown>("/api/me/onboarding", {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
-    return parseWithFallback(raw, UserSchema, EMPTY_USER, {
-      endpoint: "PATCH /api/me/onboarding",
     });
   }
 
@@ -527,17 +441,6 @@ export class ApiClient {
     project_id?: string | null;
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async createFeedback(data: {
-    message: string;
-    url?: string;
-    workspace_id?: string;
-  }): Promise<{ id: string; created_at: string }> {
-    return this.fetch("/api/feedback", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -804,49 +707,6 @@ export class ApiClient {
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
     if (params?.owner) search.set("owner", params.owner);
     return this.fetch(`/api/runtimes?${search}`);
-  }
-
-  async listCloudRuntimeNodes(
-    params?: ListCloudRuntimeNodesParams,
-  ): Promise<CloudRuntimeNode[]> {
-    const search = new URLSearchParams();
-    if (params?.limit !== undefined) search.set("limit", String(params.limit));
-    if (params?.offset !== undefined) search.set("offset", String(params.offset));
-    const query = search.toString();
-    const raw = await this.fetch<unknown>(
-      `/api/cloud-runtime/nodes${query ? `?${query}` : ""}`,
-    );
-    return parseWithFallback(
-      raw,
-      CloudRuntimeNodeListSchema,
-      EMPTY_CLOUD_RUNTIME_NODE_LIST,
-      { endpoint: "GET /api/cloud-runtime/nodes" },
-    );
-  }
-
-  async createCloudRuntimeNode(
-    data: CreateCloudRuntimeNodeRequest,
-  ): Promise<CloudRuntimeNode> {
-    const res = await this.fetchRaw("/api/cloud-runtime/nodes", {
-      method: "POST",
-      body: JSON.stringify(data),
-      extraHeaders: { "Content-Type": "application/json" },
-    });
-    const raw = await res.json() as unknown;
-    return parseWithFallback(
-      raw,
-      CloudRuntimeNodeSchema,
-      EMPTY_CLOUD_RUNTIME_NODE,
-      { endpoint: "POST /api/cloud-runtime/nodes" },
-    );
-  }
-
-  async deleteCloudRuntimeNode(instanceId: string): Promise<void> {
-    await this.fetchRaw("/api/cloud-runtime/nodes", {
-      method: "DELETE",
-      body: JSON.stringify({ instance_id: instanceId }),
-      extraHeaders: { "Content-Type": "application/json" },
-    });
   }
 
   async deleteRuntime(runtimeId: string): Promise<void> {
@@ -1194,9 +1054,6 @@ export class ApiClient {
     cdn_domain: string;
     allow_signup: boolean;
     google_client_id?: string;
-    posthog_key?: string;
-    posthog_host?: string;
-    analytics_environment?: string;
   }> {
     return this.fetch("/api/config");
   }
@@ -1227,63 +1084,6 @@ export class ApiClient {
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`);
-  }
-
-  async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateMember(workspaceId: string, memberId: string, data: UpdateMemberRequest): Promise<MemberWithUser> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteMember(workspaceId: string, memberId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
-      method: "DELETE",
-    });
-  }
-
-  async leaveWorkspace(workspaceId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/leave`, {
-      method: "POST",
-    });
-  }
-
-  // Invitations
-  async listWorkspaceInvitations(workspaceId: string): Promise<Invitation[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/invitations`);
-  }
-
-  async revokeInvitation(workspaceId: string, invitationId: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/invitations/${invitationId}`, {
-      method: "DELETE",
-    });
-  }
-
-  async listMyInvitations(): Promise<Invitation[]> {
-    return this.fetch("/api/invitations");
-  }
-
-  async getInvitation(invitationId: string): Promise<Invitation> {
-    return this.fetch(`/api/invitations/${invitationId}`);
-  }
-
-  async acceptInvitation(invitationId: string): Promise<MemberWithUser> {
-    return this.fetch(`/api/invitations/${invitationId}/accept`, {
-      method: "POST",
-    });
-  }
-
-  async declineInvitation(invitationId: string): Promise<void> {
-    await this.fetch(`/api/invitations/${invitationId}/decline`, {
-      method: "POST",
-    });
   }
 
   async deleteWorkspace(workspaceId: string): Promise<void> {

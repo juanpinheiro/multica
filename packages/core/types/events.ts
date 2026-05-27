@@ -3,7 +3,7 @@ import type { Agent } from "./agent";
 import type { InboxItem } from "./inbox";
 import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
-import type { Workspace, MemberWithUser, Invitation } from "./workspace";
+import type { Workspace } from "./workspace";
 import type { Project } from "./project";
 import type { Label } from "./label";
 
@@ -35,9 +35,6 @@ export type WSEventType =
   | "inbox:batch-archived"
   | "workspace:updated"
   | "workspace:deleted"
-  | "member:added"
-  | "member:updated"
-  | "member:removed"
   | "daemon:heartbeat"
   | "daemon:register"
   | "skill:created"
@@ -69,10 +66,6 @@ export type WSEventType =
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
-  | "invitation:created"
-  | "invitation:accepted"
-  | "invitation:declined"
-  | "invitation:revoked"
   | "github_installation:created"
   | "github_installation:deleted"
   | "pull_request:linked"
@@ -174,22 +167,6 @@ export interface WorkspaceUpdatedPayload {
 }
 
 export interface WorkspaceDeletedPayload {
-  workspace_id: string;
-}
-
-export interface MemberUpdatedPayload {
-  member: MemberWithUser;
-}
-
-export interface MemberAddedPayload {
-  member: MemberWithUser;
-  workspace_id: string;
-  workspace_name?: string;
-}
-
-export interface MemberRemovedPayload {
-  member_id: string;
-  user_id: string;
   workspace_id: string;
 }
 
@@ -332,26 +309,6 @@ export interface ProjectDeletedPayload {
   project_id: string;
 }
 
-export interface InvitationCreatedPayload {
-  invitation: Invitation;
-  workspace_name?: string;
-}
-
-export interface InvitationAcceptedPayload {
-  invitation_id: string;
-  member: MemberWithUser;
-}
-
-export interface InvitationDeclinedPayload {
-  invitation_id: string;
-  invitee_email: string;
-}
-
-export interface InvitationRevokedPayload {
-  invitation_id: string;
-  invitee_email: string;
-}
-
 /**
  * Maps every WSEventType to its payload interface. Events whose payload
  * shape isn't formally typed (server emits an object the client doesn't
@@ -397,9 +354,6 @@ export interface WSEventPayloadMap {
   "inbox:batch-archived": InboxBatchArchivedPayload;
   "workspace:updated": WorkspaceUpdatedPayload;
   "workspace:deleted": WorkspaceDeletedPayload;
-  "member:added": MemberAddedPayload;
-  "member:updated": MemberUpdatedPayload;
-  "member:removed": MemberRemovedPayload;
   "subscriber:added": SubscriberAddedPayload;
   "subscriber:removed": SubscriberRemovedPayload;
   "activity:created": ActivityCreatedPayload;
@@ -411,10 +365,6 @@ export interface WSEventPayloadMap {
   "project:created": ProjectCreatedPayload;
   "project:updated": ProjectUpdatedPayload;
   "project:deleted": ProjectDeletedPayload;
-  "invitation:created": InvitationCreatedPayload;
-  "invitation:accepted": InvitationAcceptedPayload;
-  "invitation:declined": InvitationDeclinedPayload;
-  "invitation:revoked": InvitationRevokedPayload;
   // No formal payload interfaces yet — server emits domain objects clients
   // currently consume as opaque triggers (refetch on receipt).
   "daemon:heartbeat": unknown;

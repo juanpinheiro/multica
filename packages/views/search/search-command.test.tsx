@@ -252,7 +252,7 @@ describe("SearchCommand", () => {
     expect(useSearchStore.getState().open).toBe(false);
   });
 
-  it("lists workspace members and navigates to the member page on selection", async () => {
+  it("lists workspace members and closes on selection", async () => {
     const user = userEvent.setup();
     mockMembers.current = [
       {
@@ -297,7 +297,7 @@ describe("SearchCommand", () => {
     );
     await user.click(aliceItem);
 
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/members/user-1");
+    expect(mockPush).not.toHaveBeenCalled();
     expect(useSearchStore.getState().open).toBe(false);
   });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Save, LogOut } from "lucide-react";
+import { Save } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
@@ -18,12 +18,9 @@ import {
   AlertDialogAction,
 } from "@multica/ui/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
-import { useLeaveWorkspace, useDeleteWorkspace } from "@multica/core/workspace/mutations";
-import { useWorkspaceId } from "@multica/core/hooks";
+import { useQueryClient } from "@tanstack/react-query";
+import { useDeleteWorkspace } from "@multica/core/workspace/mutations";
 import {
-  memberListOptions,
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
@@ -32,7 +29,6 @@ import { api } from "@multica/core/api";
 import {
   resolvePostAuthDestination,
   useCurrentWorkspace,
-  useHasOnboarded,
 } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
@@ -42,15 +38,10 @@ import { useT } from "../../i18n";
 
 export function WorkspaceTab() {
   const { t } = useT("settings");
-  const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
-  const wsId = useWorkspaceId();
-  const { data: members = [], isFetched: membersFetched } = useQuery(memberListOptions(wsId));
   const qc = useQueryClient();
-  const leaveWorkspace = useLeaveWorkspace();
   const deleteWorkspace = useDeleteWorkspace();
   const navigation = useNavigation();
-  const hasOnboarded = useHasOnboarded();
 
   /**
    * Send the user to a safe URL BEFORE the leave/delete mutation fires.
@@ -93,7 +84,7 @@ export function WorkspaceTab() {
     // takes over immediately, or the new-workspace overlay takes over
     // (which has no workspace context, so null is correct).
     setCurrentWorkspace(null, null);
-    navigation.push(resolvePostAuthDestination(remaining, hasOnboarded));
+    navigation.push(resolvePostAuthDestination(remaining));
   };
 
   const [name, setName] = useState(workspace?.name ?? "");
@@ -110,16 +101,9 @@ export function WorkspaceTab() {
   } | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
-  const isOwner = currentMember?.role === "owner";
-  // Mirror the backend invariant (server/internal/handler/workspace.go:569):
-  // a workspace must always have at least one owner, so the sole owner can't
-  // leave. Pre-flight here instead of letting the 400 round-trip become a
-  // confusing toast — disable Leave and tell the user what they need to do.
-  const ownerCount = members.filter((m) => m.role === "owner").length;
-  const isSoleOwner = isOwner && ownerCount <= 1;
-  const isSoleMember = members.length <= 1;
+  // Singleton user is always the owner of every workspace.
+  const canManageWorkspace = true;
+  const isOwner = true;
 
   useEffect(() => {
     setName(workspace?.name ?? "");
@@ -183,26 +167,6 @@ export function WorkspaceTab() {
       return;
     }
     void performSave(false);
-  };
-
-  const handleLeaveWorkspace = () => {
-    if (!workspace) return;
-    setConfirmAction({
-      title: t(($) => $.workspace.leave_confirm_title),
-      description: t(($) => $.workspace.leave_confirm_description, { name: workspace.name }),
-      variant: "destructive",
-      onConfirm: async () => {
-        setActionId("leave");
-        navigateAwayFromCurrentWorkspace();
-        try {
-          await leaveWorkspace.mutateAsync(workspace.id);
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : t(($) => $.workspace.toast_leave_failed));
-        } finally {
-          setActionId(null);
-        }
-      },
-    });
   };
 
   const handleConfirmDelete = async () => {
@@ -307,41 +271,14 @@ export function WorkspaceTab() {
         </Card>
       </section>
 
-      {/* Danger Zone — gated on the member query settling so the owner-only
-          Delete button and the sole-owner Leave guidance don't flash in
-          after mount. */}
-      {membersFetched && (
+      {/* Danger Zone */}
       <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <LogOut className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">{t(($) => $.workspace.danger_zone)}</h2>
-        </div>
+        <h2 className="text-sm font-semibold">{t(($) => $.workspace.danger_zone)}</h2>
 
         <Card>
           <CardContent className="space-y-3">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-sm font-medium">{t(($) => $.workspace.leave_title)}</p>
-                <p className="text-xs text-muted-foreground">
-                  {isSoleOwner
-                    ? isSoleMember
-                      ? t(($) => $.workspace.leave_sole_member)
-                      : t(($) => $.workspace.leave_sole_owner)
-                    : t(($) => $.workspace.leave_default)}
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleLeaveWorkspace}
-                disabled={actionId === "leave" || isSoleOwner}
-              >
-                {actionId === "leave" ? t(($) => $.workspace.leaving) : t(($) => $.workspace.leave_button)}
-              </Button>
-            </div>
-
             {isOwner && (
-              <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium text-destructive">{t(($) => $.workspace.delete_title)}</p>
                   <p className="text-xs text-muted-foreground">
@@ -361,7 +298,6 @@ export function WorkspaceTab() {
           </CardContent>
         </Card>
       </section>
-      )}
 
       <AlertDialog open={!!confirmAction} onOpenChange={(v) => { if (!v) setConfirmAction(null); }}>
         <AlertDialogContent>

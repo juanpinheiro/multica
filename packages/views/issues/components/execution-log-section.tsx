@@ -20,11 +20,8 @@ import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 
 // Mask gradient that fades the trigger-summary text into transparency at
-// the right edge. Mirrors the pattern used by the desktop tab bar
-// (apps/desktop/.../tab-bar.tsx) and the sidebar pin item
-// (packages/views/layout/app-sidebar.tsx) — gives the row a smooth
-// visual ramp toward the trailing actions instead of a hard truncate +
-// ellipsis cut.
+// the right edge — gives the row a smooth visual ramp toward the
+// trailing actions instead of a hard truncate + ellipsis cut.
 const TRIGGER_MASK_STYLE: React.CSSProperties = {
   maskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
   WebkitMaskImage:

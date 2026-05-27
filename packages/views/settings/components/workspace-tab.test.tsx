@@ -38,7 +38,6 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => workspaceRef.current,
-  useHasOnboarded: () => true,
   resolvePostAuthDestination: () => "/",
 }));
 
@@ -229,9 +228,4 @@ describe("WorkspaceTab — issue prefix editing", () => {
     expect(screen.getByRole("button", { name: /^Save$/ })).toBeDisabled();
   });
 
-  it("disables the prefix input for non-admins", () => {
-    membersRef.current = [{ user_id: "user-1", role: "member" }];
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-    expect(screen.getByPlaceholderText("TES")).toBeDisabled();
-  });
 });

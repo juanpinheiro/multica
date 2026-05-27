@@ -31,22 +31,6 @@ export interface User {
   name: string;
   email: string;
   avatar_url: string | null;
-  onboarded_at: string | null;
-  /**
-   * JSONB payload from the server. Typed as `unknown` here so this module
-   * stays independent of the questionnaire shape — the onboarding views
-   * cast into `Partial<QuestionnaireAnswers>` when reading. Server always
-   * returns an object (defaults to `{}`), never null.
-   */
-  onboarding_questionnaire: Record<string, unknown>;
-  /**
-   * Legacy column from the removed starter-content dialog. The column is
-   * still written to (always 'imported' for new accounts after the
-   * mark-onboarded paths run) so older desktop builds — which still render
-   * the dialog on NULL — don't show it to anyone created on a newer server.
-   * Kept as `string | null` for forward compatibility.
-   */
-  starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
   /**
@@ -71,20 +55,4 @@ export interface MemberWithUser {
   name: string;
   email: string;
   avatar_url: string | null;
-}
-
-export interface Invitation {
-  id: string;
-  workspace_id: string;
-  inviter_id: string;
-  invitee_email: string;
-  invitee_user_id: string | null;
-  role: MemberRole;
-  status: "pending" | "accepted" | "declined" | "expired";
-  created_at: string;
-  updated_at: string;
-  expires_at: string;
-  inviter_name?: string;
-  inviter_email?: string;
-  workspace_name?: string;
 }

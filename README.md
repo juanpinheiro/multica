@@ -64,45 +64,20 @@ Multica manages the full agent lifecycle: from task assignment to execution moni
 
 ---
 
-## Quick Install
+## Build from Source
 
-### macOS / Linux (Homebrew - recommended)
-
-```bash
-brew install multica-ai/tap/multica
-```
-
-Use `brew upgrade multica-ai/tap/multica` to keep the CLI current.
-
-### macOS / Linux (install script)
+This is a personal fork of Multica. Build the CLI from your checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+cd server
+go build -o ../bin/multica ./cmd/multica
 ```
 
-Use this if Homebrew is not available. The script installs the Multica CLI on macOS and Linux by using Homebrew when it is on `PATH`, otherwise it downloads the binary directly.
-
-### Windows (PowerShell)
-
-```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-```
-
-Then configure, authenticate, and start the daemon in one command:
+Then start the daemon:
 
 ```bash
-multica setup          # Connect to Multica Cloud, log in, start daemon
+./bin/multica daemon start
 ```
-
-> **Self-hosting?** Add `--with-server` to deploy a full Multica server on your machine:
->
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash -s -- --with-server
-> multica setup self-host
-> ```
->
-> This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
-> If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` from a checkout.
 
 ---
 
@@ -147,7 +122,6 @@ The `multica` CLI connects your local machine to Multica — authenticate, manag
 | `multica workspace switch <id\|slug>` | Switch the default workspace for this profile |
 | `multica issue list` | List issues in your workspace |
 | `multica issue create` | Create a new issue |
-| `multica update` | Update to the latest version |
 
 See the [CLI and Daemon Guide](CLI_AND_DAEMON.md) for the full command reference.
 

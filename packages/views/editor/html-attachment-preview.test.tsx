@@ -28,13 +28,8 @@ vi.mock("../i18n", () => ({
   }),
 }));
 
-// Module-level flag toggled per-test to simulate desktop (openInNewTab
-// present) vs web (omitted) adapters. vi.hoisted so the mock factory can
-// close over it.
-const { openInNewTabMock, getShareableUrlMock, navState } = vi.hoisted(() => ({
-  openInNewTabMock: vi.fn(),
+const { getShareableUrlMock } = vi.hoisted(() => ({
   getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
-  navState: { hasOpenInNewTab: true },
 }));
 
 vi.mock("../navigation", () => ({
@@ -44,8 +39,8 @@ vi.mock("../navigation", () => ({
     back: vi.fn(),
     pathname: "/acme/issues",
     searchParams: new URLSearchParams(),
-    ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
     getShareableUrl: getShareableUrlMock,
+    prefetch: vi.fn(),
   }),
 }));
 
@@ -72,7 +67,6 @@ function renderWithQuery(ui: ReactElement) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  navState.hasOpenInNewTab = true;
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -182,32 +176,7 @@ describe("HtmlAttachmentPreview — toolbar actions", () => {
     expect(screen.queryByTitle("Copy code")).toBeNull();
   });
 
-  it("invokes navigation.openInNewTab with the preview path when available (desktop)", async () => {
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>ok</p>",
-      originalContentType: "text/html",
-    });
-    renderWithQuery(
-      <HtmlAttachmentPreview
-        attachmentId="att-1"
-        filename="report.html"
-        onPreview={() => {}}
-        onDownload={() => {}}
-      />,
-    );
-    await waitFor(() =>
-      expect(screen.getByTitle("Open in new tab")).toBeTruthy(),
-    );
-    fireEvent.mouseDown(screen.getByTitle("Open in new tab"));
-    expect(openInNewTabMock).toHaveBeenCalledWith(
-      "/acme/attachments/att-1/preview?name=report.html",
-      "report.html",
-      { activate: true },
-    );
-  });
-
-  it("falls back to window.open against the shareable URL when openInNewTab is absent (web)", async () => {
-    navState.hasOpenInNewTab = false;
+  it("opens the shareable URL via window.open", async () => {
     getAttachmentTextContentMock.mockResolvedValueOnce({
       text: "<p>ok</p>",
       originalContentType: "text/html",
@@ -227,7 +196,6 @@ describe("HtmlAttachmentPreview — toolbar actions", () => {
       expect(screen.getByTitle("Open in new tab")).toBeTruthy(),
     );
     fireEvent.mouseDown(screen.getByTitle("Open in new tab"));
-    expect(openInNewTabMock).not.toHaveBeenCalled();
     expect(windowOpenSpy).toHaveBeenCalledWith(
       "https://app.example/acme/attachments/att-1/preview?name=report.html",
       "_blank",

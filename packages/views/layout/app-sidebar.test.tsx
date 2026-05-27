@@ -67,7 +67,6 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
 }));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
-vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
@@ -113,8 +112,6 @@ vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
 vi.mock("@multica/core/runtimes/hooks", () => ({ useMyRuntimesNeedUpdate: () => false }));
 vi.mock("@multica/core/workspace/queries", () => ({
-  myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
-  workspaceKeys: { myInvitations: () => ["invitations"] },
   workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
 }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({

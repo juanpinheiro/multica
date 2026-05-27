@@ -4,13 +4,7 @@ The `multica` CLI connects your local machine to Multica. It handles authenticat
 
 ## Installation
 
-### Homebrew (macOS/Linux)
-
-```bash
-brew install multica-ai/tap/multica
-```
-
-### Build from Source
+Build the CLI from source:
 
 ```bash
 git clone https://github.com/multica-ai/multica.git
@@ -19,19 +13,12 @@ make build
 cp server/bin/multica /usr/local/bin/multica
 ```
 
-### Update
+Or if you already have the repo cloned:
 
 ```bash
-brew upgrade multica-ai/tap/multica
+cd server
+go build -o ../bin/multica ./cmd/multica
 ```
-
-For install script or manual installs, use:
-
-```bash
-multica update
-```
-
-`multica update` auto-detects your installation method and upgrades accordingly.
 
 ## Quick Start
 
@@ -684,7 +671,6 @@ Only cron-based `schedule` triggers are currently exposed via the CLI. The data 
 
 ```bash
 multica version              # Show CLI version and commit hash
-multica update               # Update to latest version
 multica agent list           # List agents in the current workspace
 ```
 

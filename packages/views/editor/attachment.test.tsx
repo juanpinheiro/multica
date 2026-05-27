@@ -7,12 +7,10 @@ import type { Attachment as AttachmentRecord } from "@multica/core/types";
 const {
   getAttachmentTextContentMock,
   downloadMock,
-  openExternalMock,
   openByUrlMock,
 } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
   downloadMock: vi.fn(),
-  openExternalMock: vi.fn(),
   openByUrlMock: vi.fn(),
 }));
 
@@ -24,10 +22,6 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("./use-download-attachment", () => ({
   useDownloadAttachment: () => downloadMock,
-}));
-
-vi.mock("../platform", () => ({
-  openExternal: openExternalMock,
 }));
 
 vi.mock("../i18n", () => ({
@@ -63,8 +57,8 @@ vi.mock("../navigation", () => ({
     back: vi.fn(),
     pathname: "/acme/issues",
     searchParams: new URLSearchParams(),
-    openInNewTab: vi.fn(),
     getShareableUrl: (p: string) => `https://app.example${p}`,
+    prefetch: vi.fn(),
   }),
 }));
 

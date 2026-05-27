@@ -4,12 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 
-const openExternalMock = vi.hoisted(() => vi.fn());
-
-vi.mock("../platform", () => ({
-  openExternal: openExternalMock,
-}));
-
 // vi.hoisted: factories run before module evaluation, letting us name mocks
 // referenced from inside vi.mock factories below. The Error classes must be
 // hoisted too because vi.mock is itself hoisted above the top-level `class`
@@ -50,16 +44,10 @@ vi.mock("./use-download-attachment", () => ({
   useDownloadAttachment: () => downloadMock,
 }));
 
-// Module-level flags toggled per-test: simulate desktop (openInNewTab
-// adapter present) vs web (omitted), and the no-slug case where the
-// modal sits outside a workspace route.
-const { openInNewTabMock, getShareableUrlMock, navState, slugState } =
-  vi.hoisted(() => ({
-    openInNewTabMock: vi.fn(),
-    getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
-    navState: { hasOpenInNewTab: true },
-    slugState: { value: "acme" as string | null },
-  }));
+const { getShareableUrlMock, slugState } = vi.hoisted(() => ({
+  getShareableUrlMock: vi.fn((p: string) => `https://app.example${p}`),
+  slugState: { value: "acme" as string | null },
+}));
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({
@@ -68,8 +56,8 @@ vi.mock("../navigation", () => ({
     back: vi.fn(),
     pathname: "/acme/issues",
     searchParams: new URLSearchParams(),
-    ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),
     getShareableUrl: getShareableUrlMock,
+    prefetch: vi.fn(),
   }),
 }));
 
@@ -145,7 +133,6 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  navState.hasOpenInNewTab = true;
   slugState.value = "acme";
 });
 
@@ -364,6 +351,9 @@ describe("AttachmentPreviewModal — URL-only source", () => {
 
   it("Download button opens the raw URL externally when no attachment id is available", () => {
     const url = "https://cdn.example.test/orphan.pdf?Signature=s";
+    const windowOpenSpy = vi
+      .spyOn(window, "open")
+      .mockImplementation(() => null);
     render(
       <AttachmentPreviewModal
         source={{ kind: "url", url, filename: "orphan.pdf" }}
@@ -373,7 +363,11 @@ describe("AttachmentPreviewModal — URL-only source", () => {
     );
     const button = screen.getAllByTitle("Download")[0]!;
     fireEvent.click(button);
-    expect(openExternalMock).toHaveBeenCalledWith(url);
+    expect(windowOpenSpy).toHaveBeenCalledWith(
+      url,
+      "_blank",
+      "noopener,noreferrer",
+    );
     expect(downloadMock).not.toHaveBeenCalled();
   });
 });
@@ -398,34 +392,7 @@ describe("AttachmentPreviewModal — open-in-new-tab (HTML only)", () => {
     expect(screen.getByTitle("Open in new tab")).toBeTruthy();
   });
 
-  it("invokes navigation.openInNewTab with the preview path and closes the modal (desktop)", async () => {
-    getAttachmentTextContentMock.mockResolvedValueOnce({
-      text: "<p>hi</p>",
-      originalContentType: "text/html",
-    });
-    const att = makeAttachment({
-      filename: "report.html",
-      content_type: "text/html",
-    });
-    const onClose = vi.fn();
-    render(
-      <AttachmentPreviewModal
-        source={{ kind: "full", attachment: att }}
-        open
-        onClose={onClose}
-      />,
-    );
-    fireEvent.click(screen.getByTitle("Open in new tab"));
-    expect(openInNewTabMock).toHaveBeenCalledWith(
-      "/acme/attachments/att-1/preview?name=report.html",
-      "report.html",
-      { activate: true },
-    );
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("falls back to window.open against the shareable URL and closes the modal (web)", async () => {
-    navState.hasOpenInNewTab = false;
+  it("opens the shareable URL via window.open and closes the modal", async () => {
     getAttachmentTextContentMock.mockResolvedValueOnce({
       text: "<p>hi</p>",
       originalContentType: "text/html",
@@ -446,7 +413,6 @@ describe("AttachmentPreviewModal — open-in-new-tab (HTML only)", () => {
       />,
     );
     fireEvent.click(screen.getByTitle("Open in new tab"));
-    expect(openInNewTabMock).not.toHaveBeenCalled();
     expect(windowOpenSpy).toHaveBeenCalledWith(
       "https://app.example/acme/attachments/att-1/preview?name=report.html",
       "_blank",

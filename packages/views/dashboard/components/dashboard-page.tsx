@@ -20,7 +20,6 @@ import {
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
 } from "@multica/core/dashboard";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PageHeader } from "../../layout/page-header";
 import { KpiCard } from "../../runtimes/components/shared";
@@ -164,10 +163,6 @@ export function DashboardPage() {
     if (!stillAllowed) setDays(DEFAULT_DAYS_BY_DIM[next]);
   };
 
-  // The user can save model prices from the runtimes page; re-render when
-  // they do so the dashboard reflects the new rates.
-  useCustomPricingStore((s) => s.pricings);
-
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
@@ -245,7 +240,7 @@ export function DashboardPage() {
     runTimeRows.length === 0 &&
     runTimeDailyRows.length === 0;
 
-  // Cost / token math — re-derived when usage, days, or pricings change.
+  // Cost / token math — re-derived when usage or days change.
   const totals = useMemo(
     () => computeDailyTotals(dailyUsageInWindow),
     [dailyUsageInWindow],

@@ -1,6 +1,5 @@
 export { createAuthStore } from "./store";
 export type { AuthStoreOptions, AuthState } from "./store";
-export { sanitizeNextUrl } from "./utils";
 
 import type { createAuthStore as CreateAuthStoreFn } from "./store";
 

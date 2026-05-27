@@ -3,8 +3,6 @@ import type {
   RuntimeUsage,
   RuntimeUsageByAgent,
 } from "@multica/core/types";
-import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
-
 // A live local daemon re-registers itself within seconds of a server-side
 // delete (daemon self-heal, #2404), so deleting an online local runtime from
 // the UI has no lasting effect. Both the detail page and the list row menu
@@ -248,18 +246,13 @@ const MODEL_PRICING: Record<
 //     bracketed variant at the standard tier. Slight under-estimate
 //     beats the previous behaviour of dropping the row entirely.
 //
-// Anything still unmapped falls back to the user-supplied custom pricing
-// store. No startsWith fallback: variants like `gpt-5.5-mini` must have
-// their own row to be priced (otherwise they'd inherit `gpt-5.5`).
+// No startsWith fallback: variants like `gpt-5.5-mini` must have their
+// own row to be priced (otherwise they'd inherit `gpt-5.5`).
 function resolvePricing(model: string) {
   if (!model) return undefined;
 
   for (const candidate of canonicalCandidates(model)) {
     const hit = MODEL_PRICING[candidate];
-    if (hit) return hit;
-  }
-  for (const candidate of canonicalCandidates(model)) {
-    const hit = getCustomPricing(candidate);
     if (hit) return hit;
   }
   return undefined;

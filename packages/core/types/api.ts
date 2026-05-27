@@ -1,5 +1,4 @@
 import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
-import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
 // Issue API
@@ -165,15 +164,6 @@ export interface UpdateMeRequest {
   profile_description?: string;
   /** IANA tz to pin; "" clears back to browser-tz; undefined leaves untouched. */
   timezone?: string;
-}
-
-export interface CreateMemberRequest {
-  email: string;
-  role?: MemberRole;
-}
-
-export interface UpdateMemberRequest {
-  role: MemberRole;
 }
 
 // Personal Access Tokens

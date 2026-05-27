@@ -39,18 +39,6 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// custom-pricing-store is consumed two ways: usage-section reads the store
-// hook, and runtimes/utils reads getCustomPricing(). The hook must be both
-// callable and expose getState(), mirroring a real Zustand store.
-vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
-  const state = { pricings: {} as Record<string, unknown> };
-  const useCustomPricingStore = Object.assign(
-    (sel?: (s: typeof state) => unknown) => (sel ? sel(state) : state),
-    { getState: () => state },
-  );
-  return { useCustomPricingStore, getCustomPricing: () => undefined };
-});
-
 // useQuery is mocked so the component renders synchronously with canned
 // data — the `kind` tag on each query-options object routes the response.
 vi.mock("@tanstack/react-query", async () => {
@@ -89,10 +77,6 @@ vi.mock("./charts", () => ({
   ActivityHeatmap: ({ tz }: { tz: string }) => (
     <div data-testid="heatmap-tz">{tz}</div>
   ),
-}));
-
-vi.mock("./custom-pricing-dialog", () => ({
-  CustomPricingDialog: () => null,
 }));
 
 import { UsageSection } from "./usage-section";

@@ -21,10 +21,9 @@ func setupSweeperTestFixture(t *testing.T, taskStatus string) (string, string, s
 	err := testPool.QueryRow(ctx, `
 		SELECT a.id, a.runtime_id FROM agent a
 		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
-		WHERE u.email = $1
+		WHERE m.user_id = $1
 		LIMIT 1
-	`, integrationTestEmail).Scan(&agentID, &runtimeID)
+	`, testUserID).Scan(&agentID, &runtimeID)
 	if err != nil {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
@@ -361,10 +360,9 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	err := testPool.QueryRow(ctx, `
 		SELECT a.id, a.runtime_id FROM agent a
 		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
-		WHERE u.email = $1
+		WHERE m.user_id = $1
 		LIMIT 1
-	`, integrationTestEmail).Scan(&agentID, &runtimeID)
+	`, testUserID).Scan(&agentID, &runtimeID)
 	if err != nil {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
@@ -447,10 +445,9 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	err := testPool.QueryRow(ctx, `
 		SELECT a.id, a.runtime_id FROM agent a
 		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
-		WHERE u.email = $1
+		WHERE m.user_id = $1
 		LIMIT 1
-	`, integrationTestEmail).Scan(&agentID, &runtimeID)
+	`, testUserID).Scan(&agentID, &runtimeID)
 	if err != nil {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
@@ -521,10 +518,9 @@ func TestExpireStaleQueuedTasks(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		SELECT a.id, a.runtime_id FROM agent a
 		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
-		WHERE u.email = $1
+		WHERE m.user_id = $1
 		LIMIT 1
-	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+	`, testUserID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
 
@@ -626,10 +622,9 @@ func TestExpireStaleQueuedTasksRespectsBatchLimit(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `
 		SELECT a.id, a.runtime_id FROM agent a
 		JOIN member m ON m.workspace_id = a.workspace_id
-		JOIN "user" u ON u.id = m.user_id
-		WHERE u.email = $1
+		WHERE m.user_id = $1
 		LIMIT 1
-	`, integrationTestEmail).Scan(&agentID, &runtimeID); err != nil {
+	`, testUserID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
 

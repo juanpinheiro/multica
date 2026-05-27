@@ -188,46 +188,6 @@
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
   },
-  "cloud_runtime": {
-    "action": "Cloud Runtime",
-    "title": "Cloud Runtime",
-    "description": "Launch a managed cloud node and watch its Fleet status.",
-    "create_title": "New node",
-    "create_hint": "Choose a name, instance type, and disk size. Fleet applies the rest.",
-    "nodes_title": "Fleet nodes",
-    "refresh": "Refresh",
-    "nodes_empty": "No cloud nodes",
-    "nodes_failed": "Cloud Runtime unavailable",
-    "nodes_failed_hint": "Fleet did not return a node list.",
-    "node_fallback_name": "Cloud node",
-    "create": "Create node",
-    "creating": "Creating...",
-    "cancel": "Cancel",
-    "toast_created": "Cloud Runtime node created",
-    "toast_create_failed": "Failed to create Cloud Runtime node",
-    "delete": "Delete node",
-    "delete_confirm": "Are you sure you want to delete this cloud node? This action cannot be undone.",
-    "toast_deleted": "Cloud node deleted",
-    "toast_delete_failed": "Failed to delete cloud node",
-    "fields": {
-      "name": "Name",
-      "instance_type": "Instance type",
-      "region": "Region",
-      "disk_size": "Disk size GiB",
-      "image_id": "AMI ID",
-      "subnet_id": "Subnet ID",
-      "key_name": "Key pair",
-      "bootstrap_pat": "Bootstrap PAT"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "Instance type is required",
-      "disk_size_invalid": "Disk size must be a positive integer"
-    }
-  },
   "update": {
     "cli_version_label": "CLI Version:",
     "version_unknown": "unknown",
@@ -292,24 +252,7 @@
     "legend_cache_write": "Cache write",
     "empty_no_usage": "No usage in this period.",
     "empty_pricing_missing": "Tokens recorded but pricing missing for:",
-    "empty_pricing_hint": "Set a custom rate to include them in cost totals.",
     "empty_zero_cost": "Tokens recorded but cost calculation returned $0.",
-    "unmapped_notice_one": "{{count}} model has no maintained price — its tokens are excluded from cost totals.",
-    "unmapped_notice_other": "{{count}} models have no maintained price — their tokens are excluded from cost totals.",
-    "custom_pricing": {
-      "open_button": "Set custom prices",
-      "title": "Custom model prices",
-      "description": "Enter per-million-token rates so we can price models we don't ship a maintained rate for. Stored locally on this machine.",
-      "empty": "No models need a custom price right now.",
-      "field_input": "Input",
-      "field_output": "Output",
-      "field_cache_read": "Cache read",
-      "field_cache_write": "Cache write",
-      "unit_hint": "All rates are USD per 1M tokens. Leave every field blank to remove an override.",
-      "remove_aria": "Remove custom price",
-      "cancel": "Cancel",
-      "save": "Save"
-    },
     "cost_by_title_agent": "Cost by agent",
     "cost_by_title_model": "Cost by model",
     "cost_by_tab_agent": "By agent",

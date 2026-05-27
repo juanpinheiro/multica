@@ -378,52 +378,6 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		return err
 	}
 
-	// Check if the daemon needs to restart after a CLI update.
-	if restartBin := d.RestartBinary(); restartBin != "" {
-		logger.Info("restarting daemon with updated binary", "path", restartBin)
-
-		args := buildDaemonStartArgs(cmd)
-		child := exec.Command(restartBin, args...)
-
-		logPath := daemonLogPathForProfile(profile)
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-		if err != nil {
-			logger.Error("failed to open log file for restart", "error", err)
-			return nil
-		}
-		child.Stdout = logFile
-		child.Stderr = logFile
-		// Break out of the parent's Job Object on Windows; see the
-		// runDaemonBackground call site for rationale.
-		child.SysProcAttr = daemonSysProcAttr(true)
-
-		if err := child.Start(); err != nil {
-			if isAccessDeniedSpawnErr(err) {
-				child = exec.Command(restartBin, args...)
-				child.Stdout = logFile
-				child.Stderr = logFile
-				child.SysProcAttr = daemonSysProcAttr(false)
-				if err := child.Start(); err != nil {
-					logFile.Close()
-					logger.Error("failed to start new daemon (no breakaway)", "error", err)
-					return nil
-				}
-			} else {
-				logFile.Close()
-				logger.Error("failed to start new daemon", "error", err)
-				return nil
-			}
-		}
-		logFile.Close()
-		child.Process.Release()
-
-		// Write new PID file.
-		pidPath := daemonPIDPathForProfile(profile)
-		os.WriteFile(pidPath, []byte(strconv.Itoa(child.Process.Pid)), 0o644)
-
-		logger.Info("new daemon started", "pid", child.Process.Pid)
-	}
-
 	return nil
 }
 

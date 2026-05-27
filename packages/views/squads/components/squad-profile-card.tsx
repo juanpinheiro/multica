@@ -149,18 +149,14 @@ function MembersList({
           const href =
             m.member_type === "agent"
               ? p.agentDetail(m.member_id)
-              : p.memberDetail(m.member_id);
+              : null;
           const memberRole =
             m.member_type === "member"
               ? wsMembers.find((u) => u.user_id === m.member_id)?.role ?? null
               : null;
 
-          return (
-            <AppLink
-              key={`${m.member_type}-${m.member_id}`}
-              href={href}
-              className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/60"
-            >
+          const rowContent = (
+            <>
               <ActorAvatar
                 actorType={m.member_type}
                 actorId={m.member_id}
@@ -179,7 +175,24 @@ function MembersList({
                   {memberRole}
                 </span>
               )}
+            </>
+          );
+
+          return href ? (
+            <AppLink
+              key={`${m.member_type}-${m.member_id}`}
+              href={href}
+              className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/60"
+            >
+              {rowContent}
             </AppLink>
+          ) : (
+            <div
+              key={`${m.member_type}-${m.member_id}`}
+              className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5"
+            >
+              {rowContent}
+            </div>
           );
         })}
         {overflow > 0 && (

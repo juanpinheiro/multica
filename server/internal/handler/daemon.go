@@ -16,7 +16,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -49,18 +48,7 @@ func (h *Handler) requireDaemonWorkspaceAccess(w http.ResponseWriter, r *http.Re
 		return true
 	}
 
-	// PAT/JWT fallback: check membership cache before hitting DB.
-	userID := requestUserID(r)
-	if userID != "" {
-		if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-			return true
-		}
-	}
-
 	_, ok := h.requireWorkspaceMember(w, r, workspaceID, "not found")
-	if ok && userID != "" {
-		h.MembershipCache.Set(r.Context(), userID, workspaceID)
-	}
 	return ok
 }
 
@@ -136,15 +124,8 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 	if userID == "" {
 		return false
 	}
-	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
-		return true
-	}
 	_, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)
-	if err != nil {
-		return false
-	}
-	h.MembershipCache.Set(r.Context(), userID, workspaceID)
-	return true
+	return err == nil
 }
 
 // ---------------------------------------------------------------------------
@@ -331,15 +312,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			OwnerID:     ownerID,
 		})
 		if err != nil {
-			h.Analytics.Capture(analytics.RuntimeFailed(
-				uuidToString(ownerID),
-				req.WorkspaceID,
-				req.DaemonID,
-				provider,
-				"registration_failed",
-				"db_error",
-				true,
-			))
 			writeError(w, http.StatusInternalServerError, "failed to register runtime: "+err.Error())
 			return
 		}
@@ -364,25 +336,6 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// Inserted is false for normal daemon reconnects/upserts, so
 		// runtime_ready is a first-ready-per-runtime-row signal.
 		if row.Inserted {
-			h.Analytics.Capture(analytics.RuntimeRegistered(
-				uuidToString(ownerID),
-				req.WorkspaceID,
-				uuidToString(registered.ID),
-				req.DaemonID,
-				provider,
-				runtime.Version,
-				req.CLIVersion,
-			))
-			if registered.Status == "online" {
-				h.Analytics.Capture(analytics.RuntimeReady(
-					uuidToString(ownerID),
-					req.WorkspaceID,
-					uuidToString(registered.ID),
-					req.DaemonID,
-					provider,
-					0,
-				))
-			}
 		}
 
 		// Seamless migration from the previous hostname-derived identity. The
@@ -548,13 +501,6 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
-		h.Analytics.Capture(analytics.RuntimeOffline(
-			uuidToString(rt.OwnerID),
-			wsID,
-			uuidToString(rt.ID),
-			rt.DaemonID.String,
-			rt.Provider,
-		))
 
 		affectedWorkspaces[wsID] = true
 	}
@@ -1705,37 +1651,13 @@ func (h *Handler) emitIssueExecutedOnFirstCompletion(r *http.Request, task *db.A
 	if task == nil {
 		return
 	}
-	marked, err := h.Queries.MarkIssueFirstExecuted(r.Context(), task.IssueID)
+	_, err := h.Queries.MarkIssueFirstExecuted(r.Context(), task.IssueID)
 	if err != nil {
 		if !isNotFound(err) {
 			slog.Warn("analytics: mark issue first-executed failed", "issue_id", uuidToString(task.IssueID), "error", err)
 		}
 		return
 	}
-	var durationMS int64
-	if task.StartedAt.Valid && task.CompletedAt.Valid {
-		durationMS = task.CompletedAt.Time.Sub(task.StartedAt.Time).Milliseconds()
-	}
-	taskContext := h.TaskService.AnalyticsContextForTask(r.Context(), *task)
-	// distinct_id prefers the human creator so agent-driven events flow into
-	// the issue-author's person profile (same place signup and
-	// workspace_created land). Agent-created issues keep the agent id with a
-	// prefix so PostHog doesn't merge them into a user by accident.
-	distinct := uuidToString(marked.CreatorID)
-	if marked.CreatorType == "agent" {
-		distinct = "agent:" + distinct
-	}
-	h.Analytics.Capture(analytics.IssueExecuted(
-		distinct,
-		uuidToString(marked.WorkspaceID),
-		uuidToString(marked.ID),
-		uuidToString(task.ID),
-		uuidToString(task.AgentID),
-		taskContext.Source,
-		taskContext.RuntimeMode,
-		taskContext.Provider,
-		durationMS,
-	))
 }
 
 // ReportTaskUsage stores per-task token usage. Called independently of
