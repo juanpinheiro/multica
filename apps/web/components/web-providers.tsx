@@ -6,10 +6,6 @@ import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import { NavigationProvider } from "@multica/views/navigation";
 import packageJson from "../package.json";
-import {
-  setLoggedInCookie,
-  clearLoggedInCookie,
-} from "@/features/auth/auth-cookie";
 
 // Derive WebSocket URL from the page origin so self-hosted / LAN deployments
 // work without explicit NEXT_PUBLIC_WS_URL.  The Next.js rewrite rule
@@ -48,8 +44,6 @@ export function WebProviders({
       apiBaseUrl={process.env.NEXT_PUBLIC_API_URL}
       wsUrl={deriveWsUrl()}
       cookieAuth={true}
-      onLogin={setLoggedInCookie}
-      onLogout={clearLoggedInCookie}
       identity={identity}
       locale={locale}
       resources={resources}

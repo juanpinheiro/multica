@@ -11,15 +11,7 @@ import type { User } from "../types";
 
 const logger = createLogger("auth");
 
-export function AuthInitializer({
-  children,
-  onLogin,
-  onLogout,
-}: {
-  children: ReactNode;
-  onLogin?: () => void;
-  onLogout?: () => void;
-}) {
+export function AuthInitializer({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -40,12 +32,10 @@ export function AuthInitializer({
       });
 
     const onAuthSuccess = (user: User) => {
-      onLogin?.();
       useAuthStore.setState({ user, isLoading: false });
     };
 
     const onAuthFailure = () => {
-      onLogout?.();
       useAuthStore.setState({ user: null, isLoading: false });
     };
 
