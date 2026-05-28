@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type { TFunction } from "i18next";
 import { createI18n } from "@multica/core/i18n/react";
 import enAutopilots from "../../locales/en/autopilots.json";
-import zhAutopilots from "../../locales/zh-Hans/autopilots.json";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 
 // Contract test for the autopilot-dialog partial-success toast formatting.
@@ -45,28 +44,6 @@ describe("autopilot dialog partial-success toast", () => {
       expect(formatSchedulePartialFailureToast(t, "update", null)).toBe(
         "Autopilot updated, but schedule failed to save",
       );
-    });
-  });
-
-  describe("zh-Hans", () => {
-    const i18n = createI18n("zh-Hans", {
-      "zh-Hans": { autopilots: zhAutopilots },
-      en: { autopilots: enAutopilots },
-    });
-    const t = i18n.getFixedT("zh-Hans", "autopilots") as TFunction<"autopilots">;
-
-    it("renders create partial-success with the server reason verbatim", () => {
-      const rendered = formatSchedulePartialFailureToast(t, "create", reason);
-      expect(rendered).toContain(reason);
-      expect(rendered).not.toContain("{{");
-      expect(rendered).not.toContain("{reason}");
-    });
-
-    it("renders update partial-success with the server reason verbatim", () => {
-      const rendered = formatSchedulePartialFailureToast(t, "update", reason);
-      expect(rendered).toContain(reason);
-      expect(rendered).not.toContain("{{");
-      expect(rendered).not.toContain("{reason}");
     });
   });
 });

@@ -4,7 +4,6 @@ import "i18next";
 // typecheck program to see ui's contribution to `I18nResources`.
 import "@multica/ui/i18n-types";
 import type common from "../locales/en/common.json";
-import type auth from "../locales/en/auth.json";
 import type settings from "../locales/en/settings.json";
 import type issues from "../locales/en/issues.json";
 import type agents from "../locales/en/agents.json";
@@ -26,13 +25,12 @@ import type usage from "../locales/en/usage.json";
 import type squads from "../locales/en/squads.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
-// `t($ => $.signin.title)` resolves to the value in en/auth.json.
+// `t($ => $.common.field)` resolves to the value in en/common.json.
 // Apps don't need to redeclare this — the augmentation is global, pulled
 // into the compilation graph by `use-t.ts`'s side-effect import.
 //
-// Adding a namespace: drop a JSON file under en/ and zh-Hans/, then add
-// the matching `import type` + entry below. Type inference on `t($ => $)`
-// follows automatically.
+// Adding a namespace: drop a JSON file under en/, then add the matching
+// `import type` + entry below. Type inference on `t($ => $)` follows automatically.
 //
 // The resource shape lives on a global `I18nResources` interface (not a
 // type literal inside CustomTypeOptions) so other packages can contribute
@@ -42,7 +40,6 @@ import type squads from "../locales/en/squads.json";
 declare global {
   interface I18nResources {
     common: typeof common;
-    auth: typeof auth;
     settings: typeof settings;
     issues: typeof issues;
     agents: typeof agents;

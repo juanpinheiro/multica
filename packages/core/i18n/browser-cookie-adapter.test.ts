@@ -26,13 +26,13 @@ describe("createBrowserCookieLocaleAdapter", () => {
 
   it("getUserChoice round-trips a persisted value", () => {
     const adapter = createBrowserCookieLocaleAdapter();
-    adapter.persist("zh-Hans");
-    expect(adapter.getUserChoice()).toBe("zh-Hans");
+    adapter.persist("en");
+    expect(adapter.getUserChoice()).toBe("en");
   });
 
   it("getUserChoice decodes URI-encoded cookie values", () => {
-    document.cookie = `${LOCALE_COOKIE}=${encodeURIComponent("zh-Hans")}; path=/`;
-    expect(createBrowserCookieLocaleAdapter().getUserChoice()).toBe("zh-Hans");
+    document.cookie = `${LOCALE_COOKIE}=${encodeURIComponent("en")}; path=/`;
+    expect(createBrowserCookieLocaleAdapter().getUserChoice()).toBe("en");
   });
 
   it("getUserChoice ignores unrelated cookies that share a prefix", () => {
@@ -48,11 +48,10 @@ describe("createBrowserCookieLocaleAdapter", () => {
 
   it("getSystemPreferences mirrors navigator.languages", () => {
     Object.defineProperty(navigator, "languages", {
-      value: ["zh-Hans-CN", "en-US"],
+      value: ["en-US"],
       configurable: true,
     });
     expect(createBrowserCookieLocaleAdapter().getSystemPreferences()).toEqual([
-      "zh-Hans-CN",
       "en-US",
     ]);
   });

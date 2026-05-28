@@ -15,10 +15,9 @@ import { RESOURCES } from "../locales";
 // `TEST_RESOURCES` slice meant every test author had to remember to
 // extend the slice when their component started using a new namespace.
 //
-// Use `renderWithI18n` like the standard `render`. Pass `locale: "zh-Hans"`
-// to verify Chinese strings; default is "en".
+// Use `renderWithI18n` like the standard `render`. Default locale is "en".
 type RenderArgs = Omit<RenderOptions, "wrapper"> & {
-  locale?: "en" | "zh-Hans";
+  locale?: "en";
 };
 
 export function renderWithI18n(
