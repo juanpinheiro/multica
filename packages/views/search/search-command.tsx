@@ -44,10 +44,10 @@ import type { WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { StatusIcon } from "../issues/components";
-import { ProjectIcon } from "../projects/components/project-icon";
+import { FeatureIcon } from "../features/components/feature-icon";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
-import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
-import type { ProjectStatus } from "@multica/core/types";
+import { FEATURE_STATUS_CONFIG } from "@multica/core/features/config";
+import type { FeatureStatus } from "@multica/core/types";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
@@ -114,7 +114,7 @@ type NavKey =
   | "inbox"
   | "myIssues"
   | "issues"
-  | "projects"
+  | "features"
   | "agents"
   | "runtimes"
   | "skills"
@@ -158,7 +158,7 @@ interface CommandItem {
 
 interface SearchResults {
   issues: SearchIssueResult[];
-  projects: SearchProjectResult[];
+  features: SearchProjectResult[];
 }
 
 export function SearchCommand() {
@@ -167,7 +167,7 @@ export function SearchCommand() {
     { key: "inbox", label: t(($) => $.pages.inbox), icon: Inbox, keywords: ["inbox", "notifications", "收件箱"] },
     { key: "myIssues", label: t(($) => $.pages.my_issues), icon: CircleUser, keywords: ["my", "issues", "assigned", "我的"] },
     { key: "issues", label: t(($) => $.pages.issues), icon: ListTodo, keywords: ["issues", "tasks", "bugs"] },
-    { key: "projects", label: t(($) => $.pages.projects), icon: FolderKanban, keywords: ["projects", "kanban", "项目"] },
+    { key: "features", label: t(($) => $.pages.features), icon: FolderKanban, keywords: ["features", "kanban", "项目"] },
     { key: "agents", label: t(($) => $.pages.agents), icon: Bot, keywords: ["agents", "bots", "ai"] },
     { key: "runtimes", label: t(($) => $.pages.runtimes), icon: Monitor, keywords: ["runtimes", "environments"] },
     { key: "skills", label: t(($) => $.pages.skills), icon: BookOpenText, keywords: ["skills", "library"] },
@@ -196,7 +196,7 @@ export function SearchCommand() {
   );
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<SearchResults>({ issues: [], projects: [] });
+  const [results, setResults] = useState<SearchResults>({ issues: [], features: [] });
   const [isLoading, setIsLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -245,11 +245,11 @@ export function SearchCommand() {
       },
       {
         key: "new-project",
-        label: t(($) => $.commands.new_project),
+        label: t(($) => $.commands.new_feature),
         icon: Plus,
-        keywords: ["new", "project", "create", "add"],
+        keywords: ["new", "feature", "create", "add"],
         onSelect: () => {
-          useModalStore.getState().open("create-project");
+          useModalStore.getState().open("create-feature");
           setOpen(false);
         },
       },
@@ -351,7 +351,7 @@ export function SearchCommand() {
 
   const hasResults =
     results.issues.length > 0 ||
-    results.projects.length > 0 ||
+    results.features.length > 0 ||
     filteredMembers.length > 0;
 
   // Global Cmd+K / Ctrl+K shortcut
@@ -392,7 +392,7 @@ export function SearchCommand() {
   useEffect(() => {
     if (!open) {
       setQuery("");
-      setResults({ issues: [], projects: [] });
+      setResults({ issues: [], features: [] });
       setIsLoading(false);
     }
   }, [open]);
@@ -402,7 +402,7 @@ export function SearchCommand() {
     if (abortRef.current) abortRef.current.abort();
 
     if (!q.trim()) {
-      setResults({ issues: [], projects: [] });
+      setResults({ issues: [], features: [] });
       setIsLoading(false);
       return;
     }
@@ -429,7 +429,7 @@ export function SearchCommand() {
         if (!controller.signal.aborted) {
           setResults({
             issues: issueRes.issues,
-            projects: projectRes.projects,
+            features: projectRes.features,
           });
           setIsLoading(false);
         }
@@ -452,9 +452,9 @@ export function SearchCommand() {
   const handleSelect = useCallback(
     (value: string) => {
       setOpen(false);
-      if (value.startsWith("project:")) {
-        // value is "project:<id>" — slice off the 8-char prefix to extract the id.
-        push(p.projectDetail(value.slice(8)));
+      if (value.startsWith("feature:")) {
+        // value is "feature:<id>" — slice off the 8-char prefix to extract the id.
+        push(p.featureDetail(value.slice(8)));
       } else {
         push(p.issueDetail(value));
       }
@@ -532,7 +532,7 @@ export function SearchCommand() {
               </CommandPrimitive.Group>
             )}
 
-            {/* Commands section — New Issue / New Project / Copy link / Theme, only shown when query matches */}
+            {/* Commands section — New Issue / New Feature / Copy link / Theme, only shown when query matches */}
             {filteredCommands.length > 0 && (
               <CommandPrimitive.Group className="p-2">
                 <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
@@ -602,35 +602,35 @@ export function SearchCommand() {
                 </CommandPrimitive.Empty>
               )}
 
-            {!isLoading && results.projects.length > 0 && (
+            {!isLoading && results.features.length > 0 && (
               <CommandPrimitive.Group
-                heading={t(($) => $.groups.projects)}
+                heading={t(($) => $.groups.features)}
                 className="p-2 [&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
               >
-                {results.projects.map((project) => (
+                {results.features.map((feature) => (
                   <CommandPrimitive.Item
-                    key={`project:${project.id}`}
-                    value={`project:${project.id}`}
+                    key={`feature:${feature.id}`}
+                    value={`feature:${feature.id}`}
                     onSelect={handleSelect}
                     className="flex cursor-default select-none flex-col gap-1 rounded-lg px-3 py-2.5 text-sm outline-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-selected:bg-accent"
                   >
                     <div className="flex items-center gap-2.5">
-                      <ProjectIcon project={project} size="md" />
+                      <FeatureIcon feature={feature} size="md" />
                       <span className="truncate">
-                        <HighlightText text={project.title} query={query} />
+                        <HighlightText text={feature.title} query={query} />
                       </span>
                       <span
-                        className={`ml-auto text-xs shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
+                        className={`ml-auto text-xs shrink-0 ${FEATURE_STATUS_CONFIG[feature.status as FeatureStatus]?.color ?? "text-muted-foreground"}`}
                       >
-                        {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
+                        {FEATURE_STATUS_CONFIG[feature.status as FeatureStatus]?.label ?? feature.status}
                       </span>
                     </div>
-                    {project.match_source === "description" &&
-                      project.matched_snippet && (
+                    {feature.match_source === "description" &&
+                      feature.matched_snippet && (
                         <div className="flex items-start gap-2 pl-[26px]">
                           <span className="text-xs text-muted-foreground truncate">
                             <HighlightText
-                              text={project.matched_snippet}
+                              text={feature.matched_snippet}
                               query={query}
                             />
                           </span>

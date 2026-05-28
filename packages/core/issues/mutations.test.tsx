@@ -43,7 +43,7 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: null,
-    project_id: null,
+    feature_id: null,
     position: idx,
     start_date: null,
     due_date: null,

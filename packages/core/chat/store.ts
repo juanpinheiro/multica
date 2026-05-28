@@ -74,7 +74,7 @@ export interface ChatTimelineItem {
  * consumers (buildAnchorMarkdown, chip props) share the same shape.
  */
 export interface ContextAnchor {
-  type: "issue" | "project";
+  type: "issue" | "feature";
   /** UUID for `issue`, UUID for `project`. */
   id: string;
   /** Human-readable label: issue identifier (MUL-1) or project title. */

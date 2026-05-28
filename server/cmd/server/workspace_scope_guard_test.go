@@ -55,14 +55,14 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 		assertRowExists(t, ctx, "comment", id)
 	})
 
-	t.Run("DeleteProject", func(t *testing.T) {
-		id := seedProject(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, util.UUIDToString(id)) })
+	t.Run("DeleteFeature", func(t *testing.T) {
+		id := seedFeature(t, ctx)
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, util.UUIDToString(id)) })
 
-		if err := queries.DeleteProject(ctx, db.DeleteProjectParams{ID: id, WorkspaceID: wsB}); err != nil {
-			t.Fatalf("cross-workspace DeleteProject: expected nil error (no-op), got %v", err)
+		if err := queries.DeleteFeature(ctx, db.DeleteFeatureParams{ID: id, WorkspaceID: wsB}); err != nil {
+			t.Fatalf("cross-workspace DeleteFeature: expected nil error (no-op), got %v", err)
 		}
-		assertRowExists(t, ctx, "project", id)
+		assertRowExists(t, ctx, "feature", id)
 	})
 
 	t.Run("DeleteSkill", func(t *testing.T) {
@@ -159,15 +159,15 @@ func seedComment(t *testing.T, ctx context.Context, issueID pgtype.UUID) pgtype.
 	return parseUUID(s)
 }
 
-func seedProject(t *testing.T, ctx context.Context) pgtype.UUID {
+func seedFeature(t *testing.T, ctx context.Context) pgtype.UUID {
 	t.Helper()
 	var s string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, status, priority)
-		VALUES ($1, 'scope-guard test project', 'planned', 'none')
+		INSERT INTO feature (workspace_id, title, status, priority)
+		VALUES ($1, 'scope-guard test feature', 'planned', 'none')
 		RETURNING id
 	`, testWorkspaceID).Scan(&s); err != nil {
-		t.Fatalf("seed project: %v", err)
+		t.Fatalf("seed feature: %v", err)
 	}
 	return parseUUID(s)
 }

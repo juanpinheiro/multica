@@ -347,20 +347,20 @@ func resolveAutopilotTriggerID(ctx context.Context, client *cli.APIClient, autop
 	return resolveIDByPrefix(ctx, client, "autopilot trigger", input, fetch)
 }
 
-func resolveProjectID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
-	return resolveIDByPrefix(ctx, client, "project", input, fetchProjectCandidates)
+func resolveFeatureID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
+	return resolveIDByPrefix(ctx, client, "feature", input, fetchFeatureCandidates)
 }
 
-func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
+func fetchFeatureCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 	if client.WorkspaceID == "" {
-		return nil, fmt.Errorf("workspace_id is required to resolve project id prefixes")
+		return nil, fmt.Errorf("workspace_id is required to resolve feature id prefixes")
 	}
 	params := url.Values{"workspace_id": {client.WorkspaceID}}
 	var result map[string]any
-	if err := client.GetJSON(ctx, "/api/projects?"+params.Encode(), &result); err != nil {
+	if err := client.GetJSON(ctx, "/api/features?"+params.Encode(), &result); err != nil {
 		return nil, err
 	}
-	projectsRaw, _ := result["projects"].([]any)
+	projectsRaw, _ := result["features"].([]any)
 	candidates := make([]idCandidate, 0, len(projectsRaw))
 	for _, raw := range projectsRaw {
 		p, ok := raw.(map[string]any)
@@ -376,10 +376,10 @@ func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCan
 	return candidates, nil
 }
 
-func resolveProjectResourceID(ctx context.Context, client *cli.APIClient, projectID, input string) (resolvedID, error) {
+func resolveFeatureResourceID(ctx context.Context, client *cli.APIClient, projectID, input string) (resolvedID, error) {
 	fetch := func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 		var result map[string]any
-		if err := client.GetJSON(ctx, "/api/projects/"+url.PathEscape(projectID)+"/resources", &result); err != nil {
+		if err := client.GetJSON(ctx, "/api/features/"+url.PathEscape(projectID)+"/resources", &result); err != nil {
 			return nil, err
 		}
 		resourcesRaw, _ := result["resources"].([]any)
@@ -401,7 +401,7 @@ func resolveProjectResourceID(ctx context.Context, client *cli.APIClient, projec
 		}
 		return candidates, nil
 	}
-	return resolveIDByPrefix(ctx, client, "project resource", input, fetch)
+	return resolveIDByPrefix(ctx, client, "feature resource", input, fetch)
 }
 
 func resolveLabelID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {

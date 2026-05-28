@@ -7,8 +7,8 @@ export interface IssueFilters {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
-  projectFilters: string[];
-  includeNoProject: boolean;
+  featureFilters: string[];
+  includeNoFeature: boolean;
   labelFilters: string[];
   // When `agentRunningFilter` is true, only keep issues whose id is in
   // `runningIssueIds`. The set is derived by the caller from
@@ -28,9 +28,9 @@ export interface IssueFilters {
  * - When both → show matching assignees + unassigned
  */
 export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
-  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, agentRunningFilter, runningIssueIds } = filters;
+  const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, featureFilters, includeNoFeature, labelFilters, agentRunningFilter, runningIssueIds } = filters;
   const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
-  const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
+  const hasProjectFilter = featureFilters.length > 0 || includeNoFeature;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
   // filter is on but the set is missing/empty, hide everything — the
   // user opted into "only running" and there is nothing running.
@@ -71,10 +71,10 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
     }
 
     if (hasProjectFilter) {
-      if (!issue.project_id) {
-        if (!includeNoProject) return false;
-      } else if (projectFilters.length > 0) {
-        if (!projectFilters.includes(issue.project_id)) return false;
+      if (!issue.feature_id) {
+        if (!includeNoFeature) return false;
+      } else if (featureFilters.length > 0) {
+        if (!featureFilters.includes(issue.feature_id)) return false;
       } else {
         // Only "No project" is checked → hide issues that have a project
         return false;

@@ -237,7 +237,7 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("assignee", "", "")
 	cmd.Flags().String("assignee-id", "", "")
 	cmd.Flags().String("parent", "", "")
-	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("feature", "", "")
 	cmd.Flags().String("due-date", "", "")
 	cmd.Flags().Bool("allow-duplicate", false, "")
 	cmd.Flags().String("output", "json", "")
@@ -1305,12 +1305,12 @@ func TestPickAssigneeFromFlags(t *testing.T) {
 }
 
 // TestPickAssigneeFromFlagsMemberOrAgentKinds is the call-site regression
-// for the MUL-2165 follow-up. Subscriber add/remove and project lead pass
+// for the MUL-2165 follow-up. Subscriber add/remove and feature lead pass
 // memberOrAgentKinds because their target schema rejects squads
 // (subscriber: server/internal/handler/handler.go:414;
-// project: server/migrations/034_projects.up.sql:10). Without this gating,
+// feature: server/migrations/001_init.up.sql feature_lead_type_check). Without this gating,
 // `multica issue subscriber add --user "<SquadName>"` or
-// `multica project create --lead "<SquadName>"` would resolve to
+// `multica feature create --lead "<SquadName>"` would resolve to
 // (squad, ...) and surface as a 500/403 server-side instead of a clean
 // CLI-side resolution error.
 func TestPickAssigneeFromFlagsMemberOrAgentKinds(t *testing.T) {

@@ -52,7 +52,7 @@ var (
 //
 // allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
 // every refresh from the server. taskRepoURLs covers repos that the server
-// surfaced through a per-task claim (project github_repo resources today,
+// surfaced through a per-task claim (feature github_repo resources today,
 // possibly other typed sources later) — those don't show up in
 // GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
 type workspaceState struct {
@@ -807,14 +807,14 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	return *s.CoAuthoredByEnabled
 }
 
-// registerTaskRepos merges task-scoped repos (e.g. project github_repo
+// registerTaskRepos merges task-scoped repos (e.g. feature github_repo
 // resources lifted into resp.Repos by the claim handler) into the workspace's
 // allowlist and kicks off a cache sync for any URLs that aren't yet cached.
 //
 // It's safe to call with the workspace's own repos — duplicates are
 // idempotent. Called from runTask before the agent spawns so
-// `multica repo checkout` accepts project-only URLs without an extra round
-// trip back to GetWorkspaceRepos (which doesn't carry project resources).
+// `multica repo checkout` accepts feature-only URLs without an extra round
+// trip back to GetWorkspaceRepos (which doesn't carry feature resources).
 func (d *Daemon) registerTaskRepos(workspaceID string, repos []RepoData) {
 	if len(repos) == 0 {
 		return
@@ -1758,7 +1758,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		"runtime_id", task.RuntimeID,
 		"agent_id", task.AgentID,
 		"repos", len(task.Repos),
-		"project_id", task.ProjectID,
+		"feature_id", task.FeatureID,
 		"autopilot_run_id", task.AutopilotRunID,
 		"trigger_comment_id", task.TriggerCommentID,
 		"resume_session", task.PriorSessionID != "",
@@ -1944,9 +1944,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// task.Repos is the authoritative repo list for this task — when the
 	// claimed task belongs to a project with github_repo resources the server
-	// has already narrowed it to project repos only. Make sure those URLs are
+	// has already narrowed it to feature repos only. Make sure those URLs are
 	// in the per-workspace allowlist and the local cache, otherwise
-	// `multica repo checkout` would reject project-only URLs that aren't also
+	// `multica repo checkout` would reject feature-only URLs that aren't also
 	// bound at the workspace level.
 	d.registerTaskRepos(task.WorkspaceID, task.Repos)
 
@@ -1977,9 +1977,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
 		Repos:                            convertReposForEnv(task.Repos),
-		ProjectID:                        task.ProjectID,
-		ProjectTitle:                     task.ProjectTitle,
-		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		FeatureID:                        task.FeatureID,
+		FeatureTitle:                     task.FeatureTitle,
+		FeatureResources:                 convertFeatureResourcesForEnv(task.FeatureResources),
 		ChatSessionID:                    task.ChatSessionID,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
@@ -1992,6 +1992,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		WorkspaceContext:                 task.WorkspaceContext,
+		TargetBranch:                     task.TargetBranch,
+		IsSharedBranch:                   task.IsSharedBranch,
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -2243,7 +2245,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	//   - kiro and kimi are wrapped through their own CLIs whose cwd handling
 	//     is opaque enough that we can't trust the file-based path either.
 	// Pass the full runtime brief inline (CLI catalog + workflow steps + agent
-	// identity/persona + skills + project context) so the backend prepends the
+	// identity/persona + skills + feature context) so the backend prepends the
 	// same payload that file-based runtimes pick up from disk. Without this,
 	// these providers silently miss the workflow section and never call
 	// `multica issue status` / `multica issue comment add`, leaving issues
@@ -2838,13 +2840,13 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	return result
 }
 
-func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {
+func convertFeatureResourcesForEnv(resources []FeatureResourceData) []execenv.FeatureResourceForEnv {
 	if len(resources) == 0 {
 		return nil
 	}
-	result := make([]execenv.ProjectResourceForEnv, len(resources))
+	result := make([]execenv.FeatureResourceForEnv, len(resources))
 	for i, r := range resources {
-		result[i] = execenv.ProjectResourceForEnv{
+		result[i] = execenv.FeatureResourceForEnv{
 			ID:           r.ID,
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,

@@ -5,7 +5,8 @@ import type {
   GroupedIssuesResponse,
   ListIssuesResponse,
   SearchIssuesResponse,
-  SearchProjectsResponse,
+  SearchFeaturesResponse,
+  FeatureIssuesResponse,
   UpdateMeRequest,
   ListIssuesParams,
   ListGroupedIssuesParams,
@@ -59,13 +60,13 @@ import type {
   ChatPendingTask,
   PendingChatTasksResponse,
   SendChatMessageResponse,
-  Project,
-  CreateProjectRequest,
-  UpdateProjectRequest,
-  ListProjectsResponse,
-  ProjectResource,
-  CreateProjectResourceRequest,
-  ListProjectResourcesResponse,
+  Feature,
+  CreateFeatureRequest,
+  UpdateFeatureRequest,
+  ListFeaturesResponse,
+  FeatureResource,
+  CreateFeatureResourceRequest,
+  ListFeatureResourcesResponse,
   Label,
   CreateLabelRequest,
   UpdateLabelRequest,
@@ -352,7 +353,7 @@ export class ApiClient {
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
-    if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.feature_id) search.set("feature_id", params.feature_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
@@ -379,7 +380,7 @@ export class ApiClient {
     if (params.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
-    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.feature_id) search.set("feature_id", params.feature_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
@@ -391,8 +392,8 @@ export class ApiClient {
     if (params.creator_filters?.length) {
       search.set("creator_filters", params.creator_filters.map((f) => `${f.type}:${f.id}`).join(","));
     }
-    if (params.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
-    if (params.include_no_project) search.set("include_no_project", "true");
+    if (params.feature_ids?.length) search.set("feature_ids", params.feature_ids.join(","));
+    if (params.include_no_feature) search.set("include_no_feature", "true");
     if (params.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params.group_assignee_type) search.set("group_assignee_type", params.group_assignee_type);
     if (params.group_assignee_id) search.set("group_assignee_id", params.group_assignee_id);
@@ -412,12 +413,12 @@ export class ApiClient {
     return this.fetch(`/api/issues/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
-  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
+  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchFeaturesResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
-    return this.fetch(`/api/projects/search?${search}`, params.signal ? { signal: params.signal } : undefined);
+    return this.fetch(`/api/features/search?${search}`, params.signal ? { signal: params.signal } : undefined);
   }
 
   async getIssue(id: string): Promise<Issue> {
@@ -435,7 +436,7 @@ export class ApiClient {
     agent_id?: string;
     squad_id?: string;
     prompt: string;
-    project_id?: string | null;
+    feature_id?: string | null;
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
@@ -813,17 +814,17 @@ export class ApiClient {
 
   // ---------------------------------------------------------------------------
   // Workspace dashboard — three independent rollups for `/{slug}/dashboard`.
-  // Each accepts an optional `project_id` to narrow the scope to one project.
+  // Each accepts an optional `feature_id` to narrow the scope to one feature.
   // Cost is computed client-side from the model pricing table (same contract
   // as the per-runtime endpoints above).
   // ---------------------------------------------------------------------------
 
   async getDashboardUsageDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; feature_id?: string | null; tz?: string },
   ): Promise<DashboardUsageDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.feature_id) search.set("feature_id", params.feature_id);
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/daily?${search}`);
     return parseWithFallback<DashboardUsageDaily[]>(
@@ -835,11 +836,11 @@ export class ApiClient {
   }
 
   async getDashboardUsageByAgent(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; feature_id?: string | null; tz?: string },
   ): Promise<DashboardUsageByAgent[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.feature_id) search.set("feature_id", params.feature_id);
     if (params.tz) search.set("tz", params.tz);
     const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-agent?${search}`);
     return parseWithFallback<DashboardUsageByAgent[]>(
@@ -851,11 +852,11 @@ export class ApiClient {
   }
 
   async getDashboardAgentRunTime(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; feature_id?: string | null; tz?: string },
   ): Promise<DashboardAgentRunTime[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.feature_id) search.set("feature_id", params.feature_id);
     // `tz` aligns the "last N days" cutoff with the viewer's calendar,
     // matching the per-agent token card.
     if (params.tz) search.set("tz", params.tz);
@@ -869,11 +870,11 @@ export class ApiClient {
   }
 
   async getDashboardRunTimeDaily(
-    params: { days?: number; project_id?: string | null; tz?: string },
+    params: { days?: number; feature_id?: string | null; tz?: string },
   ): Promise<DashboardRunTimeDaily[]> {
     const search = new URLSearchParams();
     if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
+    if (params.feature_id) search.set("feature_id", params.feature_id);
     // `tz` cuts the day buckets in the viewer's calendar so Time / Tasks
     // align with the Cost / Tokens charts.
     if (params.tz) search.set("tz", params.tz);
@@ -1284,57 +1285,61 @@ export class ApiClient {
     };
   }
 
-  // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  // Features
+  async listFeatures(params?: { status?: string }): Promise<ListFeaturesResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/projects?${search}`);
+    return this.fetch(`/api/features?${search}`);
   }
 
-  async getProject(id: string): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`);
+  async getFeature(id: string): Promise<Feature> {
+    return this.fetch(`/api/features/${id}`);
   }
 
-  async createProject(data: CreateProjectRequest): Promise<Project> {
-    return this.fetch("/api/projects", {
+  async getFeatureIssues(id: string): Promise<FeatureIssuesResponse> {
+    return this.fetch(`/api/features/${id}/issues`);
+  }
+
+  async createFeature(data: CreateFeatureRequest): Promise<Feature> {
+    return this.fetch("/api/features", {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  async updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`, {
+  async updateFeature(id: string, data: UpdateFeatureRequest): Promise<Feature> {
+    return this.fetch(`/api/features/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
   }
 
-  async deleteProject(id: string): Promise<void> {
-    await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  async deleteFeature(id: string): Promise<void> {
+    await this.fetch(`/api/features/${id}`, { method: "DELETE" });
   }
 
-  // Project resources
-  async listProjectResources(
-    projectId: string,
-  ): Promise<ListProjectResourcesResponse> {
-    return this.fetch(`/api/projects/${projectId}/resources`);
+  // Feature resources
+  async listFeatureResources(
+    featureId: string,
+  ): Promise<ListFeatureResourcesResponse> {
+    return this.fetch(`/api/features/${featureId}/resources`);
   }
 
-  async createProjectResource(
-    projectId: string,
-    data: CreateProjectResourceRequest,
-  ): Promise<ProjectResource> {
-    return this.fetch(`/api/projects/${projectId}/resources`, {
+  async createFeatureResource(
+    featureId: string,
+    data: CreateFeatureResourceRequest,
+  ): Promise<FeatureResource> {
+    return this.fetch(`/api/features/${featureId}/resources`, {
       method: "POST",
       body: JSON.stringify(data),
     });
   }
 
-  async deleteProjectResource(
-    projectId: string,
+  async deleteFeatureResource(
+    featureId: string,
     resourceId: string,
   ): Promise<void> {
-    await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+    await this.fetch(`/api/features/${featureId}/resources/${resourceId}`, {
       method: "DELETE",
     });
   }

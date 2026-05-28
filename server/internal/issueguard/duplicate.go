@@ -62,7 +62,7 @@ func LockAndFindActiveDuplicate(
 
 	duplicate, err := q.FindActiveDuplicateIssue(ctx, db.FindActiveDuplicateIssueParams{
 		WorkspaceID:     workspaceID,
-		ProjectID:       projectID,
+		FeatureID:       projectID,
 		ParentIssueID:   parentIssueID,
 		NormalizedTitle: normalizedTitle,
 	})

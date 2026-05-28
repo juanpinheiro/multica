@@ -118,21 +118,21 @@ func TestBuildQuickCreatePromptSquadDefaultsToSquad(t *testing.T) {
 	}
 }
 
-// TestBuildQuickCreatePromptProjectPinning verifies that when the user
-// pins a project in the quick-create modal, the prompt instructs the agent
-// to pass `--project <uuid>` exactly. Without this, the agent would re-read
+// TestBuildQuickCreatePromptFeaturePinning verifies that when the user
+// pins a feature in the quick-create modal, the prompt instructs the agent
+// to pass `--feature <uuid>` exactly. Without this, the agent would re-read
 // the workspace default and silently drop the user's selection — the same
-// "I have to retype 'in project X' every time" failure mode the modal
+// "I have to retype 'in feature X' every time" failure mode the modal
 // addition was meant to fix.
-func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
+func TestBuildQuickCreatePromptFeaturePinning(t *testing.T) {
 	const projectID = "11111111-2222-3333-4444-555555555555"
 	out := buildQuickCreatePrompt(Task{
 		QuickCreatePrompt: "fix the login button color",
-		ProjectID:         projectID,
-		ProjectTitle:      "Web App",
+		FeatureID:         projectID,
+		FeatureTitle:      "Web App",
 	})
 	mustContain := []string{
-		"--project \"" + projectID + "\"",
+		"--feature \"" + projectID + "\"",
 		"Web App",
 		"modal selection is authoritative",
 	}
@@ -142,15 +142,15 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 		}
 	}
 
-	// Without a project, the prompt must keep the legacy "omit" instruction
-	// so the agent doesn't accidentally start passing --project on plain
+	// Without a feature, the prompt must keep the legacy "omit" instruction
+	// so the agent doesn't accidentally start passing --feature on plain
 	// quick-create runs.
 	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
-	if !strings.Contains(plain, "**project**: omit") {
+	if !strings.Contains(plain, "**feature**: omit") {
 		t.Errorf("buildQuickCreatePrompt without project must keep the omit instruction, got:\n%s", plain)
 	}
-	if strings.Contains(plain, "--project") {
-		t.Errorf("buildQuickCreatePrompt without project must NOT mention --project, got:\n%s", plain)
+	if strings.Contains(plain, "--feature") {
+		t.Errorf("buildQuickCreatePrompt without project must NOT mention --feature, got:\n%s", plain)
 	}
 }
 

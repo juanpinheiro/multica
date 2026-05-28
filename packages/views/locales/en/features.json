@@ -1,0 +1,103 @@
+{
+  "page": {
+    "title": "Features",
+    "new_feature": "New feature",
+    "empty": "No features yet",
+    "create_first": "Create your first feature",
+    "view_compact": "Compact",
+    "view_comfortable": "Comfortable",
+    "search_placeholder": "Search features...",
+    "no_search_results": "No results match your search"
+  },
+  "table": {
+    "name": "Name",
+    "priority": "Priority",
+    "status": "Status",
+    "progress": "Progress",
+    "lead": "Lead",
+    "created": "Created"
+  },
+  "status": {
+    "planned": "Planned",
+    "in_progress": "In Progress",
+    "paused": "Paused",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "priority": {
+    "urgent": "Urgent",
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low",
+    "none": "No priority"
+  },
+  "lead": {
+    "no_lead": "No lead",
+    "assign_placeholder": "Assign lead...",
+    "members_group": "Members",
+    "agents_group": "Agents",
+    "no_results": "No results"
+  },
+  "relative_date": {
+    "today": "Today",
+    "one_day_ago": "1d ago",
+    "days_ago": "{{count}}d ago",
+    "months_ago": "{{count}}mo ago"
+  },
+  "detail": {
+    "not_found": "Feature not found",
+    "breadcrumb_fallback": "Features",
+    "title_placeholder": "Feature title",
+    "icon_tooltip": "Change icon",
+    "pin_tooltip": "Pin to sidebar",
+    "unpin_tooltip": "Unpin from sidebar",
+    "sidebar_tooltip": "Toggle sidebar",
+    "copy_link": "Copy link",
+    "delete_action": "Delete feature",
+    "section_properties": "Properties",
+    "section_progress": "Progress",
+    "section_description": "Description",
+    "description_placeholder": "Add description...",
+    "empty_issues_title": "No issues linked",
+    "empty_issues_hint": "Issues will appear here once created via MCP.",
+    "no_issues_yet": "No issues yet",
+    "toast_link_copied": "Link copied",
+    "toast_feature_deleted": "Feature deleted",
+    "toast_move_issue_failed": "Failed to move issue",
+    "approve_button": "Approve & start",
+    "section_ready_now": "Ready now",
+    "section_blocked": "Blocked",
+    "section_issues": "Issues",
+    "branch_label": "Branch"
+  },
+  "resources": {
+    "section_header": "Resources",
+    "empty": "No resources attached.",
+    "add_button": "Add resource",
+    "popover_title": "Attach a GitHub repo",
+    "repos_search_placeholder": "Search repositories...",
+    "repos_search_empty": "No repositories match your search.",
+    "attached_badge": "attached",
+    "remove_tooltip": "Remove",
+    "url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
+    "url_submit": "Add",
+    "toast_attached": "Repository attached",
+    "toast_attach_failed": "Failed to attach",
+    "toast_removed": "Resource removed",
+    "toast_remove_failed": "Failed to remove resource"
+  },
+  "delete_dialog": {
+    "title": "Delete feature",
+    "description": "This will delete the feature. Issues will not be deleted but will be unlinked.",
+    "confirm": "Delete",
+    "cancel": "Cancel"
+  },
+  "picker": {
+    "no_feature": "No feature",
+    "remove": "Remove from feature",
+    "empty": "No features yet"
+  },
+  "chip": {
+    "fallback_label": "Feature"
+  }
+}

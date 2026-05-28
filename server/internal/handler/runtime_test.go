@@ -236,7 +236,7 @@ func TestListRuntimeUsageBucketsByViewerTimezone(t *testing.T) {
 	}
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO task_usage_hourly (
-			bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+			bucket_hour, workspace_id, runtime_id, agent_id, feature_id,
 			provider, model,
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
 		)

@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/feature"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -1093,10 +1094,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Include workspace ID and repos so the daemon can set up worktrees.
 	//
-	// Repo precedence: project-bound github_repo resources override workspace
+	// Repo precedence: feature-bound github_repo resources override workspace
 	// repos when present. Mixing both would just confuse the agent — if a
-	// project explicitly attached its repos, those are the authoritative set
-	// for issues inside that project. When the project has no github_repo
+	// feature explicitly attached its repos, those are the authoritative set
+	// for issues inside that feature. When the feature has no github_repo
 	// resources (or no project at all), we fall back to the workspace repos.
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
@@ -1129,13 +1130,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 
 			var projectRepos []RepoData
-			if issue.ProjectID.Valid {
-				resp.ProjectID = uuidToString(issue.ProjectID)
-				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
-					resp.ProjectTitle = proj.Title
+			var featureForBranch *feature.FeatureForBranch
+			if issue.FeatureID.Valid {
+				resp.FeatureID = uuidToString(issue.FeatureID)
+				if proj, err := h.Queries.GetFeature(r.Context(), issue.FeatureID); err == nil {
+					resp.FeatureTitle = proj.Title
+					featureForBranch = &feature.FeatureForBranch{}
+					if proj.TargetBranch.Valid {
+						tb := proj.TargetBranch.String
+						featureForBranch.TargetBranch = &tb
+					}
 				}
-				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
-					out := make([]ProjectResourceData, 0, len(rows))
+				if rows := h.listFeatureResourcesForFeature(r.Context(), issue.FeatureID); len(rows) > 0 {
+					out := make([]FeatureResourceData, 0, len(rows))
 					for _, row := range rows {
 						label := ""
 						if row.Label.Valid {
@@ -1145,7 +1152,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						if len(ref) == 0 {
 							ref = json.RawMessage("{}")
 						}
-						out = append(out, ProjectResourceData{
+						out = append(out, FeatureResourceData{
 							ID:           uuidToString(row.ID),
 							ResourceType: row.ResourceType,
 							ResourceRef:  ref,
@@ -1163,7 +1170,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
-					resp.ProjectResources = out
+					resp.FeatureResources = out
 				}
 			}
 
@@ -1175,6 +1182,19 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.Repos = repos
 				}
 			}
+
+			// Resolve the git branch this task should target. feature.Resolve
+			// mirrors the COALESCE chain in ClaimAgentTask's branch gate
+			// (server/pkg/db/queries/agent.sql) — drift between the two is
+			// caught by server/internal/feature/branch_parity_test.go.
+			issuePrefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+			resp.TargetBranch, resp.IsSharedBranch = feature.Resolve(
+				feature.IssueForBranch{
+					Identifier: issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
+					Metadata:   parseIssueMetadata(issue.Metadata),
+				},
+				featureForBranch,
+			)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1345,15 +1365,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// the project, and `multica repo checkout` sees the project's
 			// github_repo resources instead of the workspace fallback.
 			var projectRepos []RepoData
-			if qc.ProjectID != "" {
-				projectUUID, err := util.ParseUUID(qc.ProjectID)
+			if qc.FeatureID != "" {
+				projectUUID, err := util.ParseUUID(qc.FeatureID)
 				if err == nil {
-					resp.ProjectID = qc.ProjectID
-					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
-						resp.ProjectTitle = proj.Title
+					resp.FeatureID = qc.FeatureID
+					if proj, err := h.Queries.GetFeature(r.Context(), projectUUID); err == nil {
+						resp.FeatureTitle = proj.Title
 					}
-					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
-						out := make([]ProjectResourceData, 0, len(rows))
+					if rows := h.listFeatureResourcesForFeature(r.Context(), projectUUID); len(rows) > 0 {
+						out := make([]FeatureResourceData, 0, len(rows))
 						for _, row := range rows {
 							label := ""
 							if row.Label.Valid {
@@ -1363,7 +1383,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 							if len(ref) == 0 {
 								ref = json.RawMessage("{}")
 							}
-							out = append(out, ProjectResourceData{
+							out = append(out, FeatureResourceData{
 								ID:           uuidToString(row.ID),
 								ResourceType: row.ResourceType,
 								ResourceRef:  ref,
@@ -1378,7 +1398,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 								}
 							}
 						}
-						resp.ProjectResources = out
+						resp.FeatureResources = out
 					}
 				}
 			}

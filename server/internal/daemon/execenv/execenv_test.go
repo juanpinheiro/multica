@@ -144,15 +144,15 @@ func TestPrepareDirectoryMode(t *testing.T) {
 	}
 }
 
-func TestPrepareWithProjectResources(t *testing.T) {
+func TestPrepareWithFeatureResources(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
 
 	taskCtx := TaskContextForEnv{
 		IssueID:      "11111111-2222-3333-4444-555555555555",
-		ProjectID:    "22222222-3333-4444-5555-666666666666",
-		ProjectTitle: "Agent UX 2026",
-		ProjectResources: []ProjectResourceForEnv{
+		FeatureID:    "22222222-3333-4444-5555-666666666666",
+		FeatureTitle: "Agent UX 2026",
+		FeatureResources: []FeatureResourceForEnv{
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
 				ResourceType: "github_repo",
@@ -174,14 +174,14 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	defer env.Cleanup(true)
 
 	// resources.json should exist and decode back to what we wrote.
-	resourcesPath := filepath.Join(env.WorkDir, ".multica", "project", "resources.json")
+	resourcesPath := filepath.Join(env.WorkDir, ".multica", "feature", "resources.json")
 	raw, err := os.ReadFile(resourcesPath)
 	if err != nil {
 		t.Fatalf("failed to read resources.json: %v", err)
 	}
 	var got struct {
-		ProjectID    string `json:"project_id"`
-		ProjectTitle string `json:"project_title"`
+		FeatureID    string `json:"feature_id"`
+		FeatureTitle string `json:"feature_title"`
 		Resources    []struct {
 			ID           string          `json:"id"`
 			ResourceType string          `json:"resource_type"`
@@ -191,17 +191,17 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatalf("resources.json unmarshal: %v\n%s", err, string(raw))
 	}
-	if got.ProjectID != taskCtx.ProjectID {
-		t.Errorf("resources.json project_id = %q, want %q", got.ProjectID, taskCtx.ProjectID)
+	if got.FeatureID != taskCtx.FeatureID {
+		t.Errorf("resources.json feature_id = %q, want %q", got.FeatureID, taskCtx.FeatureID)
 	}
-	if got.ProjectTitle != taskCtx.ProjectTitle {
-		t.Errorf("resources.json project_title = %q, want %q", got.ProjectTitle, taskCtx.ProjectTitle)
+	if got.FeatureTitle != taskCtx.FeatureTitle {
+		t.Errorf("resources.json feature_title = %q, want %q", got.FeatureTitle, taskCtx.FeatureTitle)
 	}
 	if len(got.Resources) != 1 || got.Resources[0].ResourceType != "github_repo" {
 		t.Fatalf("resources.json resources mismatch: %+v", got.Resources)
 	}
 
-	// CLAUDE.md should mention the project context block.
+	// CLAUDE.md should mention the feature context block.
 	if _, err := InjectRuntimeConfig(env.WorkDir, "claude", taskCtx); err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
@@ -224,25 +224,25 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 }
 
-// When the issue's project has its own github_repo resources, those should be
+// When the issue's feature has its own github_repo resources, those should be
 // the only repos rendered in the meta-skill — workspace-level repos must not
 // leak into the agent prompt to avoid confusing it about which repo to use.
 //
 // The handler-side override is exercised in handler tests; this test confirms
 // the rendering side: given a TaskContextForEnv where Repos was already
-// narrowed by the server to project repos only, the meta skill renders just
+// narrowed by the server to feature repos only, the meta skill renders just
 // those.
 func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	ctx := TaskContextForEnv{
 		IssueID:      "11111111-2222-3333-4444-555555555555",
-		ProjectID:    "22222222-3333-4444-5555-666666666666",
-		ProjectTitle: "Project A",
+		FeatureID:    "22222222-3333-4444-5555-666666666666",
+		FeatureTitle: "Project A",
 		Repos: []RepoContextForEnv{
 			{URL: "https://github.com/org/project-repo"},
 		},
-		ProjectResources: []ProjectResourceForEnv{
+		FeatureResources: []FeatureResourceForEnv{
 			{
 				ID:           "33333333-4444-5555-6666-777777777777",
 				ResourceType: "github_repo",
@@ -259,21 +259,21 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 	}
 	s := string(content)
 	if !strings.Contains(s, "https://github.com/org/project-repo") {
-		t.Errorf("CLAUDE.md missing project repo URL")
+		t.Errorf("CLAUDE.md missing feature repo URL")
 	}
 	if strings.Contains(s, "https://github.com/org/workspace-repo") {
-		t.Errorf("CLAUDE.md should not contain workspace repo when project has its own")
+		t.Errorf("CLAUDE.md should not contain workspace repo when feature has its own")
 	}
 }
 
-func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
+func TestWriteFeatureResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := writeProjectResources(dir, TaskContextForEnv{}); err != nil {
-		t.Fatalf("writeProjectResources: %v", err)
+	if err := writeFeatureResources(dir, TaskContextForEnv{}); err != nil {
+		t.Fatalf("writeFeatureResources: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
-		t.Errorf("expected no resources.json to be written when project context is empty")
+	if _, err := os.Stat(filepath.Join(dir, ".multica", "feature", "resources.json")); !os.IsNotExist(err) {
+		t.Errorf("expected no resources.json to be written when feature context is empty")
 	}
 }
 
@@ -635,8 +635,8 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica autopilot update",
 		"multica autopilot trigger",
 		"multica autopilot delete",
-		"multica project get",
-		"multica project resource list",
+		"multica feature get",
+		"multica feature resource list",
 		"multica issue assign",
 		"multica issue label add",
 		"multica issue label remove",

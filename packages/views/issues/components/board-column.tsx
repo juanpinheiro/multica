@@ -47,7 +47,7 @@ export const BoardColumn = memo(function BoardColumn({
   childProgressMap,
   totalCount,
   footer,
-  projectId,
+  featureId,
   sortLabel,
 }: {
   group: BoardColumnGroup;
@@ -57,7 +57,7 @@ export const BoardColumn = memo(function BoardColumn({
   totalCount?: number;
   footer?: ReactNode;
   /** When set, the per-column "+" pre-fills the project on the create form. */
-  projectId?: string;
+  featureId?: string;
   sortLabel?: string | null;
 }) {
   const status = group.status;
@@ -110,7 +110,7 @@ export const BoardColumn = memo(function BoardColumn({
                   onClick={() => {
                     const data = {
                       ...(group.createData ?? {}),
-                      ...(projectId ? { project_id: projectId } : {}),
+                      ...(featureId ? { feature_id: featureId } : {}),
                     };
                     useModalStore.getState().open("create-issue", data);
                   }}

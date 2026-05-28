@@ -14,7 +14,7 @@ import type myIssues from "../locales/en/my-issues.json";
 import type search from "../locales/en/search.json";
 import type inbox from "../locales/en/inbox.json";
 import type workspace from "../locales/en/workspace.json";
-import type projects from "../locales/en/projects.json";
+import type features from "../locales/en/features.json";
 import type autopilots from "../locales/en/autopilots.json";
 import type skills from "../locales/en/skills.json";
 import type chat from "../locales/en/chat.json";
@@ -50,7 +50,7 @@ declare global {
     search: typeof search;
     inbox: typeof inbox;
     workspace: typeof workspace;
-    projects: typeof projects;
+    features: typeof features;
     autopilots: typeof autopilots;
     skills: typeof skills;
     chat: typeof chat;

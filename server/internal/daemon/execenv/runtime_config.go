@@ -54,7 +54,7 @@ func sanitizeNameForBriefMarkdown(name string) string {
 // Unknown resource types fall back to a JSON-encoded ref so the agent can
 // still read what the user attached. New resource types should add a case
 // here AND in the API validator (handler/project_resource.go).
-func formatProjectResource(r ProjectResourceForEnv) string {
+func formatProjectResource(r FeatureResourceForEnv) string {
 	label := r.Label
 	switch r.ResourceType {
 	case "github_repo":
@@ -96,8 +96,8 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
 // For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
-// For Kimi:     writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
-// For Kiro:     writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from project skills dirs)
+// For Kimi:     writes {workDir}/AGENTS.md  (Kimi Code CLI reads AGENTS.md natively; skills auto-discovered from feature skills dirs)
+// For Kiro:     writes {workDir}/AGENTS.md  (Kiro CLI reads AGENTS.md natively; skills auto-discovered from feature skills dirs)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
 	content := buildMetaSkillContent(provider, ctx)
 
@@ -246,7 +246,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	if len(ctx.Repos) > 0 {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
-		b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
+		if ctx.IsSharedBranch && ctx.TargetBranch != "" {
+			fmt.Fprintf(&b, "Use `multica repo checkout <url> --ref %s` to check out a repository and continue from the feature's shared branch.\n\n", ctx.TargetBranch)
+		} else {
+			b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
+		}
 		for _, repo := range ctx.Repos {
 			if repo.Description != "" {
 				fmt.Fprintf(&b, "- %s — %s\n", repo.URL, repo.Description)
@@ -260,21 +264,50 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	// Inject project-scoped context (resources attached to the issue's project).
 	// The full structured payload is also available at .multica/project/resources.json
 	// so skills can consume it programmatically.
-	if ctx.ProjectID != "" || len(ctx.ProjectResources) > 0 {
+	if ctx.FeatureID != "" || len(ctx.FeatureResources) > 0 {
 		b.WriteString("## Project Context\n\n")
-		if ctx.ProjectTitle != "" {
-			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		if ctx.FeatureTitle != "" {
+			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.FeatureTitle)
 		}
-		if len(ctx.ProjectResources) > 0 {
+		if len(ctx.FeatureResources) > 0 {
 			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
-			for _, r := range ctx.ProjectResources {
+			for _, r := range ctx.FeatureResources {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
 			}
 			b.WriteString("\nResources are pointers — open them only when relevant to the task. ")
 			b.WriteString("For `github_repo` resources, use `multica repo checkout <url>` to fetch the code. Add `--ref <branch-or-sha>` when a task or handoff names an exact revision.\n\n")
 		} else {
-			b.WriteString("This project has no resources attached yet.\n\n")
+			b.WriteString("This feature has no resources attached yet.\n\n")
 		}
+	}
+
+	// Shared branch safety section — emitted only when multiple sibling issues
+	// converge on the same feature branch. Warns the agent against force-pushes
+	// and history rewrites that would corrupt a peer's work, and aligns the
+	// workflow with the "1 feature = 1 PR" model (human reviews once at the
+	// end, not per issue).
+	if ctx.IsSharedBranch && ctx.TargetBranch != "" {
+		b.WriteString("## Shared branch\n\n")
+		fmt.Fprintf(&b, "This issue's commits go to the shared branch `%s`. Other issues of this feature also push there. Rules:\n", ctx.TargetBranch)
+		b.WriteString("- Do not `git push --force`.\n")
+		fmt.Fprintf(&b, "- Do not rewrite history (`git rebase -i`, `git reset --hard origin/%s`, `git commit --amend` after first push).\n", ctx.TargetBranch)
+		b.WriteString("- If the remote has new commits when you go to push, `git pull --rebase` first.\n\n")
+		b.WriteString("### Consolidated PR model\n\n")
+		b.WriteString("The whole feature ships as ONE PR — human review happens once on the consolidated PR, not per individual issue.\n\n")
+		if ctx.FeatureID != "" {
+			fmt.Fprintf(&b, "- List sibling issues at any time with `multica issue list --feature %s --output json` so you know what is in scope for this PR.\n", ctx.FeatureID)
+		}
+		b.WriteString("- **First push (PR does not exist yet):** open the PR with a feature-level title")
+		if ctx.FeatureTitle != "" {
+			fmt.Fprintf(&b, " (e.g. `feat: %s`)", ctx.FeatureTitle)
+		}
+		b.WriteString(" and a description that lists EVERY sibling issue under a `## Implements` section, one per line as `- <identifier>: <title>`. Mark the PR as draft if some sibling issues are still queued — switch out of draft on the LAST push.\n")
+		b.WriteString("- **Subsequent push (PR already exists):** do NOT open a new PR. Append commits to the existing PR. If your issue's identifier is missing from the PR description's `## Implements` list (rare — earlier agent forgot it), use `gh pr edit <num> --body \"...\"` to add it. Otherwise leave the PR metadata alone.\n")
+		b.WriteString("- After your push lands, post a short comment on the PR (`gh pr comment <num> --body \"<identifier>: <one-line summary>\"`) so the reviewer can scan which commits belong to which issue.\n\n")
+		b.WriteString("### Status workflow under shared branch\n\n")
+		b.WriteString("- When all acceptance criteria pass and your push lands, mark this issue **`done`** directly — NOT `in_review`. Dependent issues unblock on `done`; if you stop at `in_review`, the daemon will not dispatch the next sibling and the feature stalls indefinitely.\n")
+		b.WriteString("- The human reviews the consolidated PR after every sibling issue completes — there is nothing to review per-issue, so the `in_review` step is skipped on purpose.\n")
+		b.WriteString("- Use `in_review` (or `blocked`) only for genuine handoffs (you cannot finish without a decision). Posting a comment explaining what is blocking is mandatory in that case.\n\n")
 	}
 
 	// Issue Metadata semantics — emitted only for tasks that operate on a real
@@ -380,7 +413,11 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "6. **Post your final results as a comment — this step is mandatory**: `multica issue comment add %s --content \"...\"`. Your results are only visible to the user if posted via this CLI call; text in your terminal or run logs is NOT delivered.\n", ctx.IssueID)
 		}
 		b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
-		fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
+		if ctx.IsSharedBranch {
+			fmt.Fprintf(&b, "8. When all acceptance criteria pass and your push lands on the shared branch, run `multica issue status %s done` (NOT `in_review` — see the `## Shared branch` section above for why)\n", ctx.IssueID)
+		} else {
+			fmt.Fprintf(&b, "8. When done, run `multica issue status %s in_review`\n", ctx.IssueID)
+		}
 		fmt.Fprintf(&b, "9. If blocked, run `multica issue status %s blocked` and post a comment explaining why\n\n", ctx.IssueID)
 	}
 

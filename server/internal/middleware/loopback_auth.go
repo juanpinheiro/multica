@@ -69,6 +69,19 @@ func LoopbackAuth(trustedProxies []netip.Prefix) func(http.Handler) http.Handler
 	}
 }
 
+// ResolveClientIP is the exported variant of resolveClientIP for callers
+// outside the middleware package (e.g. realtime.HandleWebSocket). Same
+// semantics: trusted proxies → leftmost X-Forwarded-For, else r.RemoteAddr.
+func ResolveClientIP(r *http.Request, trustedProxies []netip.Prefix) netip.Addr {
+	return resolveClientIP(r, trustedProxies)
+}
+
+// IsLoopback is the exported variant of isLoopback. Used by realtime to
+// extend the personal-fork loopback bypass beyond HTTP middlewares.
+func IsLoopback(ip netip.Addr) bool {
+	return isLoopback(ip)
+}
+
 // resolveClientIP returns the effective client IP for the request. When the
 // peer address is a trusted proxy, the leftmost address from X-Forwarded-For
 // is used; otherwise r.RemoteAddr is used directly.

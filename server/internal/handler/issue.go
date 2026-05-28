@@ -39,7 +39,7 @@ type IssueResponse struct {
 	CreatorType   string                  `json:"creator_type"`
 	CreatorID     string                  `json:"creator_id"`
 	ParentIssueID *string                 `json:"parent_issue_id"`
-	ProjectID     *string                 `json:"project_id"`
+	FeatureID     *string                 `json:"feature_id"`
 	Position      float64                 `json:"position"`
 	StartDate     *string                 `json:"start_date"`
 	DueDate       *string                 `json:"due_date"`
@@ -76,7 +76,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorType:   i.CreatorType,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
+		FeatureID:     uuidToPtr(i.FeatureID),
 		Position:      i.Position,
 		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
@@ -103,7 +103,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatorType:   i.CreatorType,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
+		FeatureID:     uuidToPtr(i.FeatureID),
 		Position:      i.Position,
 		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
@@ -160,7 +160,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatorType:   i.CreatorType,
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
-		ProjectID:     uuidToPtr(i.ProjectID),
+		FeatureID:     uuidToPtr(i.FeatureID),
 		Position:      i.Position,
 		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
@@ -547,7 +547,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
-		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
@@ -640,7 +640,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 			&sr.issue.CreatedAt,
 			&sr.issue.UpdatedAt,
 			&sr.issue.Number,
-			&sr.issue.ProjectID,
+			&sr.issue.FeatureID,
 			&sr.totalCount,
 			&sr.matchSource,
 			&sr.matchedCommentContent,
@@ -739,13 +739,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		creatorFilter = id
 	}
-	var projectFilter pgtype.UUID
-	if p := r.URL.Query().Get("project_id"); p != "" {
-		id, ok := parseUUIDOrBadRequest(w, p, "project_id")
+	var featureFilter pgtype.UUID
+	if p := r.URL.Query().Get("feature_id"); p != "" {
+		id, ok := parseUUIDOrBadRequest(w, p, "feature_id")
 		if !ok {
 			return
 		}
-		projectFilter = id
+		featureFilter = id
 	}
 	// involves_user_id widens the assignee filter to surface issues where the
 	// user is the indirect assignee (their owned agent, or a squad they belong
@@ -774,7 +774,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			AssigneeID:     assigneeFilter,
 			AssigneeIds:    assigneeIdsFilter,
 			CreatorID:      creatorFilter,
-			ProjectID:      projectFilter,
+			FeatureID:      featureFilter,
 			InvolvesUserID: involvesUserFilter,
 			MetadataFilter: metadataFilter,
 		})
@@ -825,8 +825,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// scheduled=true restricts the result to issues that have at least one of
-	// start_date / due_date set. Used by the Project Gantt view, which only
-	// renders schedulable rows and shouldn't pay for the full project list.
+	// start_date / due_date set. Used by the Feature Gantt view, which only
+	// renders schedulable rows and shouldn't pay for the full feature list.
 	var scheduledFilter pgtype.Bool
 	if r.URL.Query().Get("scheduled") == "true" {
 		scheduledFilter = pgtype.Bool{Bool: true, Valid: true}
@@ -886,8 +886,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if creatorFilter.Valid {
 		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(creatorFilter)))
 	}
-	if projectFilter.Valid {
-		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
+	if featureFilter.Valid {
+		where = append(where, fmt.Sprintf("i.feature_id = %s::uuid", addArg(featureFilter)))
 	}
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
@@ -948,7 +948,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id, i.metadata
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -983,7 +983,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.CreatedAt,
 			&row.UpdatedAt,
 			&row.Number,
-			&row.ProjectID,
+			&row.FeatureID,
 			&row.Metadata,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
@@ -1187,12 +1187,12 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		where = append(where, fmt.Sprintf("i.creator_id = %s::uuid", addArg(id)))
 	}
-	if raw := r.URL.Query().Get("project_id"); raw != "" {
-		id, ok := parseUUIDOrBadRequest(w, raw, "project_id")
+	if raw := r.URL.Query().Get("feature_id"); raw != "" {
+		id, ok := parseUUIDOrBadRequest(w, raw, "feature_id")
 		if !ok {
 			return
 		}
-		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(id)))
+		where = append(where, fmt.Sprintf("i.feature_id = %s::uuid", addArg(id)))
 	}
 	if filter, ok := parseMetadataFilterParam(w, r.URL.Query().Get("metadata")); !ok {
 		return
@@ -1280,18 +1280,18 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "("+strings.Join(ors, " OR ")+")")
 	}
 
-	projectIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("project_ids"), "project_ids")
+	projectIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("feature_ids"), "feature_ids")
 	if !ok {
 		return
 	}
-	includeNoProject := r.URL.Query().Get("include_no_project") == "true"
+	includeNoProject := r.URL.Query().Get("include_no_feature") == "true"
 	if len(projectIDs) > 0 || includeNoProject {
 		ors := make([]string, 0, 2)
 		if len(projectIDs) > 0 {
-			ors = append(ors, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIDs)))
+			ors = append(ors, fmt.Sprintf("i.feature_id = ANY(%s::uuid[])", addArg(projectIDs)))
 		}
 		if includeNoProject {
-			ors = append(ors, "i.project_id IS NULL")
+			ors = append(ors, "i.feature_id IS NULL")
 		}
 		where = append(where, "("+strings.Join(ors, " OR ")+")")
 	}
@@ -1377,7 +1377,7 @@ WITH ranked AS (
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
-		i.number, i.project_id, i.metadata,
+		i.number, i.feature_id, i.metadata,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -1390,7 +1390,7 @@ SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, due_date, created_at, updated_at,
-	number, project_id, metadata, group_total
+	number, feature_id, metadata, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -1432,7 +1432,7 @@ ORDER BY
 			&row.CreatedAt,
 			&row.UpdatedAt,
 			&row.Number,
-			&row.ProjectID,
+			&row.FeatureID,
 			&row.Metadata,
 			&row.GroupTotal,
 		); err != nil {
@@ -1587,7 +1587,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 // the same Operating Protocol briefing it would for an issue assigned to
 // the squad, so it can choose to delegate to a squad member as usual.
 //
-// ProjectID is optional and lets the modal target a specific project so
+// FeatureID is optional and lets the modal target a specific project so
 // the agent's `multica issue create` invocation passes `--project <uuid>`
 // instead of letting it default. The frontend remembers the user's last
 // pick per workspace, so frequent users skip retyping "in project X".
@@ -1595,7 +1595,7 @@ type QuickCreateIssueRequest struct {
 	AgentID   string `json:"agent_id,omitempty"`
 	SquadID   string `json:"squad_id,omitempty"`
 	Prompt    string `json:"prompt"`
-	ProjectID string `json:"project_id,omitempty"`
+	FeatureID string `json:"feature_id,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -1722,27 +1722,27 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Optional project_id — validate it belongs to the same workspace before
+	// Optional feature_id — validate it belongs to the same workspace before
 	// pinning the task to it. The handler is the trust boundary; the frontend
 	// already only shows projects from the active workspace, but we re-check
-	// here so a forged request can't smuggle a foreign project ID through.
-	var projectUUID pgtype.UUID
-	if strings.TrimSpace(req.ProjectID) != "" {
-		pid, ok := parseUUIDOrBadRequest(w, req.ProjectID, "project_id")
+	// here so a forged request can't smuggle a foreign feature ID through.
+	var featureUUID pgtype.UUID
+	if strings.TrimSpace(req.FeatureID) != "" {
+		pid, ok := parseUUIDOrBadRequest(w, req.FeatureID, "feature_id")
 		if !ok {
 			return
 		}
-		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		if _, err := h.Queries.GetFeatureInWorkspace(r.Context(), db.GetFeatureInWorkspaceParams{
 			ID:          pid,
 			WorkspaceID: wsUUID,
 		}); err != nil {
-			writeError(w, http.StatusBadRequest, "project not found")
+			writeError(w, http.StatusBadRequest, "feature not found")
 			return
 		}
-		projectUUID = pid
+		featureUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID)
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, featureUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -1848,7 +1848,7 @@ type CreateIssueRequest struct {
 	AssigneeType  *string  `json:"assignee_type"`
 	AssigneeID    *string  `json:"assignee_id"`
 	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
+	FeatureID     *string  `json:"feature_id"`
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -1920,8 +1920,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var parentIssueID pgtype.UUID
 	var projectID pgtype.UUID
-	if req.ProjectID != nil {
-		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
+	if req.FeatureID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.FeatureID, "feature_id")
 		if !ok {
 			return
 		}
@@ -1942,8 +1942,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 			return
 		}
-		if req.ProjectID == nil {
-			projectID = parent.ProjectID
+		if req.FeatureID == nil {
+			projectID = parent.FeatureID
 		}
 	}
 
@@ -2052,7 +2052,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
-			ProjectID:     projectID,
+			FeatureID:     projectID,
 			OriginType:    originType,
 			OriginID:      originID,
 		})
@@ -2072,7 +2072,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			StartDate:     startDate,
 			DueDate:       dueDate,
 			Number:        issueNumber,
-			ProjectID:     projectID,
+			FeatureID:     projectID,
 		})
 	}
 	if err != nil {
@@ -2137,7 +2137,7 @@ type UpdateIssueRequest struct {
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
+	FeatureID     *string  `json:"feature_id"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2179,7 +2179,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		StartDate:     prevIssue.StartDate,
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
-		ProjectID:     prevIssue.ProjectID,
+		FeatureID:     prevIssue.FeatureID,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -2280,15 +2280,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ParentIssueID = pgtype.UUID{Valid: false} // explicit null = remove parent
 		}
 	}
-	if _, ok := rawFields["project_id"]; ok {
-		if req.ProjectID != nil {
-			projectUUID, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
+	if _, ok := rawFields["feature_id"]; ok {
+		if req.FeatureID != nil {
+			featureUUID, ok := parseUUIDOrBadRequest(w, *req.FeatureID, "feature_id")
 			if !ok {
 				return
 			}
-			params.ProjectID = projectUUID
+			params.FeatureID = featureUUID
 		} else {
-			params.ProjectID = pgtype.UUID{Valid: false}
+			params.FeatureID = pgtype.UUID{Valid: false}
 		}
 	}
 
@@ -2411,6 +2411,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.notifyFeatureReadyForReview(r.Context(), prevIssue, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2672,7 +2673,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		req.Updates.Priority != nil ||
 		req.Updates.Position != nil
 	if !hasMutation {
-		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "project_id"} {
+		for _, k := range []string{"assignee_type", "assignee_id", "start_date", "due_date", "parent_issue_id", "feature_id"} {
 			if _, ok := rawUpdates[k]; ok {
 				hasMutation = true
 				break
@@ -2710,7 +2711,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			StartDate:     prevIssue.StartDate,
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
-			ProjectID:     prevIssue.ProjectID,
+			FeatureID:     prevIssue.FeatureID,
 		}
 
 		if req.Updates.Title != nil {
@@ -2808,15 +2809,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				params.ParentIssueID = pgtype.UUID{Valid: false}
 			}
 		}
-		if _, ok := rawUpdates["project_id"]; ok {
-			if req.Updates.ProjectID != nil {
-				projectUUID, err := util.ParseUUID(*req.Updates.ProjectID)
+		if _, ok := rawUpdates["feature_id"]; ok {
+			if req.Updates.FeatureID != nil {
+				featureUUID, err := util.ParseUUID(*req.Updates.FeatureID)
 				if err != nil {
 					continue
 				}
-				params.ProjectID = projectUUID
+				params.FeatureID = featureUUID
 			} else {
-				params.ProjectID = pgtype.UUID{Valid: false}
+				params.FeatureID = pgtype.UUID{Valid: false}
 			}
 		}
 
@@ -2882,10 +2883,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		}
 
-		// Platform-driven parent notification, mirrored from UpdateIssue
-		// (MUL-2538). Best-effort; failure does not abort the batch.
+		// Platform-driven parent notification and feature completion check,
+		// mirrored from UpdateIssue. Best-effort; failure does not abort the batch.
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			h.notifyFeatureReadyForReview(r.Context(), prevIssue, issue)
 		}
 
 		updated++

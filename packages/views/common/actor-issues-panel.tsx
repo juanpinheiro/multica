@@ -50,8 +50,8 @@ export function ActorIssuesPanel({
   const assigneeFilters = useStore(actorIssuesViewStore, (s) => s.assigneeFilters);
   const includeNoAssignee = useStore(actorIssuesViewStore, (s) => s.includeNoAssignee);
   const creatorFilters = useStore(actorIssuesViewStore, (s) => s.creatorFilters);
-  const projectFilters = useStore(actorIssuesViewStore, (s) => s.projectFilters);
-  const includeNoProject = useStore(actorIssuesViewStore, (s) => s.includeNoProject);
+  const featureFilters = useStore(actorIssuesViewStore, (s) => s.featureFilters);
+  const includeNoFeature = useStore(actorIssuesViewStore, (s) => s.includeNoFeature);
   const labelFilters = useStore(actorIssuesViewStore, (s) => s.labelFilters);
 
   const [search, setSearch] = useState("");
@@ -102,8 +102,8 @@ export function ActorIssuesPanel({
         assigneeFilters,
         includeNoAssignee,
         creatorFilters,
-        projectFilters,
-        includeNoProject,
+        featureFilters,
+        includeNoFeature,
         labelFilters,
       }),
     [
@@ -113,8 +113,8 @@ export function ActorIssuesPanel({
       assigneeFilters,
       includeNoAssignee,
       creatorFilters,
-      projectFilters,
-      includeNoProject,
+      featureFilters,
+      includeNoFeature,
       labelFilters,
     ],
   );

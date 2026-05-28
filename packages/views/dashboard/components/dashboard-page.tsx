@@ -13,7 +13,7 @@ import {
 } from "@multica/ui/components/ui/select";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { featureListOptions } from "@multica/core/features/queries";
 import {
   dashboardUsageDailyOptions,
   dashboardUsageByAgentOptions,
@@ -33,7 +33,7 @@ import {
   WeeklyTimeChart,
   WeeklyTasksChart,
 } from "../../runtimes/components/charts";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import {
   addDaysIso,
@@ -86,9 +86,9 @@ function rangesForDim(dim: Dim) {
   return TIME_RANGES.filter((r) => (r.dims as readonly string[]).includes(dim));
 }
 
-// Sentinel for "no project filter" — kept distinct from the empty string
-// so it survives a refactor that ever lets a project be slug-keyed.
-const ALL_PROJECTS = "__all__";
+// Sentinel for "no feature filter" — kept distinct from the empty string
+// so it survives a refactor that ever lets a feature be slug-keyed.
+const ALL_FEATURES = "__all__";
 
 // Stable references — `data ?? []` would create a new empty array on
 // every render while the query is loading, which breaks useMemo's
@@ -141,7 +141,7 @@ function Segmented<T extends string | number>({
  * Lives at `/{slug}/dashboard`. Three independent rollups (daily cost,
  * per-agent tokens, per-agent run-time) feed four KPI tiles, a daily cost
  * chart, and a combined "by agent" list. A project dropdown narrows every
- * query to one project; the period selector applies to all three.
+ * query to one feature; the period selector applies to all three.
  *
  * Cost math runs client-side via the runtimes utils — keeps the dashboard
  * and the runtime page using one pricing table.
@@ -152,7 +152,7 @@ export function DashboardPage() {
   const viewTZ = useViewingTimezone();
   const [dim, setDim] = useState<Dim>("daily");
   const [days, setDays] = useState<TimeRange>(30);
-  const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
+  const [featureValue, setFeatureValue] = useState<string>(ALL_FEATURES);
 
   const allowedRanges = rangesForDim(dim);
   const handleDimChange = (next: Dim) => {
@@ -163,19 +163,19 @@ export function DashboardPage() {
     if (!stillAllowed) setDays(DEFAULT_DAYS_BY_DIM[next]);
   };
 
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: features = [] } = useQuery(featureListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
 
   // Validate the picked project against the current workspace's list. A
-  // stale UUID — left over from a project that's been deleted, or from the
+  // stale UUID — left over from a feature that's been deleted, or from the
   // previous workspace after a switch — would silently filter all three
-  // queries to empty rows while the dropdown still reads "All projects".
+  // queries to empty rows while the dropdown still reads "All features".
   // Derive the effective filter so the API call matches the user-visible
   // selection.
-  const projectId = useMemo(() => {
-    if (projectValue === ALL_PROJECTS) return null;
-    return projects.some((p) => p.id === projectValue) ? projectValue : null;
-  }, [projectValue, projects]);
+  const featureId = useMemo(() => {
+    if (featureValue === ALL_FEATURES) return null;
+    return features.some((p) => p.id === featureValue) ? featureValue : null;
+  }, [featureValue, features]);
 
   // The weekly chart paints `ceil(days / 7)` trailing calendar weeks anchored
   // at today-in-UTC. In the worst case (today = Sunday) the leftmost Monday
@@ -187,16 +187,16 @@ export function DashboardPage() {
   const chartFetchDays = dim === "weekly" ? weekCount * 7 : days;
 
   const dailyQuery = useQuery(
-    dashboardUsageDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardUsageDailyOptions(wsId, chartFetchDays, featureId, viewTZ),
   );
   const byAgentQuery = useQuery(
-    dashboardUsageByAgentOptions(wsId, days, projectId, viewTZ),
+    dashboardUsageByAgentOptions(wsId, days, featureId, viewTZ),
   );
   const runTimeQuery = useQuery(
-    dashboardAgentRunTimeOptions(wsId, days, projectId, viewTZ),
+    dashboardAgentRunTimeOptions(wsId, days, featureId, viewTZ),
   );
   const runTimeDailyQuery = useQuery(
-    dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+    dashboardRunTimeDailyOptions(wsId, chartFetchDays, featureId, viewTZ),
   );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
@@ -231,7 +231,7 @@ export function DashboardPage() {
     runTimeDailyQuery.isLoading;
 
   // Four independent rollups, but the empty-state is one decision — only
-  // show "no data yet" when ALL came back empty so a project with tokens
+  // show "no data yet" when ALL came back empty so a feature with tokens
   // but no runs (or vice-versa) doesn't look broken.
   const hasNoData =
     !isLoading &&
@@ -307,7 +307,7 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* h-auto + min-h-12 + flex-wrap: the toolbar (project filter,
+      {/* h-auto + min-h-12 + flex-wrap: the toolbar (feature filter,
           dimension switch, range switch) wraps on narrow viewports so every
           control stays reachable. Wider viewports still render the original
           single row. */}
@@ -317,10 +317,10 @@ export function DashboardPage() {
           <h1 className="truncate text-sm font-medium">{t(($) => $.title)}</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <ProjectFilter
-            projects={projects}
-            value={projectValue}
-            onChange={setProjectValue}
+          <FeatureFilter
+            features={features}
+            value={featureValue}
+            onChange={setFeatureValue}
           />
           <Segmented
             value={dim}
@@ -418,32 +418,32 @@ export function DashboardPage() {
   );
 }
 
-function ProjectFilter({
-  projects,
+function FeatureFilter({
+  features,
   value,
   onChange,
 }: {
-  projects: { id: string; title: string; icon: string | null }[];
+  features: { id: string; title: string; icon: string | null }[];
   value: string;
   onChange: (v: string) => void;
 }) {
   const { t } = useT("usage");
-  const allLabel = t(($) => $.filter.all_projects);
-  const selected = projects.find((p) => p.id === value);
+  const allLabel = t(($) => $.filter.all_features);
+  const selected = features.find((p) => p.id === value);
   const selectedTitle =
-    value === ALL_PROJECTS ? allLabel : selected?.title ?? allLabel;
+    value === ALL_FEATURES ? allLabel : selected?.title ?? allLabel;
 
   return (
     <Select
       value={value}
-      onValueChange={(v) => onChange(v ?? ALL_PROJECTS)}
+      onValueChange={(v) => onChange(v ?? ALL_FEATURES)}
     >
       <SelectTrigger size="sm" className="min-w-[180px]">
         <SelectValue>
           {() => (
             <>
               {selected ? (
-                <ProjectIcon project={selected} size="sm" />
+                <FeatureIcon feature={selected} size="sm" />
               ) : (
                 <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               )}
@@ -453,20 +453,20 @@ function ProjectFilter({
         </SelectValue>
       </SelectTrigger>
       {/* alignItemWithTrigger=false: the default aligns the *selected* item
-          to the trigger, which pushes "All projects" above the trigger and
+          to the trigger, which pushes "All features" above the trigger and
           clips it off-screen when the usage header sits at the top of the
           viewport. Anchor the dropdown to the bottom of the trigger so
           every entry stays reachable.
-          max-h-72: cap the dropdown so a long project list scrolls instead
+          max-h-72: cap the dropdown so a long feature list scrolls instead
           of stretching to the bottom of the window. */}
       <SelectContent align="start" alignItemWithTrigger={false} className="max-h-72">
-        <SelectItem value={ALL_PROJECTS}>
+        <SelectItem value={ALL_FEATURES}>
           <FolderKanban className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <span className="truncate">{allLabel}</span>
         </SelectItem>
-        {projects.map((p) => (
+        {features.map((p) => (
           <SelectItem key={p.id} value={p.id}>
-            <ProjectIcon project={p} size="sm" />
+            <FeatureIcon feature={p} size="sm" />
             <span className="truncate">{p.title}</span>
           </SelectItem>
         ))}

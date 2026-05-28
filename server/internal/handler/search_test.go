@@ -97,7 +97,7 @@ func TestBuildSearchQuery_SpecialChars(t *testing.T) {
 // --- Project search tests ---
 
 func TestBuildProjectSearchQuery_SingleTerm(t *testing.T) {
-	query, args := buildProjectSearchQuery("Hello", []string{"Hello"}, false)
+	query, args := buildFeatureSearchQuery("Hello", []string{"Hello"}, false)
 
 	if args[0] != "hello" {
 		t.Errorf("expected phrase arg to be lowercased, got %q", args[0])
@@ -120,7 +120,7 @@ func TestBuildProjectSearchQuery_SingleTerm(t *testing.T) {
 }
 
 func TestBuildProjectSearchQuery_MultiTerm(t *testing.T) {
-	query, args := buildProjectSearchQuery("Foo Bar", []string{"Foo", "Bar"}, false)
+	query, args := buildFeatureSearchQuery("Foo Bar", []string{"Foo", "Bar"}, false)
 
 	if args[0] != "foo bar" {
 		t.Errorf("expected phrase arg lowercased, got %q", args[0])
@@ -138,7 +138,7 @@ func TestBuildProjectSearchQuery_MultiTerm(t *testing.T) {
 }
 
 func TestBuildProjectSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildProjectSearchQuery("test", []string{"test"}, true)
+	query, _ := buildFeatureSearchQuery("test", []string{"test"}, true)
 
 	if strings.Contains(query, "NOT IN ('completed', 'cancelled')") {
 		t.Error("query should not exclude completed/cancelled when includeClosed=true")

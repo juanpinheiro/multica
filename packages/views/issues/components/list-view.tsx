@@ -57,7 +57,7 @@ export function ListView({
   childProgressMap = EMPTY_PROGRESS_MAP,
   myIssuesScope,
   myIssuesFilter,
-  projectId,
+  featureId,
   onMoveIssue,
   sort,
 }: {
@@ -66,7 +66,7 @@ export function ListView({
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesScope?: string;
   myIssuesFilter?: MyIssuesFilter;
-  projectId?: string;
+  featureId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   sort?: IssueSortParam;
 }) {
@@ -307,7 +307,7 @@ export function ListView({
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
             myIssuesOpts={myIssuesOpts}
-            projectId={projectId}
+            featureId={featureId}
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
             sortLabel={sortLabel}
@@ -356,7 +356,7 @@ function StatusAccordionItem({
   issueMap,
   childProgressMap,
   myIssuesOpts,
-  projectId,
+  featureId,
   dragEnabled,
   isExpanded,
   sortLabel,
@@ -367,7 +367,7 @@ function StatusAccordionItem({
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  projectId?: string;
+  featureId?: string;
   dragEnabled: boolean;
   isExpanded: boolean;
   sortLabel: string | null;
@@ -443,7 +443,7 @@ function StatusAccordionItem({
                   onClick={() =>
                     useModalStore
                       .getState()
-                      .open("create-issue", { status, ...(projectId ? { project_id: projectId } : {}) })
+                      .open("create-issue", { status, ...(featureId ? { feature_id: featureId } : {}) })
                   }
                 />
               }

@@ -1127,13 +1127,12 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		return
 	}
 
-	// Fire the platform parent-notification path on the same transition the
-	// HTTP UpdateIssue / BatchUpdateIssues paths use. A merged PR is one of
-	// the most common ways a sub-issue actually reaches `done`, and skipping
-	// it here would leave the parent silent for the dominant completion path.
-	// notifyParentOfChildDone re-checks every guard (prev != done, parent
-	// exists, parent not terminal), so calling it unconditionally is safe.
+	// Fire the platform parent-notification and feature-completion paths on the
+	// same transition the HTTP UpdateIssue / BatchUpdateIssues handlers use.
+	// A merged PR is the dominant way a sub-issue reaches `done`, so skipping
+	// these helpers here would silently drop notifications on that path.
 	h.notifyParentOfChildDone(ctx, issue, updated)
+	h.notifyFeatureReadyForReview(ctx, issue, updated)
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)

@@ -22,9 +22,9 @@ type RepoData struct {
 	Description string `json:"description,omitempty"`
 }
 
-// ProjectResourceData mirrors handler.ProjectResourceData — a single project
+// FeatureResourceData mirrors handler.FeatureResourceData — a single project
 // resource as delivered to the daemon. resource_ref is type-specific JSON.
-type ProjectResourceData struct {
+type FeatureResourceData struct {
 	ID           string          `json:"id"`
 	ResourceType string          `json:"resource_type"`
 	ResourceRef  json.RawMessage `json:"resource_ref"`
@@ -46,9 +46,9 @@ type Task struct {
 	WorkspaceContext        string                `json:"workspace_context,omitempty"`
 	Agent                   *AgentData            `json:"agent,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`                // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`             // human-readable project title for context injection
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"`         // project-scoped resources to expose to the agent
+	FeatureID               string                `json:"feature_id,omitempty"`                // issue's feature, when present
+	FeatureTitle            string                `json:"feature_title,omitempty"`             // human-readable feature title for context injection
+	FeatureResources        []FeatureResourceData `json:"feature_resources,omitempty"`         // feature-scoped resources to expose to the agent
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // Claude session ID from a previous task on this issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on this issue
 	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
@@ -81,6 +81,18 @@ type Task struct {
 	// Empty when the server-side runtime has no owning user — the daemon
 	// then falls back to its own token. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+	// TargetBranch is the resolved git branch this task should target. The
+	// server computes it via feature.Resolve(issue, feature): feature's
+	// target_branch wins, else the issue's metadata.target_branch override,
+	// else the derived 'issue/<identifier>'. Always non-empty for issue tasks;
+	// empty for chat / quick-create / autopilot tasks that have no issue.
+	TargetBranch string `json:"target_branch,omitempty"`
+	// IsSharedBranch is true when the resolved branch came from
+	// feature.target_branch — meaning sibling issues of the same feature push
+	// to the same branch. The daemon uses this to append a "## Shared branch"
+	// warning to the agent brief so agents don't force-push or rewrite history
+	// over each other's work.
+	IsSharedBranch bool `json:"is_shared_branch,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

@@ -100,14 +100,14 @@ vi.mock("@multica/core/paths", () => ({
     inbox: () => "/ws-test/inbox",
     myIssues: () => "/ws-test/my-issues",
     issues: () => "/ws-test/issues",
-    projects: () => "/ws-test/projects",
+    features: () => "/ws-test/projects",
     agents: () => "/ws-test/agents",
     runtimes: () => "/ws-test/runtimes",
     skills: () => "/ws-test/skills",
     settings: () => "/ws-test/settings",
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
     memberDetail: (id: string) => `/ws-test/members/${id}`,
-    projectDetail: (id: string) => `/ws-test/projects/${id}`,
+    projectDetail: (id: string) => `/ws-test/features/${id}`,
   }),
 }));
 
@@ -169,7 +169,7 @@ describe("SearchCommand", () => {
   beforeEach(() => {
     mockPush.mockReset();
     mockSearchIssues.mockReset().mockResolvedValue({ issues: [] });
-    mockSearchProjects.mockReset().mockResolvedValue({ projects: [] });
+    mockSearchProjects.mockReset().mockResolvedValue({ features: [] });
     mockRecentItems.current = [];
     mockAllIssues.current = [];
     mockSetTheme.mockReset();
@@ -217,7 +217,7 @@ describe("SearchCommand", () => {
     expect(
       screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
     ).toBeInTheDocument();
-    expect(screen.queryByText("New Project")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Feature")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch to Light Theme")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch to Dark Theme")).not.toBeInTheDocument();
     expect(screen.queryByText("Use System Theme")).not.toBeInTheDocument();
@@ -319,7 +319,7 @@ describe("SearchCommand", () => {
     expect(screen.getByText("MUL-2")).toBeInTheDocument();
   });
 
-  it("shows New Issue / New Project under Commands and triggers the modal store", async () => {
+  it("shows New Issue / New Feature under Commands and triggers the modal store", async () => {
     const user = userEvent.setup();
     renderSearch();
 
@@ -332,7 +332,7 @@ describe("SearchCommand", () => {
         screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
       ).toBeInTheDocument();
       expect(
-        screen.getByText((_, el) => el?.textContent === "New Project" && el?.tagName === "SPAN"),
+        screen.getByText((_, el) => el?.textContent === "New Feature" && el?.tagName === "SPAN"),
       ).toBeInTheDocument();
     });
 
@@ -489,7 +489,7 @@ describe("SearchCommand", () => {
           creator_type: "member",
           creator_id: "user-1",
           parent_issue_id: null,
-          project_id: null,
+          feature_id: null,
           position: 0,
           start_date: null,
           due_date: null,

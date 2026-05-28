@@ -304,6 +304,184 @@ func TestWorkspaceContextHeadingSkippedWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestSharedBranchSectionPresentWhenIsSharedBranch verifies that the
+// "## Shared branch" safety section appears in the brief exactly when
+// IsSharedBranch is true, and is absent otherwise. The section guards
+// against force-pushes and history rewrites when multiple sibling issues
+// converge on the same feature branch.
+func TestSharedBranchSectionPresentWhenIsSharedBranch(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name        string
+		ctx         TaskContextForEnv
+		wantSection bool
+	}{
+		{
+			name: "shared branch - section present",
+			ctx: TaskContextForEnv{
+				IssueID:        "11111111-2222-3333-4444-555555555555",
+				TargetBranch:   "feature/auth-v2",
+				IsSharedBranch: true,
+			},
+			wantSection: true,
+		},
+		{
+			name: "isolated branch - no section",
+			ctx: TaskContextForEnv{
+				IssueID:        "22222222-3333-4444-5555-666666666666",
+				TargetBranch:   "issue/MUL-123",
+				IsSharedBranch: false,
+			},
+			wantSection: false,
+		},
+		{
+			name: "no target branch - no section",
+			ctx: TaskContextForEnv{
+				IssueID: "33333333-4444-5555-6666-777777777777",
+			},
+			wantSection: false,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			hasSection := strings.Contains(out, "## Shared branch")
+			if hasSection != tc.wantSection {
+				t.Errorf("IsSharedBranch=%v: expected section=%v, got=%v\n--- output ---\n%s",
+					tc.ctx.IsSharedBranch, tc.wantSection, hasSection, out)
+			}
+		})
+	}
+}
+
+// TestSharedBranchSectionContent verifies that the section body matches
+// the spec verbatim: branch name is present, force-push rule, rebase
+// rule, pull-before-push rule, and PR append rule.
+func TestSharedBranchSectionContent(t *testing.T) {
+	t.Parallel()
+	const branch = "feature/auth-v2"
+	ctx := TaskContextForEnv{
+		IssueID:        "44444444-5555-6666-7777-888888888888",
+		TargetBranch:   branch,
+		IsSharedBranch: true,
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"## Shared branch",
+		"`" + branch + "`",
+		"Other issues of this feature also push there",
+		"Do not `git push --force`",
+		"git rebase -i",
+		"git pull --rebase",
+		"### Consolidated PR model",
+		"do NOT open a new PR",
+		"## Implements",
+		"### Status workflow under shared branch",
+		"NOT `in_review`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("shared branch section missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+// TestSharedBranchProtocolMarksDoneNotInReview verifies that when the issue
+// rides a shared feature branch, the assignment workflow tells the agent to
+// flip to `done` (not `in_review`) on completion. The dependency gate keys on
+// `done`, so leaving the issue at `in_review` would stall every dependent
+// issue and break the "1 feature = 1 PR, reviewed once at the end" model.
+func TestSharedBranchProtocolMarksDoneNotInReview(t *testing.T) {
+	t.Parallel()
+	const issueID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	ctx := TaskContextForEnv{
+		IssueID:        issueID,
+		TargetBranch:   "feature/auth-v2",
+		IsSharedBranch: true,
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	wantDone := "`multica issue status " + issueID + " done`"
+	if !strings.Contains(out, wantDone) {
+		t.Errorf("shared-branch brief must flip to `done`, expected %q\n--- output ---\n%s", wantDone, out)
+	}
+	unwantedInReview := "`multica issue status " + issueID + " in_review`"
+	if strings.Contains(out, unwantedInReview) {
+		t.Errorf("shared-branch brief must NOT flip to `in_review` (got %q in output)\n--- output ---\n%s", unwantedInReview, out)
+	}
+}
+
+// TestSharedBranchPRConsolidationGuidance verifies that the brief tells the
+// agent to use a feature-level PR title and lists all sibling issues under a
+// `## Implements` section. Subsequent agents (later issues of the same
+// feature) must not open a new PR — they append commits to the existing one.
+func TestSharedBranchPRConsolidationGuidance(t *testing.T) {
+	t.Parallel()
+	const featureID = "fea7feaf-fea7-feaf-fea7-feaffea7feaf"
+	const featureTitle = "Connect Telegram"
+	ctx := TaskContextForEnv{
+		IssueID:        "11111111-2222-3333-4444-555555555555",
+		TargetBranch:   "feature/telegram",
+		IsSharedBranch: true,
+		FeatureID:      featureID,
+		FeatureTitle:   featureTitle,
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"multica issue list --feature " + featureID,
+		"`feat: " + featureTitle + "`",
+		"## Implements",
+		"do NOT open a new PR",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("shared-branch PR guidance missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+// TestRepoCheckoutInstructionMentionsTargetBranchWhenShared verifies that
+// the repos section tells the agent to use --ref <branch> when a shared
+// target branch is set, so the agent picks up sibling-issue commits.
+func TestRepoCheckoutInstructionMentionsTargetBranchWhenShared(t *testing.T) {
+	t.Parallel()
+	const branch = "feature/auth-v2"
+	ctx := TaskContextForEnv{
+		IssueID:      "55555555-6666-7777-8888-999999999999",
+		TargetBranch: branch,
+		IsSharedBranch: true,
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/repo.git"},
+		},
+	}
+	out := buildMetaSkillContent("claude", ctx)
+	if !strings.Contains(out, "--ref "+branch) {
+		t.Errorf("repos section must mention '--ref %s' when IsSharedBranch is true\n--- output ---\n%s", branch, out)
+	}
+}
+
+// TestRepoCheckoutInstructionNoRefWhenIsolated verifies that the repos
+// section does NOT inject --ref <derived-branch> for isolated issue tasks
+// (where the branch is derived as "issue/MUL-123" and doesn't exist on
+// the remote yet).
+func TestRepoCheckoutInstructionNoRefWhenIsolated(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:        "66666666-7777-8888-9999-aaaaaaaaaaaa",
+		TargetBranch:   "issue/MUL-456",
+		IsSharedBranch: false,
+		Repos: []RepoContextForEnv{
+			{URL: "https://github.com/org/repo.git"},
+		},
+	}
+	out := buildMetaSkillContent("claude", ctx)
+	if strings.Contains(out, "--ref issue/MUL-456") {
+		t.Errorf("repos section must NOT inject --ref for isolated branches that don't exist on remote\n--- output ---\n%s", out)
+	}
+}
+
 func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

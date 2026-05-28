@@ -2,8 +2,8 @@
   "title": "Usage",
   "subtitle": "Token spend and agent activity across this workspace.",
   "filter": {
-    "project_label": "Project",
-    "all_projects": "All projects",
+    "feature_label": "Feature",
+    "all_features": "All features",
     "period_label": "Period"
   },
   "kpi": {

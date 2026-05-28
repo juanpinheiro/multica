@@ -20,13 +20,13 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 	// Seed three issues in a fresh project — one with start_date only, one
 	// with due_date only, and one with neither. Using a dedicated project so
 	// the assertion isn't polluted by other issues seeded by parallel tests.
-	var projectID string
+	var featureID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
-	`, testWorkspaceID, fmt.Sprintf("Gantt Scheduled %d", suffix)).Scan(&projectID); err != nil {
+		INSERT INTO feature (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Gantt Scheduled %d", suffix)).Scan(&featureID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM feature WHERE id = $1`, featureID) })
 
 	insertIssue := func(title string, startDate, dueDate *time.Time) string {
 		var number int
@@ -39,9 +39,9 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 		}
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, start_date, due_date)
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, feature_id, start_date, due_date)
 			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, $6, $7) RETURNING id
-		`, testWorkspaceID, title, testUserID, number, projectID, startDate, dueDate).Scan(&id); err != nil {
+		`, testWorkspaceID, title, testUserID, number, featureID, startDate, dueDate).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
 		}
 		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
@@ -56,8 +56,8 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 	noDates := insertIssue(fmt.Sprintf("no-dates-%d", suffix), nil, nil)
 
 	list := func(query string) (ids []string, total int64) {
-		path := fmt.Sprintf("/api/issues?workspace_id=%s&project_id=%s&limit=500%s",
-			testWorkspaceID, projectID, query)
+		path := fmt.Sprintf("/api/issues?workspace_id=%s&feature_id=%s&limit=500%s",
+			testWorkspaceID, featureID, query)
 		w := httptest.NewRecorder()
 		testHandler.ListIssues(w, newRequest("GET", path, nil))
 		if w.Code != http.StatusOK {

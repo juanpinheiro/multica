@@ -15,6 +15,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // MembershipChecker verifies a user belongs to a workspace.
@@ -684,6 +685,20 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 			return
 		}
 		userID = uid
+	}
+
+	// Loopback bypass for personal deployments — mirrors middleware.LoopbackAuth
+	// on the HTTP side. Without this, a browser opened against a local server
+	// has no auth cookie (LoopbackAuth injects X-User-ID, but does not mint
+	// the HttpOnly auth cookie), so the WS would fall through to
+	// firstMessageAuth and hang because the web client sets cookieAuth=true
+	// and never sends an `auth` first frame. Trusted proxies are intentionally
+	// not honored here: a remote client running behind a reverse proxy needs
+	// to authenticate normally — only direct loopback origin is bypassed.
+	if userID == "" && middleware.IsLoopback(middleware.ResolveClientIP(r, nil)) {
+		if mc.IsMember(r.Context(), middleware.SingletonUserID, workspaceID) {
+			userID = middleware.SingletonUserID
+		}
 	}
 
 	conn, err := upgrader.Upgrade(w, r, nil)

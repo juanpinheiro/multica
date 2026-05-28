@@ -260,7 +260,7 @@ func init() {
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
-	issueListCmd.Flags().String("project", "", "Filter by project ID")
+	issueListCmd.Flags().String("feature", "", "Filter by feature ID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
@@ -278,7 +278,7 @@ func init() {
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
-	issueCreateCmd.Flags().String("project", "", "Project ID")
+	issueCreateCmd.Flags().String("feature", "", "Feature ID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (RFC3339 format)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (RFC3339 format)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
@@ -294,7 +294,7 @@ func init() {
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
-	issueUpdateCmd.Flags().String("project", "", "Project ID")
+	issueUpdateCmd.Flags().String("feature", "", "Feature ID")
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (RFC3339 format; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (RFC3339 format)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
@@ -399,12 +399,12 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetInt("offset"); v > 0 {
 		params.Set("offset", fmt.Sprintf("%d", v))
 	}
-	if v, _ := cmd.Flags().GetString("project"); v != "" {
-		project, err := resolveProjectID(ctx, client, v)
+	if v, _ := cmd.Flags().GetString("feature"); v != "" {
+		feature, err := resolveFeatureID(ctx, client, v)
 		if err != nil {
 			return err
 		}
-		params.Set("project_id", project.ID)
+		params.Set("feature_id", feature.ID)
 	}
 	if mdFlags, _ := cmd.Flags().GetStringSlice("metadata"); len(mdFlags) > 0 {
 		filter, err := buildMetadataFilterQueryParam(mdFlags)
@@ -589,12 +589,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["parent_issue_id"] = parent.ID
 	}
-	if v, _ := cmd.Flags().GetString("project"); v != "" {
-		project, err := resolveProjectID(ctx, client, v)
+	if v, _ := cmd.Flags().GetString("feature"); v != "" {
+		feature, err := resolveFeatureID(ctx, client, v)
 		if err != nil {
-			return fmt.Errorf("resolve project: %w", err)
+			return fmt.Errorf("resolve feature: %w", err)
 		}
-		body["project_id"] = project.ID
+		body["feature_id"] = feature.ID
 	}
 	if v, _ := cmd.Flags().GetString("start-date"); v != "" {
 		body["start_date"] = v
@@ -746,16 +746,16 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("priority")
 		body["priority"] = v
 	}
-	if cmd.Flags().Changed("project") {
-		v, _ := cmd.Flags().GetString("project")
+	if cmd.Flags().Changed("feature") {
+		v, _ := cmd.Flags().GetString("feature")
 		if v == "" {
-			body["project_id"] = nil
+			body["feature_id"] = nil
 		} else {
-			project, err := resolveProjectID(ctx, client, v)
+			feature, err := resolveFeatureID(ctx, client, v)
 			if err != nil {
-				return fmt.Errorf("resolve project: %w", err)
+				return fmt.Errorf("resolve feature: %w", err)
 			}
-			body["project_id"] = project.ID
+			body["feature_id"] = feature.ID
 		}
 	}
 	if cmd.Flags().Changed("start-date") {

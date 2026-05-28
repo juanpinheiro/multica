@@ -38,7 +38,7 @@ func init() {
 
 	// Core commands
 	issueCmd.GroupID = groupCore
-	projectCmd.GroupID = groupCore
+	featureCmd.GroupID = groupCore
 	labelCmd.GroupID = groupCore
 	agentCmd.GroupID = groupCore
 	autopilotCmd.GroupID = groupCore
@@ -59,9 +59,11 @@ func init() {
 	attachmentCmd.GroupID = groupAdditional
 	configCmd.GroupID = groupAdditional
 	versionCmd.GroupID = groupAdditional
+	mcpCmd.GroupID = groupAdditional
 
 	rootCmd.AddCommand(issueCmd)
-	rootCmd.AddCommand(projectCmd)
+	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(featureCmd)
 	rootCmd.AddCommand(labelCmd)
 	rootCmd.AddCommand(agentCmd)
 	rootCmd.AddCommand(autopilotCmd)

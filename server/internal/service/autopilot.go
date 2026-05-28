@@ -174,7 +174,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		StartDate:     pgtype.Timestamptz{},
 		DueDate:       pgtype.Timestamptz{},
 		Number:        issueNumber,
-		ProjectID:     ap.ProjectID,
+		FeatureID:     ap.FeatureID,
 		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:      ap.ID,
 	})
@@ -478,6 +478,25 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
 func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, bool) {
+	// Feature gate: dispatch is blocked unless the parent feature is in_progress.
+	if ap.FeatureID.Valid {
+		feature, err := s.Queries.GetFeature(ctx, ap.FeatureID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return "autopilot feature not found", true
+			}
+			slog.Warn("autopilot admission: failed to load feature",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"feature_id", util.UUIDToString(ap.FeatureID),
+				"error", err,
+			)
+			return "", false
+		}
+		if feature.Status != "in_progress" {
+			return "feature_not_in_progress", true
+		}
+	}
+
 	if !ap.AssigneeID.Valid {
 		return "autopilot has no assignee", true
 	}

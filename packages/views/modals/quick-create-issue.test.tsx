@@ -16,8 +16,8 @@ const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
   lastActorId: null as string | null,
   setLastActor: mockSetLastActor,
-  lastProjectId: null as string | null,
-  setLastProjectId: mockSetLastProjectId,
+  lastFeatureId: null as string | null,
+  setLastFeatureId: mockSetLastProjectId,
   prompt: "Persisted draft prompt",
   setPrompt: mockSetPrompt,
   clearPrompt: mockClearPrompt,
@@ -56,7 +56,7 @@ vi.mock("@tanstack/react-query", () => ({
         };
       case "runtimes":
         return { data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] };
-      case "projects":
+      case "features":
         return mockProjectsQuery;
       default:
         return { data: [] };
@@ -89,8 +89,8 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
 }));
 
-vi.mock("@multica/core/projects/queries", () => ({
-  projectListOptions: () => ({ queryKey: ["projects"] }),
+vi.mock("@multica/core/features/queries", () => ({
+  featureListOptions: () => ({ queryKey: ["features"] }),
 }));
 
 vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
@@ -132,8 +132,8 @@ vi.mock("../issues/components", () => ({
   DueDatePicker: () => <div data-testid="due-date-picker" />,
 }));
 
-vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+vi.mock("../features/components/feature-picker", () => ({
+  FeaturePicker: () => <div data-testid="project-picker" />,
 }));
 
 vi.mock("../common/pill-button", () => ({
@@ -280,7 +280,7 @@ describe("AgentCreatePanel", () => {
     vi.clearAllMocks();
     mockQuickCreateStore.lastActorType = null;
     mockQuickCreateStore.lastActorId = null;
-    mockQuickCreateStore.lastProjectId = null;
+    mockQuickCreateStore.lastFeatureId = null;
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
     mockProjectsQuery.data = [];
@@ -322,12 +322,12 @@ describe("AgentCreatePanel", () => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
         agent_id: "agent-1",
         prompt: "New agent prompt",
-        project_id: undefined,
+        feature_id: undefined,
       });
     });
 
     expect(mockSetLastActor).toHaveBeenCalledWith("agent", "agent-1");
-    // No project picked → persisted project preference is cleared so the
+    // No feature picked → persisted feature preference is cleared so the
     // store stays in sync with the actual outgoing request.
     expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
     expect(mockClearPrompt).toHaveBeenCalled();
@@ -364,7 +364,7 @@ describe("AgentCreatePanel", () => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
         squad_id: "squad-1",
         prompt: "Investigate the regression",
-        project_id: undefined,
+        feature_id: undefined,
       });
     });
     expect(mockSetLastActor).toHaveBeenCalledWith("squad", "squad-1");
@@ -383,14 +383,14 @@ describe("AgentCreatePanel", () => {
     expect(screen.queryByRole("button", { name: /Orphan Squad/ })).toBeNull();
   });
 
-  // If the user's persisted `lastProjectId` points at a project that has
+  // If the user's persisted `lastFeatureId` points at a feature that has
   // been deleted (or moved to another workspace), the modal must not keep
   // submitting that dead UUID. Once the projects query resolves and the id
   // is missing, we clear BOTH local state and the persisted preference;
   // dropping only local state would leave the next open re-seeding the same
   // dead value and trigger the server's `project not found` rejection.
-  it("clears a stale persisted project once the projects list resolves without it", async () => {
-    mockQuickCreateStore.lastProjectId = "deleted-proj";
+  it("clears a stale persisted feature once the projects list resolves without it", async () => {
+    mockQuickCreateStore.lastFeatureId = "deleted-proj";
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
 
@@ -404,8 +404,8 @@ describe("AgentCreatePanel", () => {
   // Mirror case: while the query is still loading, we must NOT preemptively
   // clear the persisted preference — that would wipe a perfectly valid
   // selection on every open before the list ever renders.
-  it("keeps the persisted project while the projects list is still loading", () => {
-    mockQuickCreateStore.lastProjectId = "proj-1";
+  it("keeps the persisted feature while the projects list is still loading", () => {
+    mockQuickCreateStore.lastFeatureId = "proj-1";
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = false;
 

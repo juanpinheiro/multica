@@ -279,8 +279,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
 					r.Put("/", h.UpdateIssue)
+					r.Patch("/", h.UpdateIssue)
 					r.Delete("/", h.DeleteIssue)
 					r.Post("/comments", h.CreateComment)
+					r.Post("/dependencies", h.CreateIssueDependency)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
 					r.Get("/subscribers", h.ListIssueSubscribers)
@@ -319,18 +321,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Projects
-			r.Route("/api/projects", func(r chi.Router) {
-				r.Get("/search", h.SearchProjects)
-				r.Get("/", h.ListProjects)
-				r.Post("/", h.CreateProject)
+			// Features
+			r.Route("/api/features", func(r chi.Router) {
+				r.Get("/search", h.SearchFeatures)
+				r.Get("/", h.ListFeatures)
+				r.Post("/", h.CreateFeature)
 				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetProject)
-					r.Put("/", h.UpdateProject)
-					r.Delete("/", h.DeleteProject)
-					r.Get("/resources", h.ListProjectResources)
-					r.Post("/resources", h.CreateProjectResource)
-					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/", h.GetFeature)
+					r.Put("/", h.UpdateFeature)
+					r.Delete("/", h.DeleteFeature)
+					r.Get("/issues", h.GetFeatureIssues)
+					r.Get("/resources", h.ListFeatureResources)
+					r.Post("/resources", h.CreateFeatureResource)
+					r.Delete("/resources/{resourceId}", h.DeleteFeatureResource)
 				})
 			})
 
@@ -451,8 +454,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Dashboard — workspace-wide token + run-time rollups for the
-			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
-			// the rollup to a single project.
+			// "/{slug}/dashboard" page. Optional ?feature_id filter scopes
+			// the rollup to a single feature.
 			r.Route("/api/dashboard", func(r chi.Router) {
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)

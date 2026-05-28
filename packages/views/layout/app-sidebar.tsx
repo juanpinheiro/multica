@@ -75,13 +75,13 @@ import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { featureDetailOptions } from "@multica/core/features/queries";
 import type { PinnedItem } from "@multica/core/types";
-import { ProjectIcon } from "../projects/components/project-icon";
+import { FeatureIcon } from "../features/components/feature-icon";
 import { useT } from "../i18n";
 
 // Top-level nav items stay active when the user is on a child route
-// (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
+// (e.g. "Projects" stays lit on /:slug/features/:id). Pinned items keep
 // strict equality elsewhere — a pinned project shouldn't highlight on
 // sub-pages of itself.
 function isNavActive(pathname: string, href: string): boolean {
@@ -104,7 +104,7 @@ type NavKey =
   | "inbox"
   | "myIssues"
   | "issues"
-  | "projects"
+  | "features"
   | "autopilots"
   | "agents"
   | "squads"
@@ -118,7 +118,7 @@ type NavLabelKey =
   | "inbox"
   | "my_issues"
   | "issues"
-  | "projects"
+  | "features"
   | "autopilots"
   | "agents"
   | "squads"
@@ -134,7 +134,7 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
   { key: "issues", labelKey: "issues", icon: ListTodo },
-  { key: "projects", labelKey: "projects", icon: FolderKanban },
+  { key: "features", labelKey: "features", icon: FolderKanban },
   { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "agents", labelKey: "agents", icon: Bot },
   { key: "squads", labelKey: "squads", icon: Users },
@@ -264,19 +264,19 @@ function PinRow({
     ...issueDetailOptions(wsId, pin.item_id),
     enabled: isIssue,
   });
-  const projectQuery = useQuery({
-    ...projectDetailOptions(wsId, pin.item_id),
+  const featureQuery = useQuery({
+    ...featureDetailOptions(wsId, pin.item_id),
     enabled: !isIssue,
   });
 
   const triggeredRef = useRef(false);
   useEffect(() => {
-    const err = isIssue ? issueQuery.error : projectQuery.error;
+    const err = isIssue ? issueQuery.error : featureQuery.error;
     if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
       triggeredRef.current = true;
       onUnpin();
     }
-  }, [isIssue, issueQuery.error, onUnpin, projectQuery.error]);
+  }, [isIssue, issueQuery.error, onUnpin, featureQuery.error]);
 
   if (isIssue) {
     if (issueQuery.isPending) return <PinSkeleton />;
@@ -299,17 +299,17 @@ function PinRow({
     );
   }
 
-  if (projectQuery.isPending) return <PinSkeleton />;
-  if (projectQuery.isError || !projectQuery.data) return null;
-  const project = projectQuery.data;
-  const iconNode = <ProjectIcon project={project} size="sm" />;
+  if (featureQuery.isPending) return <PinSkeleton />;
+  if (featureQuery.isError || !featureQuery.data) return null;
+  const feature = featureQuery.data;
+  const iconNode = <FeatureIcon feature={feature} size="sm" />;
   return (
     <SortablePinItem
       pin={pin}
       href={href}
       pathname={pathname}
       onUnpin={onUnpin}
-      label={project.title}
+      label={feature.title}
       iconNode={iconNode}
     />
   );
@@ -415,10 +415,10 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       if (useModalStore.getState().modal) return;
       e.preventDefault();
       // Auto-fill project when on a project detail page. The manual form
-      // consumes `project_id`; quick-create also honours it as a seed for
+      // consumes `feature_id`; quick-create also honours it as a seed for
       // its project picker, so passing it through is safe for both modes.
-      const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-      const data = projectMatch ? { project_id: projectMatch[1] } : undefined;
+      const featureMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+      const data = featureMatch ? { feature_id: featureMatch[1] } : undefined;
       openCreateIssueWithPreference(data);
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -570,7 +570,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <PinRow
                               key={pin.id}
                               pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)}
+                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.featureDetail(pin.item_id)}
                               pathname={pathname}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                               wsId={wsId ?? ""}

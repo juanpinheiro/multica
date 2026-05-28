@@ -137,14 +137,14 @@ type RepoData struct {
 	Description string `json:"description,omitempty"`
 }
 
-// ProjectResourceData is the wire shape for a project resource included in a
+// FeatureResourceData is the wire shape for a feature resource included in a
 // claim response. The daemon reads this list and writes it into the agent's
-// working directory so skills/agents can discover project-scoped context.
+// working directory so skills/agents can discover feature-scoped context.
 //
 // resource_ref is type-specific JSON; the daemon doesn't interpret it beyond
 // well-known fields like url for github_repo. New types can be added without
 // changing this struct.
-type ProjectResourceData struct {
+type FeatureResourceData struct {
 	ID           string          `json:"id"`
 	ResourceType string          `json:"resource_type"`
 	ResourceRef  json.RawMessage `json:"resource_ref"`
@@ -176,9 +176,9 @@ type AgentTaskResponse struct {
 	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
 	Agent                   *TaskAgentData        `json:"agent,omitempty"`
 	Repos                   []RepoData            `json:"repos,omitempty"`
-	ProjectID               string                `json:"project_id,omitempty"`        // issue's project, when present
-	ProjectTitle            string                `json:"project_title,omitempty"`     // for surfacing in agent context
-	ProjectResources        []ProjectResourceData `json:"project_resources,omitempty"` // resources attached to the project
+	FeatureID               string                `json:"feature_id,omitempty"`        // issue's feature, when present
+	FeatureTitle            string                `json:"feature_title,omitempty"`     // for surfacing in agent context
+	FeatureResources        []FeatureResourceData `json:"feature_resources,omitempty"` // resources attached to the feature
 	CreatedAt               string                `json:"created_at"`
 	PriorSessionID          string                `json:"prior_session_id,omitempty"`          // session ID from a previous task on same issue
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`            // work_dir from a previous task on same issue
@@ -218,6 +218,14 @@ type AgentTaskResponse struct {
 	// (cloud / system runtimes that pre-date per-task tokens); in that case
 	// the daemon falls back to its own credential. See MUL-2600.
 	AuthToken string `json:"auth_token,omitempty"`
+	// TargetBranch is the resolved git branch the agent should check out,
+	// computed by feature.Resolve(issue, feature). Mirror struct on the
+	// daemon side: daemon.Task.TargetBranch.
+	TargetBranch string `json:"target_branch,omitempty"`
+	// IsSharedBranch is true when TargetBranch came from feature.target_branch
+	// (sibling issues of the same feature push to the same branch). The
+	// daemon emits the "## Shared branch" warning into the agent brief when set.
+	IsSharedBranch bool `json:"is_shared_branch,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in

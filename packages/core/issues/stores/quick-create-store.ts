@@ -7,10 +7,10 @@ import { defaultStorage } from "../../platform/storage";
 
 export type QuickCreateActorType = "agent" | "squad";
 
-// Per-workspace memory of the last actor (agent or squad) and project the
+// Per-workspace memory of the last actor (agent or squad) and feature the
 // user picked in the Quick Create modal. Defaulted to those values on next
 // open so frequent users skip the pickers entirely — without this, anyone
-// targeting a single project ends up retyping "in project A" on every
+// targeting a single feature ends up retyping "in project A" on every
 // prompt. Persisted with the workspace-aware StateStorage so switching
 // workspaces shows the right default automatically. Per-user scoping comes
 // for free from localStorage being browser-profile-local — matches how
@@ -25,8 +25,8 @@ interface QuickCreateState {
   lastActorType: QuickCreateActorType | null;
   lastActorId: string | null;
   setLastActor: (type: QuickCreateActorType | null, id: string | null) => void;
-  lastProjectId: string | null;
-  setLastProjectId: (id: string | null) => void;
+  lastFeatureId: string | null;
+  setLastFeatureId: (id: string | null) => void;
   prompt: string;
   setPrompt: (prompt: string) => void;
   clearPrompt: () => void;
@@ -40,8 +40,8 @@ export const useQuickCreateStore = create<QuickCreateState>()(
       lastActorType: null,
       lastActorId: null,
       setLastActor: (type, id) => set({ lastActorType: type, lastActorId: id }),
-      lastProjectId: null,
-      setLastProjectId: (id) => set({ lastProjectId: id }),
+      lastFeatureId: null,
+      setLastFeatureId: (id) => set({ lastFeatureId: id }),
       prompt: "",
       setPrompt: (prompt) => set({ prompt }),
       clearPrompt: () => set({ prompt: "" }),

@@ -33,14 +33,14 @@ BEGIN
             IF OLD.runtime_id IS NOT NULL THEN
                 INSERT INTO task_usage_hourly_dirty (
                     bucket_hour, workspace_id, runtime_id, agent_id,
-                    project_id, provider, model
+                    feature_id, provider, model
                 )
                 SELECT DISTINCT
                     task_usage_hour_bucket(tu.created_at),
                     a.workspace_id,
                     OLD.runtime_id,
                     OLD.agent_id,
-                    i_old.project_id,
+                    i_old.feature_id,
                     tu.provider,
                     tu.model
                   FROM task_usage tu
@@ -54,14 +54,14 @@ BEGIN
             IF NEW.runtime_id IS NOT NULL THEN
                 INSERT INTO task_usage_hourly_dirty (
                     bucket_hour, workspace_id, runtime_id, agent_id,
-                    project_id, provider, model
+                    feature_id, provider, model
                 )
                 SELECT DISTINCT
                     task_usage_hour_bucket(tu.created_at),
                     a.workspace_id,
                     NEW.runtime_id,
                     NEW.agent_id,
-                    i_new.project_id,
+                    i_new.feature_id,
                     tu.provider,
                     tu.model
                   FROM task_usage tu
@@ -77,14 +77,14 @@ BEGIN
         IF OLD.runtime_id IS NOT NULL THEN
             INSERT INTO task_usage_hourly_dirty (
                 bucket_hour, workspace_id, runtime_id, agent_id,
-                project_id, provider, model
+                feature_id, provider, model
             )
             SELECT DISTINCT
                 task_usage_hour_bucket(tu.created_at),
                 a.workspace_id,
                 OLD.runtime_id,
                 OLD.agent_id,
-                i.project_id,
+                i.feature_id,
                 tu.provider,
                 tu.model
               FROM task_usage tu
@@ -111,14 +111,14 @@ CREATE FUNCTION public.enqueue_task_usage_hourly_dirty_for_issue_delete() RETURN
 BEGIN
     INSERT INTO task_usage_hourly_dirty (
         bucket_hour, workspace_id, runtime_id, agent_id,
-        project_id, provider, model
+        feature_id, provider, model
     )
     SELECT DISTINCT
         task_usage_hour_bucket(tu.created_at),
         OLD.workspace_id,
         atq.runtime_id,
         atq.agent_id,
-        OLD.project_id,
+        OLD.feature_id,
         tu.provider,
         tu.model
       FROM agent_task_queue atq
@@ -133,25 +133,25 @@ $$;
 
 
 --
--- Name: enqueue_task_usage_hourly_dirty_for_issue_project(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: enqueue_task_usage_hourly_dirty_for_issue_feature(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.enqueue_task_usage_hourly_dirty_for_issue_project() RETURNS trigger
+CREATE FUNCTION public.enqueue_task_usage_hourly_dirty_for_issue_feature() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-    IF OLD.project_id IS DISTINCT FROM NEW.project_id THEN
-        -- OLD project buckets.
+    IF OLD.feature_id IS DISTINCT FROM NEW.feature_id THEN
+        -- OLD feature buckets.
         INSERT INTO task_usage_hourly_dirty (
             bucket_hour, workspace_id, runtime_id, agent_id,
-            project_id, provider, model
+            feature_id, provider, model
         )
         SELECT DISTINCT
             task_usage_hour_bucket(tu.created_at),
             NEW.workspace_id,
             atq.runtime_id,
             atq.agent_id,
-            OLD.project_id,
+            OLD.feature_id,
             tu.provider,
             tu.model
           FROM agent_task_queue atq
@@ -161,17 +161,17 @@ BEGIN
         ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_dirty_key DO UPDATE
             SET enqueued_at = GREATEST(task_usage_hourly_dirty.enqueued_at, EXCLUDED.enqueued_at);
 
-        -- NEW project buckets.
+        -- NEW feature buckets.
         INSERT INTO task_usage_hourly_dirty (
             bucket_hour, workspace_id, runtime_id, agent_id,
-            project_id, provider, model
+            feature_id, provider, model
         )
         SELECT DISTINCT
             task_usage_hour_bucket(tu.created_at),
             NEW.workspace_id,
             atq.runtime_id,
             atq.agent_id,
-            NEW.project_id,
+            NEW.feature_id,
             tu.provider,
             tu.model
           FROM agent_task_queue atq
@@ -196,14 +196,14 @@ CREATE FUNCTION public.enqueue_task_usage_hourly_dirty_for_tu() RETURNS trigger
 BEGIN
     INSERT INTO task_usage_hourly_dirty (
         bucket_hour, workspace_id, runtime_id, agent_id,
-        project_id, provider, model
+        feature_id, provider, model
     )
     SELECT
         task_usage_hour_bucket(OLD.created_at),
         a.workspace_id,
         atq.runtime_id,
         atq.agent_id,
-        i.project_id,
+        i.feature_id,
         OLD.provider,
         OLD.model
       FROM agent_task_queue atq
@@ -326,7 +326,7 @@ BEGIN
             a.workspace_id                        AS workspace_id,
             atq.runtime_id                        AS runtime_id,
             atq.agent_id                          AS agent_id,
-            i.project_id                          AS project_id,
+            i.feature_id                          AS feature_id,
             tu.provider                           AS provider,
             tu.model                              AS model
           FROM task_usage tu
@@ -344,7 +344,7 @@ BEGIN
     ),
     dirty_from_queue AS (
         SELECT bucket_hour, workspace_id, runtime_id, agent_id,
-               project_id, provider, model
+               feature_id, provider, model
           FROM task_usage_hourly_dirty
          WHERE enqueued_at < p_to
     ),
@@ -359,7 +359,7 @@ BEGIN
             dk.workspace_id,
             dk.runtime_id,
             dk.agent_id,
-            dk.project_id,
+            dk.feature_id,
             dk.provider,
             dk.model,
             SUM(tu.input_tokens)::bigint       AS input_tokens,
@@ -378,19 +378,19 @@ BEGIN
                                     AND tu.provider    = dk.provider
                                     AND tu.model       = dk.model
                                     AND task_usage_hour_bucket(tu.created_at) = dk.bucket_hour
-         WHERE (i.project_id IS NOT DISTINCT FROM dk.project_id)
+         WHERE (i.feature_id IS NOT DISTINCT FROM dk.feature_id)
          GROUP BY 1, 2, 3, 4, 5, 6, 7
     ),
     upserted AS (
         INSERT INTO task_usage_hourly AS d (
             bucket_hour, workspace_id, runtime_id, agent_id,
-            project_id, provider, model,
+            feature_id, provider, model,
             input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
             task_count, event_count
         )
         SELECT
             bucket_hour, workspace_id, runtime_id, agent_id,
-            project_id, provider, model,
+            feature_id, provider, model,
             input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
             task_count, event_count
           FROM recomputed
@@ -411,7 +411,7 @@ BEGIN
            AND d.workspace_id = dk.workspace_id
            AND d.runtime_id   = dk.runtime_id
            AND d.agent_id     = dk.agent_id
-           AND d.project_id IS NOT DISTINCT FROM dk.project_id
+           AND d.feature_id IS NOT DISTINCT FROM dk.feature_id
            AND d.provider     = dk.provider
            AND d.model        = dk.model
            AND NOT EXISTS (
@@ -420,7 +420,7 @@ BEGIN
                   AND r.workspace_id = dk.workspace_id
                   AND r.runtime_id   = dk.runtime_id
                   AND r.agent_id     = dk.agent_id
-                  AND r.project_id IS NOT DISTINCT FROM dk.project_id
+                  AND r.feature_id IS NOT DISTINCT FROM dk.feature_id
                   AND r.provider     = dk.provider
                   AND r.model        = dk.model
            )
@@ -627,7 +627,7 @@ CREATE TABLE public.autopilot (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     assignee_type text DEFAULT 'agent'::text NOT NULL,
-    project_id uuid,
+    feature_id uuid,
     CONSTRAINT autopilot_assignee_type_check CHECK ((assignee_type = ANY (ARRAY['agent'::text, 'squad'::text]))),
     CONSTRAINT autopilot_created_by_type_check CHECK ((created_by_type = ANY (ARRAY['member'::text, 'agent'::text]))),
     CONSTRAINT autopilot_execution_mode_check CHECK ((execution_mode = ANY (ARRAY['create_issue'::text, 'run_only'::text]))),
@@ -905,7 +905,7 @@ CREATE TABLE public.issue (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     number integer DEFAULT 0 NOT NULL,
-    project_id uuid,
+    feature_id uuid,
     origin_type text,
     origin_id uuid,
     first_executed_at timestamp with time zone,
@@ -1042,15 +1042,15 @@ CREATE TABLE public.pinned_item (
     item_id uuid NOT NULL,
     "position" double precision DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT pinned_item_item_type_check CHECK ((item_type = ANY (ARRAY['issue'::text, 'project'::text])))
+    CONSTRAINT pinned_item_item_type_check CHECK ((item_type = ANY (ARRAY['issue'::text, 'feature'::text])))
 );
 
 
 --
--- Name: project; Type: TABLE; Schema: public; Owner: -
+-- Name: feature; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.project (
+CREATE TABLE public.feature (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     workspace_id uuid NOT NULL,
     title text NOT NULL,
@@ -1062,19 +1062,20 @@ CREATE TABLE public.project (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     priority text DEFAULT 'none'::text NOT NULL,
-    CONSTRAINT project_lead_type_check CHECK ((lead_type = ANY (ARRAY['member'::text, 'agent'::text]))),
-    CONSTRAINT project_priority_check CHECK ((priority = ANY (ARRAY['urgent'::text, 'high'::text, 'medium'::text, 'low'::text, 'none'::text]))),
-    CONSTRAINT project_status_check CHECK ((status = ANY (ARRAY['planned'::text, 'in_progress'::text, 'paused'::text, 'completed'::text, 'cancelled'::text])))
+    target_branch text,
+    CONSTRAINT feature_lead_type_check CHECK ((lead_type = ANY (ARRAY['member'::text, 'agent'::text]))),
+    CONSTRAINT feature_priority_check CHECK ((priority = ANY (ARRAY['urgent'::text, 'high'::text, 'medium'::text, 'low'::text, 'none'::text]))),
+    CONSTRAINT feature_status_check CHECK ((status = ANY (ARRAY['planned'::text, 'in_progress'::text, 'paused'::text, 'completed'::text, 'cancelled'::text])))
 );
 
 
 --
--- Name: project_resource; Type: TABLE; Schema: public; Owner: -
+-- Name: feature_resource; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.project_resource (
+CREATE TABLE public.feature_resource (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    project_id uuid NOT NULL,
+    feature_id uuid NOT NULL,
     workspace_id uuid NOT NULL,
     resource_type text NOT NULL,
     resource_ref jsonb NOT NULL,
@@ -1211,7 +1212,7 @@ CREATE TABLE public.task_usage_hourly (
     workspace_id uuid NOT NULL,
     runtime_id uuid NOT NULL,
     agent_id uuid NOT NULL,
-    project_id uuid,
+    feature_id uuid,
     provider text NOT NULL,
     model text NOT NULL,
     input_tokens bigint DEFAULT 0 NOT NULL,
@@ -1233,7 +1234,7 @@ CREATE TABLE public.task_usage_hourly_dirty (
     workspace_id uuid NOT NULL,
     runtime_id uuid NOT NULL,
     agent_id uuid NOT NULL,
-    project_id uuid,
+    feature_id uuid,
     provider text NOT NULL,
     model text NOT NULL,
     enqueued_at timestamp with time zone DEFAULT now() NOT NULL
@@ -1629,27 +1630,27 @@ ALTER TABLE ONLY public.pinned_item
 
 
 --
--- Name: project project_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: project feature_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.project
-    ADD CONSTRAINT project_pkey PRIMARY KEY (id);
-
-
---
--- Name: project_resource project_resource_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.project_resource
-    ADD CONSTRAINT project_resource_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY public.feature
+    ADD CONSTRAINT feature_pkey PRIMARY KEY (id);
 
 
 --
--- Name: project_resource project_resource_project_id_resource_type_resource_ref_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: feature_resource feature_resource_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.project_resource
-    ADD CONSTRAINT project_resource_project_id_resource_type_resource_ref_key UNIQUE (project_id, resource_type, resource_ref);
+ALTER TABLE ONLY public.feature_resource
+    ADD CONSTRAINT feature_resource_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: feature_resource feature_resource_feature_id_resource_type_resource_ref_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feature_resource
+    ADD CONSTRAINT feature_resource_feature_id_resource_type_resource_ref_key UNIQUE (feature_id, resource_type, resource_ref);
 
 
 --
@@ -1769,7 +1770,7 @@ ALTER TABLE ONLY public.issue
 --
 
 ALTER TABLE ONLY public.task_usage_hourly_dirty
-    ADD CONSTRAINT uq_task_usage_hourly_dirty_key UNIQUE NULLS NOT DISTINCT (bucket_hour, workspace_id, runtime_id, agent_id, project_id, provider, model);
+    ADD CONSTRAINT uq_task_usage_hourly_dirty_key UNIQUE NULLS NOT DISTINCT (bucket_hour, workspace_id, runtime_id, agent_id, feature_id, provider, model);
 
 
 --
@@ -1777,7 +1778,7 @@ ALTER TABLE ONLY public.task_usage_hourly_dirty
 --
 
 ALTER TABLE ONLY public.task_usage_hourly
-    ADD CONSTRAINT uq_task_usage_hourly_key UNIQUE NULLS NOT DISTINCT (bucket_hour, workspace_id, runtime_id, agent_id, project_id, provider, model);
+    ADD CONSTRAINT uq_task_usage_hourly_key UNIQUE NULLS NOT DISTINCT (bucket_hour, workspace_id, runtime_id, agent_id, feature_id, provider, model);
 
 
 --
@@ -1982,10 +1983,10 @@ CREATE INDEX idx_autopilot_assignee_type_id ON public.autopilot USING btree (ass
 
 
 --
--- Name: idx_autopilot_project; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_autopilot_feature; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_autopilot_project ON public.autopilot USING btree (project_id);
+CREATE INDEX idx_autopilot_feature ON public.autopilot USING btree (feature_id);
 
 
 --
@@ -2157,10 +2158,10 @@ CREATE INDEX idx_issue_parent ON public.issue USING btree (parent_issue_id);
 
 
 --
--- Name: idx_issue_project; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_issue_feature; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_issue_project ON public.issue USING btree (project_id);
+CREATE INDEX idx_issue_feature ON public.issue USING btree (feature_id);
 
 
 --
@@ -2234,24 +2235,24 @@ CREATE INDEX idx_pinned_item_user_ws ON public.pinned_item USING btree (workspac
 
 
 --
--- Name: idx_project_resource_project; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_feature_resource_feature; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_project_resource_project ON public.project_resource USING btree (project_id, "position");
-
-
---
--- Name: idx_project_resource_workspace; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_project_resource_workspace ON public.project_resource USING btree (workspace_id);
+CREATE INDEX idx_feature_resource_feature ON public.feature_resource USING btree (feature_id, "position");
 
 
 --
--- Name: idx_project_workspace; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_feature_resource_workspace; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_project_workspace ON public.project USING btree (workspace_id);
+CREATE INDEX idx_feature_resource_workspace ON public.feature_resource USING btree (workspace_id);
+
+
+--
+-- Name: idx_feature_workspace; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_feature_workspace ON public.feature USING btree (workspace_id);
 
 
 --
@@ -2346,10 +2347,10 @@ CREATE INDEX idx_task_usage_hourly_workspace_agent_time ON public.task_usage_hou
 
 
 --
--- Name: idx_task_usage_hourly_workspace_project_time; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_task_usage_hourly_workspace_feature_time; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_task_usage_hourly_workspace_project_time ON public.task_usage_hourly USING btree (workspace_id, project_id, bucket_hour DESC) WHERE (project_id IS NOT NULL);
+CREATE INDEX idx_task_usage_hourly_workspace_feature_time ON public.task_usage_hourly USING btree (workspace_id, feature_id, bucket_hour DESC) WHERE (feature_id IS NOT NULL);
 
 
 --
@@ -2416,10 +2417,10 @@ CREATE TRIGGER trg_issue_delete_dirty_hourly BEFORE DELETE ON public.issue FOR E
 
 
 --
--- Name: issue trg_issue_project_dirty_hourly; Type: TRIGGER; Schema: public; Owner: -
+-- Name: issue trg_issue_feature_dirty_hourly; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_issue_project_dirty_hourly BEFORE UPDATE OF project_id ON public.issue FOR EACH ROW EXECUTE FUNCTION public.enqueue_task_usage_hourly_dirty_for_issue_project();
+CREATE TRIGGER trg_issue_feature_dirty_hourly BEFORE UPDATE OF feature_id ON public.issue FOR EACH ROW EXECUTE FUNCTION public.enqueue_task_usage_hourly_dirty_for_issue_feature();
 
 
 --
@@ -2606,11 +2607,11 @@ ALTER TABLE ONLY public.attachment
 
 
 --
--- Name: autopilot autopilot_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: autopilot autopilot_feature_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.autopilot
-    ADD CONSTRAINT autopilot_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.project(id) ON DELETE SET NULL;
+    ADD CONSTRAINT autopilot_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES public.feature(id) ON DELETE SET NULL;
 
 
 --
@@ -2846,11 +2847,11 @@ ALTER TABLE ONLY public.issue
 
 
 --
--- Name: issue issue_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: issue issue_feature_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.issue
-    ADD CONSTRAINT issue_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.project(id) ON DELETE SET NULL;
+    ADD CONSTRAINT issue_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES public.feature(id) ON DELETE SET NULL;
 
 
 --
@@ -2966,27 +2967,27 @@ ALTER TABLE ONLY public.pinned_item
 
 
 --
--- Name: project_resource project_resource_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: feature_resource feature_resource_feature_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.project_resource
-    ADD CONSTRAINT project_resource_project_id_fkey FOREIGN KEY (project_id) REFERENCES public.project(id) ON DELETE CASCADE;
-
-
---
--- Name: project_resource project_resource_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.project_resource
-    ADD CONSTRAINT project_resource_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspace(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.feature_resource
+    ADD CONSTRAINT feature_resource_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES public.feature(id) ON DELETE CASCADE;
 
 
 --
--- Name: project project_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: feature_resource feature_resource_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.project
-    ADD CONSTRAINT project_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspace(id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.feature_resource
+    ADD CONSTRAINT feature_resource_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspace(id) ON DELETE CASCADE;
+
+
+--
+-- Name: project feature_workspace_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.feature
+    ADD CONSTRAINT feature_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspace(id) ON DELETE CASCADE;
 
 
 --

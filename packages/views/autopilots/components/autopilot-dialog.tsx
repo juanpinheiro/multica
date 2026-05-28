@@ -39,7 +39,7 @@ import { TimezonePicker } from "./pickers/timezone-picker";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { featureListOptions } from "@multica/core/features/queries";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -55,8 +55,8 @@ import type {
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { ProjectPicker } from "../../projects/components/project-picker";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { FeaturePicker } from "../../features/components/feature-picker";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import {
   getDefaultTriggerConfig,
@@ -76,7 +76,7 @@ import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
 export interface AutopilotInitial {
   title: string;
   description: string;
-  project_id: string | null;
+  feature_id: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
@@ -250,7 +250,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: features = [] } = useQuery(featureListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -260,7 +260,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
-  const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
+  const [featureId, setFeatureId] = useState<string | null>(initial.feature_id ?? null);
   const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
     initial.assignee_type ?? "agent",
   );
@@ -318,9 +318,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     const agent = agents.find((a) => a.id === assigneeId);
     return agent ? { name: agent.name, description: agent.description } : null;
   }, [agents, squads, assigneeId, assigneeType]);
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === projectId) ?? null,
-    [projects, projectId],
+  const selectedFeature = useMemo(
+    () => features.find((f) => f.id === featureId) ?? null,
+    [features, featureId],
   );
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
@@ -351,7 +351,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         const autopilot = await createAutopilot.mutateAsync({
           title: title.trim(),
           description: description.trim() || undefined,
-          project_id: executionMode === "create_issue" ? projectId : null,
+          feature_id: executionMode === "create_issue" ? featureId : null,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -399,7 +399,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           id: props.autopilotId,
           title: title.trim(),
           description: description.trim() || null,
-          project_id: executionMode === "create_issue" ? projectId : null,
+          feature_id: executionMode === "create_issue" ? featureId : null,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
@@ -589,10 +589,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
 
             {executionMode === "create_issue" && (
-              <ProjectSection
-                projectId={projectId}
-                selectedProject={selectedProject}
-                onChange={setProjectId}
+              <FeatureSection
+                featureId={featureId}
+                selectedFeature={selectedFeature}
+                onChange={setFeatureId}
               />
             )}
 
@@ -774,22 +774,22 @@ function OutputModeSection({
   );
 }
 
-function ProjectSection({
-  projectId,
-  selectedProject,
+function FeatureSection({
+  featureId,
+  selectedFeature,
   onChange,
 }: {
-  projectId: string | null;
-  selectedProject: { title: string; icon: string | null } | null;
-  onChange: (projectId: string | null) => void;
+  featureId: string | null;
+  selectedFeature: { title: string; icon: string | null } | null;
+  onChange: (featureId: string | null) => void;
 }) {
   const { t } = useT("autopilots");
   return (
     <div>
-      <SectionLabel>{t(($) => $.dialog.section_project)}</SectionLabel>
-      <ProjectPicker
-        projectId={projectId}
-        onUpdate={(updates) => onChange(updates.project_id ?? null)}
+      <SectionLabel>{t(($) => $.dialog.section_feature)}</SectionLabel>
+      <FeaturePicker
+        featureId={featureId}
+        onUpdate={(updates) => onChange(updates.feature_id ?? null)}
         align="start"
         triggerRender={
           <button
@@ -799,15 +799,15 @@ function ProjectSection({
               "hover:bg-accent/40 transition-colors cursor-pointer",
             )}
           >
-            {selectedProject ? (
-              <ProjectIcon project={selectedProject} size="md" />
+            {selectedFeature ? (
+              <FeatureIcon feature={selectedFeature} size="md" />
             ) : (
               <span className="inline-flex size-5 items-center justify-center rounded-md bg-muted text-muted-foreground">
                 <FolderKanban className="size-3.5" />
               </span>
             )}
             <span className="flex-1 min-w-0 truncate text-sm font-medium">
-              {selectedProject?.title ?? t(($) => $.dialog.no_project)}
+              {selectedFeature?.title ?? t(($) => $.dialog.no_feature)}
             </span>
             <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
           </button>

@@ -98,7 +98,7 @@ WHERE a.workspace_id = $1
   AND atq.started_at IS NOT NULL
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $2::timestamptz
-  AND ($3::uuid IS NULL OR i.project_id = $3)
+  AND ($3::uuid IS NULL OR i.feature_id = $3)
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC
 `
@@ -106,7 +106,7 @@ ORDER BY total_seconds DESC
 type ListDashboardAgentRunTimeParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	FeatureID   pgtype.UUID        `json:"feature_id"`
 }
 
 type ListDashboardAgentRunTimeRow struct {
@@ -117,7 +117,7 @@ type ListDashboardAgentRunTimeRow struct {
 }
 
 // Per-agent total task run time and task count for the workspace, optionally
-// scoped to a single project. Counts only terminal runs (completed or failed)
+// scoped to a single feature. Counts only terminal runs (completed or failed)
 // with both started_at and completed_at populated — queued/running tasks have
 // no finite duration. Anchored on completed_at so the window matches the
 // token cost window (which is anchored on tu.created_at, ~= completion time).
@@ -126,7 +126,7 @@ type ListDashboardAgentRunTimeRow struct {
 // start-of-day-(N) so the "last N days" window lines up with the per-agent
 // cost card; passed straight through without re-truncation.
 func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboardAgentRunTimeParams) ([]ListDashboardAgentRunTimeRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardAgentRunTime, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	rows, err := q.db.Query(ctx, listDashboardAgentRunTime, arg.WorkspaceID, arg.Since, arg.FeatureID)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ WHERE a.workspace_id = $1
   AND atq.started_at IS NOT NULL
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= $3::timestamptz
-  AND ($4::uuid IS NULL OR i.project_id = $4)
+  AND ($4::uuid IS NULL OR i.feature_id = $4)
 GROUP BY DATE(atq.completed_at AT TIME ZONE $2::text)
 ORDER BY DATE(atq.completed_at AT TIME ZONE $2::text) DESC
 `
@@ -176,7 +176,7 @@ type ListDashboardRunTimeDailyParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Tz          string             `json:"tz"`
 	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	FeatureID   pgtype.UUID        `json:"feature_id"`
 }
 
 type ListDashboardRunTimeDailyRow struct {
@@ -187,7 +187,7 @@ type ListDashboardRunTimeDailyRow struct {
 }
 
 // Daily per-date run time + task counts for the workspace, optionally
-// scoped to a single project. Powers the workspace dashboard's "Time"
+// scoped to a single feature. Powers the workspace dashboard's "Time"
 // and "Tasks" metrics on the same toggle as Tokens / Cost. Bucketed by
 // completed_at (terminal time) sliced into calendar days under the
 // caller-supplied @tz — same Viewing-tz treatment as ListDashboardUsageDaily
@@ -203,7 +203,7 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 		arg.WorkspaceID,
 		arg.Tz,
 		arg.Since,
-		arg.ProjectID,
+		arg.FeatureID,
 	)
 	if err != nil {
 		return nil, err
@@ -240,7 +240,7 @@ SELECT
 FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= $2::timestamptz
-  AND ($3::uuid IS NULL OR project_id = $3)
+  AND ($3::uuid IS NULL OR feature_id = $3)
 GROUP BY agent_id, model
 ORDER BY agent_id, model
 `
@@ -248,7 +248,7 @@ ORDER BY agent_id, model
 type ListDashboardUsageByAgentParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	FeatureID   pgtype.UUID        `json:"feature_id"`
 }
 
 type ListDashboardUsageByAgentRow struct {
@@ -274,7 +274,7 @@ type ListDashboardUsageByAgentRow struct {
 // frontend prefers `ListDashboardAgentRunTime` for the user-facing
 // "tasks" column, so this stays informational only.
 func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboardUsageByAgentParams) ([]ListDashboardUsageByAgentRow, error) {
-	rows, err := q.db.Query(ctx, listDashboardUsageByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	rows, err := q.db.Query(ctx, listDashboardUsageByAgent, arg.WorkspaceID, arg.Since, arg.FeatureID)
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +313,7 @@ SELECT
 FROM task_usage_hourly
 WHERE workspace_id = $1
   AND bucket_hour >= $3::timestamptz
-  AND ($4::uuid IS NULL OR project_id = $4)
+  AND ($4::uuid IS NULL OR feature_id = $4)
 GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), model
 ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, model
 `
@@ -322,7 +322,7 @@ type ListDashboardUsageDailyParams struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Tz          string             `json:"tz"`
 	Since       pgtype.Timestamptz `json:"since"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
+	FeatureID   pgtype.UUID        `json:"feature_id"`
 }
 
 type ListDashboardUsageDailyRow struct {
@@ -338,7 +338,7 @@ type ListDashboardUsageDailyRow struct {
 // Daily per-(date, model) token aggregates for the workspace, served
 // from the UTC-bucketed `task_usage_hourly` table and
 // sliced to calendar days under the caller-supplied @tz. Optionally
-// scoped to a single project via sqlc.narg('project_id'). Powers the
+// scoped to a single feature via sqlc.narg('feature_id'). Powers the
 // workspace dashboard's daily cost chart.
 // The viewer's tz is applied here at query time, so a viewer in
 // Asia/Shanghai gets their "today" cut at +08 and one in
@@ -354,7 +354,7 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 		arg.WorkspaceID,
 		arg.Tz,
 		arg.Since,
-		arg.ProjectID,
+		arg.FeatureID,
 	)
 	if err != nil {
 		return nil, err

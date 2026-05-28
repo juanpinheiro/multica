@@ -11,7 +11,7 @@ import (
 
 // PinnedItemResponse carries pin metadata only. Title / status / identifier /
 // icon are intentionally NOT included — clients derive them from their own
-// issue / project query cache so that an `issue:updated` event flows naturally
+// issue / feature query cache so that an `issue:updated` event flows naturally
 // into the sidebar without needing a cross-entity invalidate on `pinKeys`.
 type PinnedItemResponse struct {
 	ID          string  `json:"id"`
@@ -84,8 +84,8 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.ItemType != "issue" && req.ItemType != "project" {
-		writeError(w, http.StatusBadRequest, "item_type must be 'issue' or 'project'")
+	if req.ItemType != "issue" && req.ItemType != "feature" {
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue' or 'feature'")
 		return
 	}
 	if req.ItemID == "" {
@@ -111,11 +111,11 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "issue not found")
 			return
 		}
-	case "project":
-		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+	case "feature":
+		if _, err := h.Queries.GetFeatureInWorkspace(r.Context(), db.GetFeatureInWorkspaceParams{
 			ID: itemUUID, WorkspaceID: wsUUID,
 		}); err != nil {
-			writeError(w, http.StatusNotFound, "project not found")
+			writeError(w, http.StatusNotFound, "feature not found")
 			return
 		}
 	}

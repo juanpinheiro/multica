@@ -303,7 +303,12 @@ func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out an
 
 	if resp.StatusCode >= 400 {
 		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("PATCH %s returned %d: %s", path, resp.StatusCode, strings.TrimSpace(string(respData)))
+		return &HTTPError{
+			Method:     http.MethodPatch,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(respData)),
+		}
 	}
 	if out == nil {
 		return nil

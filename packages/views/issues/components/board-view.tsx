@@ -120,7 +120,7 @@ export function BoardView({
   myIssuesScope,
   myIssuesFilter,
   sort,
-  projectId,
+  featureId,
 }: {
   issues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
@@ -136,7 +136,7 @@ export function BoardView({
   /** Must match the sort the page queried with — embedded in the cache key. */
   sort?: IssueSortParam;
   /** When set, the per-column "+" pre-fills the project on the create form. */
-  projectId?: string;
+  featureId?: string;
 }) {
   const { t } = useT("issues");
   const grouping = useViewStore((s) => s.grouping);
@@ -411,7 +411,7 @@ export function BoardView({
                 childProgressMap={childProgressMap}
                 myIssuesOpts={myIssuesOpts}
                 sort={sort}
-                projectId={projectId}
+                featureId={featureId}
                 sortLabel={sortLabel}
               />
             ) : (
@@ -425,7 +425,7 @@ export function BoardView({
                   queryKey={assigneeGroupQueryKey}
                   filter={assigneeGroupFilter}
                   sort={sort}
-                  projectId={projectId}
+                  featureId={featureId}
                   sortLabel={sortLabel}
                 />
               ) : (
@@ -435,7 +435,7 @@ export function BoardView({
                   issueIds={columns[group.id] ?? EMPTY_IDS}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
-                  projectId={projectId}
+                  featureId={featureId}
                   totalCount={group.totalCount}
                   sortLabel={sortLabel}
                 />
@@ -472,7 +472,7 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
   queryKey,
   filter,
   sort,
-  projectId,
+  featureId,
   sortLabel,
 }: {
   group: BoardColumnGroup;
@@ -482,7 +482,7 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
   queryKey: QueryKey;
   filter: AssigneeGroupedIssuesFilter;
   sort?: IssueSortParam;
-  projectId?: string;
+  featureId?: string;
   sortLabel?: string | null;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByAssigneeGroup(
@@ -502,7 +502,7 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
       issueMap={issueMap}
       childProgressMap={childProgressMap}
       totalCount={total}
-      projectId={projectId}
+      featureId={featureId}
       sortLabel={sortLabel}
       footer={
         hasMore ? (
@@ -520,7 +520,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   childProgressMap,
   myIssuesOpts,
   sort,
-  projectId,
+  featureId,
   sortLabel,
 }: {
   group: BoardColumnGroup & { status: IssueStatus };
@@ -529,7 +529,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
-  projectId?: string;
+  featureId?: string;
   sortLabel?: string | null;
 }) {
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
@@ -544,7 +544,7 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
       issueMap={issueMap}
       childProgressMap={childProgressMap}
       totalCount={total}
-      projectId={projectId}
+      featureId={featureId}
       sortLabel={sortLabel}
       footer={
         hasMore ? (

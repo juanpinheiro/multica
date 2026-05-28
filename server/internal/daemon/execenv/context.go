@@ -51,9 +51,9 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 	// block task startup. Missing resources surface as the agent simply not
 	// seeing the file, which matches the "scoped, not dumped" design (the
 	// meta skill content always lists what the agent should expect).
-	if err := writeProjectResources(workDir, ctx); err != nil {
+	if err := writeFeatureResources(workDir, ctx); err != nil {
 		// Caller logs warnings; avoid noisy returns for non-fatal context.
-		return fmt.Errorf("write project resources: %w", err)
+		return fmt.Errorf("write feature resources: %w", err)
 	}
 
 	return nil
@@ -63,14 +63,14 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
 // directory. Schema is intentionally a thin pass-through of the API response
 // so consumers (skills, future tooling) don't need a separate parser.
 type projectResourceFile struct {
-	ProjectID    string                  `json:"project_id,omitempty"`
-	ProjectTitle string                  `json:"project_title,omitempty"`
-	Resources    []ProjectResourceForEnv `json:"resources"`
+	FeatureID    string                  `json:"feature_id,omitempty"`
+	FeatureTitle string                  `json:"feature_title,omitempty"`
+	Resources    []FeatureResourceForEnv `json:"resources"`
 }
 
 // MarshalJSON renders the resource_ref field as raw JSON instead of a base64
 // blob. The struct's other fields are simple strings.
-func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
+func (p FeatureResourceForEnv) MarshalJSON() ([]byte, error) {
 	type alias struct {
 		ID           string          `json:"id"`
 		ResourceType string          `json:"resource_type"`
@@ -89,25 +89,25 @@ func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// writeProjectResources writes .multica/project/resources.json into the
-// working directory when the task carries project context. The file is
-// always written when a project is attached (even with zero resources) so
-// agents can rely on its presence as a signal that a project exists.
-func writeProjectResources(workDir string, ctx TaskContextForEnv) error {
-	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
+// writeFeatureResources writes .multica/project/resources.json into the
+// working directory when the task carries feature context. The file is
+// always written when a feature is attached (even with zero resources) so
+// agents can rely on its presence as a signal that a feature exists.
+func writeFeatureResources(workDir string, ctx TaskContextForEnv) error {
+	if ctx.FeatureID == "" && len(ctx.FeatureResources) == 0 {
 		return nil
 	}
-	dir := filepath.Join(workDir, ".multica", "project")
+	dir := filepath.Join(workDir, ".multica", "feature")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	resources := ctx.ProjectResources
+	resources := ctx.FeatureResources
 	if resources == nil {
-		resources = []ProjectResourceForEnv{}
+		resources = []FeatureResourceForEnv{}
 	}
 	payload := projectResourceFile{
-		ProjectID:    ctx.ProjectID,
-		ProjectTitle: ctx.ProjectTitle,
+		FeatureID:    ctx.FeatureID,
+		FeatureTitle: ctx.FeatureTitle,
 		Resources:    resources,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
@@ -132,7 +132,7 @@ func resolveSkillsDir(workDir, provider string) (string, error) {
 		// See: https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference
 		skillsDir = filepath.Join(workDir, ".github", "skills")
 	case "opencode":
-		// OpenCode natively discovers project skills from .opencode/skills/ in
+		// OpenCode natively discovers feature skills from .opencode/skills/ in
 		// the workdir. ConfigPaths.directories() walks up from the discovery
 		// root looking for a bare `.opencode` directory (no opencode.json
 		// signal required), then skill/index.ts scans `{skill,skills}/**/SKILL.md`

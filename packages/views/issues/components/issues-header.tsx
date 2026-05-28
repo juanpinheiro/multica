@@ -51,9 +51,9 @@ import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { featureListOptions } from "@multica/core/features/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
 import {
@@ -104,8 +104,8 @@ function getActiveFilterCount(state: {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
-  projectFilters: string[];
-  includeNoProject: boolean;
+  featureFilters: string[];
+  includeNoFeature: boolean;
   labelFilters: string[];
 }) {
   let count = 0;
@@ -113,7 +113,7 @@ function getActiveFilterCount(state: {
   if (state.priorityFilters.length > 0) count++;
   if (state.assigneeFilters.length > 0 || state.includeNoAssignee) count++;
   if (state.creatorFilters.length > 0) count++;
-  if (state.projectFilters.length > 0 || state.includeNoProject) count++;
+  if (state.featureFilters.length > 0 || state.includeNoFeature) count++;
   if (state.labelFilters.length > 0) count++;
   return count;
 }
@@ -124,10 +124,10 @@ function useIssueCounts(allIssues: Issue[]) {
     const priority = new Map<string, number>();
     const assignee = new Map<string, number>();
     const creator = new Map<string, number>();
-    const project = new Map<string, number>();
+    const feature = new Map<string, number>();
     const label = new Map<string, number>();
     let noAssignee = 0;
-    let noProject = 0;
+    let noFeature = 0;
 
     for (const issue of allIssues) {
       status.set(issue.status, (status.get(issue.status) ?? 0) + 1);
@@ -143,10 +143,10 @@ function useIssueCounts(allIssues: Issue[]) {
       const cKey = `${issue.creator_type}:${issue.creator_id}`;
       creator.set(cKey, (creator.get(cKey) ?? 0) + 1);
 
-      if (!issue.project_id) {
-        noProject++;
+      if (!issue.feature_id) {
+        noFeature++;
       } else {
-        project.set(issue.project_id, (project.get(issue.project_id) ?? 0) + 1);
+        feature.set(issue.feature_id, (feature.get(issue.feature_id) ?? 0) + 1);
       }
 
       if (issue.labels) {
@@ -156,7 +156,7 @@ function useIssueCounts(allIssues: Issue[]) {
       }
     }
 
-    return { status, priority, assignee, creator, noAssignee, project, noProject, label };
+    return { status, priority, assignee, creator, noAssignee, feature, noFeature, label };
   }, [allIssues]);
 }
 
@@ -339,30 +339,30 @@ function ActorSubContent({
 }
 
 // ---------------------------------------------------------------------------
-// Project sub-menu content
+// Feature sub-menu content
 // ---------------------------------------------------------------------------
 
-function ProjectSubContent({
+function FeatureSubContent({
   counts,
   selected,
   onToggle,
-  includeNoProject,
-  onToggleNoProject,
-  noProjectCount,
+  includeNoFeature,
+  onToggleNoFeature,
+  noFeatureCount,
 }: {
   counts: Map<string, number>;
   selected: string[];
-  onToggle: (projectId: string) => void;
-  includeNoProject: boolean;
-  onToggleNoProject: () => void;
-  noProjectCount: number;
+  onToggle: (featureId: string) => void;
+  includeNoFeature: boolean;
+  onToggleNoFeature: () => void;
+  noFeatureCount: number;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
   const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: features = [] } = useQuery(featureListOptions(wsId));
   const query = search.trim().toLowerCase();
-  const filtered = projects.filter((p) =>
+  const filtered = features.filter((p) =>
     p.title.toLowerCase().includes(query),
   );
 
@@ -380,18 +380,18 @@ function ProjectSubContent({
       </div>
 
       <div className="max-h-64 overflow-y-auto p-1">
-        {(!query || "no project".includes(query) || "unassigned".includes(query)) && (
+        {(!query || "no feature".includes(query) || "unassigned".includes(query)) && (
           <DropdownMenuCheckboxItem
-            checked={includeNoProject}
-            onCheckedChange={() => onToggleNoProject()}
+            checked={includeNoFeature}
+            onCheckedChange={() => onToggleNoFeature()}
             className={FILTER_ITEM_CLASS}
           >
-            <HoverCheck checked={includeNoProject} />
+            <HoverCheck checked={includeNoFeature} />
             <FolderMinus className="size-3.5 text-muted-foreground" />
-            {t(($) => $.filters.no_project)}
-            {noProjectCount > 0 && (
+            {t(($) => $.filters.no_feature)}
+            {noFeatureCount > 0 && (
               <span className="ml-auto text-xs text-muted-foreground">
-                {noProjectCount}
+                {noFeatureCount}
               </span>
             )}
           </DropdownMenuCheckboxItem>
@@ -408,7 +408,7 @@ function ProjectSubContent({
               className={FILTER_ITEM_CLASS}
             >
               <HoverCheck checked={checked} />
-              <ProjectIcon project={p} size="sm" />
+              <FeatureIcon feature={p} size="sm" />
               <span className="truncate">{p.title}</span>
               {count > 0 && (
                 <span className="ml-auto text-xs text-muted-foreground">
@@ -585,7 +585,7 @@ export function IssueDisplayControls({
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
-  // Only Project Detail renders <GanttView>; other surfaces (global /issues,
+  // Only Feature Detail renders <GanttView>; other surfaces (global /issues,
   // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
@@ -597,8 +597,8 @@ export function IssueDisplayControls({
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
-  const projectFilters = useViewStore((s) => s.projectFilters);
-  const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const featureFilters = useViewStore((s) => s.featureFilters);
+  const includeNoFeature = useViewStore((s) => s.includeNoFeature);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
@@ -615,8 +615,8 @@ export function IssueDisplayControls({
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,
-    projectFilters,
-    includeNoProject,
+    featureFilters,
+    includeNoFeature,
     labelFilters,
   });
   const hasActiveFilters = activeFilterCount > 0;
@@ -633,18 +633,18 @@ export function IssueDisplayControls({
     status: "group_status",
     assignee: "group_assignee",
   };
-  const SWIMLANE_GROUPING_LABEL_KEY: Record<SwimlaneGrouping, "group_parent" | "group_project" | "group_assignee"> = {
+  const SWIMLANE_GROUPING_LABEL_KEY: Record<SwimlaneGrouping, "group_parent" | "group_feature" | "group_assignee"> = {
     parent: "group_parent",
-    project: "group_project",
+    feature: "group_feature",
     assignee: "group_assignee",
   };
-  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
+  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_feature" | "card_labels" | "card_child_progress"> = {
     priority: "card_priority",
     description: "card_description",
     assignee: "card_assignee",
     startDate: "card_start_date",
     dueDate: "card_due_date",
-    project: "card_project",
+    feature: "card_feature",
     labels: "card_labels",
     childProgress: "card_child_progress",
   };
@@ -810,25 +810,25 @@ export function IssueDisplayControls({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
-            {/* Project */}
+            {/* Feature */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <FolderKanban className="size-3.5" />
-                <span className="flex-1">{t(($) => $.filters.section_project)}</span>
-                {(projectFilters.length > 0 || includeNoProject) && (
+                <span className="flex-1">{t(($) => $.filters.section_feature)}</span>
+                {(featureFilters.length > 0 || includeNoFeature) && (
                   <span className="text-xs text-primary font-medium">
-                    {projectFilters.length + (includeNoProject ? 1 : 0)}
+                    {featureFilters.length + (includeNoFeature ? 1 : 0)}
                   </span>
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-52 p-0">
-                <ProjectSubContent
-                  counts={counts.project}
-                  selected={projectFilters}
-                  onToggle={act.toggleProjectFilter}
-                  includeNoProject={includeNoProject}
-                  onToggleNoProject={act.toggleNoProject}
-                  noProjectCount={counts.noProject}
+                <FeatureSubContent
+                  counts={counts.feature}
+                  selected={featureFilters}
+                  onToggle={act.toggleFeatureFilter}
+                  includeNoFeature={includeNoFeature}
+                  onToggleNoFeature={act.toggleNoFeature}
+                  noFeatureCount={counts.noFeature}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>

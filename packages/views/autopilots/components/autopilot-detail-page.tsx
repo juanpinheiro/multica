@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { autopilotDetailOptions, autopilotRunsOptions, autopilotRunOptions } from "@multica/core/autopilots/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { featureDetailOptions } from "@multica/core/features/queries";
 import {
   useUpdateAutopilot,
   useDeleteAutopilot,
@@ -58,7 +58,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -585,10 +585,10 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const updateAutopilot = useUpdateAutopilot();
   const deleteAutopilot = useDeleteAutopilot();
   const triggerAutopilot = useTriggerAutopilot();
-  const projectId = data?.autopilot.project_id ?? null;
-  const { data: project, isLoading: projectLoading } = useQuery({
-    ...projectDetailOptions(wsId, projectId ?? ""),
-    enabled: Boolean(projectId),
+  const featureId = data?.autopilot.feature_id ?? null;
+  const { data: feature, isLoading: featureLoading } = useQuery({
+    ...featureDetailOptions(wsId, featureId ?? ""),
+    enabled: Boolean(featureId),
   });
 
   const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
@@ -751,22 +751,22 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               </div>
               {autopilot.execution_mode === "create_issue" && (
                 <div>
-                  <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_project)}</label>
+                  <label className="text-xs text-muted-foreground">{t(($) => $.detail.field_feature)}</label>
                   <div className="mt-1 min-w-0">
-                    {!autopilot.project_id ? (
-                      <span className="text-muted-foreground">{t(($) => $.detail.no_project)}</span>
-                    ) : projectLoading ? (
+                    {!autopilot.feature_id ? (
+                      <span className="text-muted-foreground">{t(($) => $.detail.no_feature)}</span>
+                    ) : featureLoading ? (
                       <Skeleton className="h-5 w-32" />
-                    ) : project ? (
+                    ) : feature ? (
                       <AppLink
-                        href={wsPaths.projectDetail(project.id)}
+                        href={wsPaths.featureDetail(feature.id)}
                         className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
                       >
-                        <ProjectIcon project={project} size="md" />
-                        <span className="truncate">{project.title}</span>
+                        <FeatureIcon feature={feature} size="md" />
+                        <span className="truncate">{feature.title}</span>
                       </AppLink>
                     ) : (
-                      <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
+                      <span className="text-muted-foreground">{t(($) => $.detail.feature_unavailable)}</span>
                     )}
                   </div>
                 </div>
@@ -865,7 +865,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
           initial={{
             title: autopilot.title,
             description: autopilot.description ?? "",
-            project_id: autopilot.project_id ?? null,
+            feature_id: autopilot.feature_id ?? null,
             assignee_type: autopilot.assignee_type,
             assignee_id: autopilot.assignee_id,
             execution_mode: autopilot.execution_mode as AutopilotExecutionMode,

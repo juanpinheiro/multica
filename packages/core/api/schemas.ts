@@ -154,7 +154,7 @@ export const IssueSchema = z.object({
   creator_type: z.string(),
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),
-  project_id: z.string().nullable(),
+  feature_id: z.string().nullable(),
   position: z.number(),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),

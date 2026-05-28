@@ -11,7 +11,7 @@ import {
 // links don't hit 404.
 const LEGACY_ROUTE_SEGMENTS = new Set([
   "issues",
-  "projects",
+  "features",
   "agents",
   "inbox",
   "my-issues",

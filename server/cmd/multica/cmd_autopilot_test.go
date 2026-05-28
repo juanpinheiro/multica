@@ -20,7 +20,7 @@ func newAutopilotCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("agent", "", "")
 	cmd.Flags().String("mode", "", "")
 	cmd.Flags().String("priority", "none", "")
-	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("feature", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
@@ -31,7 +31,7 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("title", "", "")
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("agent", "", "")
-	cmd.Flags().String("project", "", "")
+	cmd.Flags().String("feature", "", "")
 	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("mode", "", "")
@@ -128,7 +128,7 @@ func TestResolveAgent(t *testing.T) {
 	})
 }
 
-func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
+func TestRunAutopilotCreateSendsFeatureID(t *testing.T) {
 	const (
 		agentID   = "11111111-1111-1111-1111-111111111111"
 		projectID = "22222222-2222-2222-2222-222222222222"
@@ -149,7 +149,7 @@ func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"id":         "autopilot-1",
 			"title":      "Daily planner",
-			"project_id": body["project_id"],
+			"feature_id": body["feature_id"],
 		})
 	}))
 	defer srv.Close()
@@ -162,17 +162,17 @@ func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
 	_ = cmd.Flags().Set("title", "Daily planner")
 	_ = cmd.Flags().Set("agent", agentID)
 	_ = cmd.Flags().Set("mode", "create_issue")
-	_ = cmd.Flags().Set("project", projectID)
+	_ = cmd.Flags().Set("feature", projectID)
 
 	if err := runAutopilotCreate(cmd, nil); err != nil {
 		t.Fatalf("runAutopilotCreate: %v", err)
 	}
-	if got := body["project_id"]; got != projectID {
-		t.Fatalf("project_id = %#v, want %q", got, projectID)
+	if got := body["feature_id"]; got != projectID {
+		t.Fatalf("feature_id = %#v, want %q", got, projectID)
 	}
 }
 
-func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
+func TestRunAutopilotUpdateSendsFeatureIDChanges(t *testing.T) {
 	const (
 		autopilotID = "33333333-3333-3333-3333-333333333333"
 		projectID   = "44444444-4444-4444-4444-444444444444"
@@ -195,7 +195,7 @@ func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"id":         autopilotID,
 			"title":      "Daily planner",
-			"project_id": body["project_id"],
+			"feature_id": body["feature_id"],
 		})
 	}))
 	defer srv.Close()
@@ -204,29 +204,29 @@ func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
 	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
-	t.Run("set project", func(t *testing.T) {
+	t.Run("set feature", func(t *testing.T) {
 		cmd := newAutopilotUpdateTestCmd()
-		_ = cmd.Flags().Set("project", projectID)
+		_ = cmd.Flags().Set("feature", projectID)
 		if err := runAutopilotUpdate(cmd, []string{autopilotID}); err != nil {
 			t.Fatalf("runAutopilotUpdate: %v", err)
 		}
-		if got := bodies[len(bodies)-1]["project_id"]; got != projectID {
-			t.Fatalf("project_id = %#v, want %q", got, projectID)
+		if got := bodies[len(bodies)-1]["feature_id"]; got != projectID {
+			t.Fatalf("feature_id = %#v, want %q", got, projectID)
 		}
 	})
 
-	t.Run("clear project", func(t *testing.T) {
+	t.Run("clear feature", func(t *testing.T) {
 		cmd := newAutopilotUpdateTestCmd()
-		_ = cmd.Flags().Set("project", "")
+		_ = cmd.Flags().Set("feature", "")
 		if err := runAutopilotUpdate(cmd, []string{autopilotID}); err != nil {
 			t.Fatalf("runAutopilotUpdate: %v", err)
 		}
-		got, ok := bodies[len(bodies)-1]["project_id"]
+		got, ok := bodies[len(bodies)-1]["feature_id"]
 		if !ok {
-			t.Fatalf("project_id key missing from update body")
+			t.Fatalf("feature_id key missing from update body")
 		}
 		if got != nil {
-			t.Fatalf("project_id = %#v, want nil", got)
+			t.Fatalf("feature_id = %#v, want nil", got)
 		}
 	})
 }

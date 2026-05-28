@@ -1,7 +1,7 @@
 /**
  * Issue labels — workspace-scoped, applied as many-to-many to issues.
  *
- * Labels are lightweight metadata (name + color) distinct from projects:
+ * Labels are lightweight metadata (name + color) distinct from features:
  * projects group related work, labels are cross-cutting tags (bug, feature,
  * performance, …). Colors are normalized to lowercase `#RRGGBB`.
  */

@@ -1,4 +1,4 @@
-package handler
+﻿package handler
 
 import (
 	"bytes"
@@ -532,28 +532,28 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 			testHandler.DeleteIssue(httptest.NewRecorder(), req)
 		}
 		if projectID != "" {
-			req := newRequest("DELETE", "/api/projects/"+projectID, nil)
+			req := newRequest("DELETE", "/api/features/"+projectID, nil)
 			req = withURLParam(req, "id", projectID)
-			testHandler.DeleteProject(httptest.NewRecorder(), req)
+			testHandler.DeleteFeature(httptest.NewRecorder(), req)
 		}
 	}()
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+	req := newRequest("POST", "/api/features?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Sub-issue inheritance project",
 	})
-	testHandler.CreateProject(w, req)
+	testHandler.CreateFeature(w, req)
 	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("CreateFeature: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var project ProjectResponse
-	json.NewDecoder(w.Body).Decode(&project)
-	projectID = project.ID
+	var feature FeatureResponse
+	json.NewDecoder(w.Body).Decode(&feature)
+	projectID = feature.ID
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":      "Parent with project",
-		"project_id": projectID,
+		"feature_id": projectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
@@ -562,8 +562,8 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 	var parent IssueResponse
 	json.NewDecoder(w.Body).Decode(&parent)
 	parentID = parent.ID
-	if parent.ProjectID == nil || *parent.ProjectID != projectID {
-		t.Fatalf("CreateIssue parent: expected project_id %q, got %v", projectID, parent.ProjectID)
+	if parent.FeatureID == nil || *parent.FeatureID != projectID {
+		t.Fatalf("CreateIssue parent: expected feature_id %q, got %v", projectID, parent.FeatureID)
 	}
 
 	w = httptest.NewRecorder()
@@ -582,8 +582,8 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 	if child.ParentIssueID == nil || *child.ParentIssueID != parentID {
 		t.Fatalf("CreateIssue child: expected parent_issue_id %q, got %v", parentID, child.ParentIssueID)
 	}
-	if child.ProjectID == nil || *child.ProjectID != projectID {
-		t.Fatalf("CreateIssue child: expected inherited project_id %q, got %v", projectID, child.ProjectID)
+	if child.FeatureID == nil || *child.FeatureID != projectID {
+		t.Fatalf("CreateIssue child: expected inherited feature_id %q, got %v", projectID, child.FeatureID)
 	}
 }
 
@@ -602,40 +602,40 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 			if projectID == "" {
 				continue
 			}
-			req := newRequest("DELETE", "/api/projects/"+projectID, nil)
+			req := newRequest("DELETE", "/api/features/"+projectID, nil)
 			req = withURLParam(req, "id", projectID)
-			testHandler.DeleteProject(httptest.NewRecorder(), req)
+			testHandler.DeleteFeature(httptest.NewRecorder(), req)
 		}
 	}()
 
 	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+	req := newRequest("POST", "/api/features?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Parent project",
 	})
-	testHandler.CreateProject(w, req)
+	testHandler.CreateFeature(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateProject parent: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var parentProject ProjectResponse
+	var parentProject FeatureResponse
 	json.NewDecoder(w.Body).Decode(&parentProject)
 	parentProjectID = parentProject.ID
 
 	w = httptest.NewRecorder()
-	req = newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+	req = newRequest("POST", "/api/features?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Child explicit project",
 	})
-	testHandler.CreateProject(w, req)
+	testHandler.CreateFeature(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateProject child: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var childProject ProjectResponse
+	var childProject FeatureResponse
 	json.NewDecoder(w.Body).Decode(&childProject)
 	childProjectID = childProject.ID
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":      "Parent with project",
-		"project_id": parentProjectID,
+		"feature_id": parentProjectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
@@ -644,15 +644,15 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 	var parent IssueResponse
 	json.NewDecoder(w.Body).Decode(&parent)
 	parentID = parent.ID
-	if parent.ProjectID == nil || *parent.ProjectID != parentProjectID {
-		t.Fatalf("CreateIssue parent: expected project_id %q, got %v", parentProjectID, parent.ProjectID)
+	if parent.FeatureID == nil || *parent.FeatureID != parentProjectID {
+		t.Fatalf("CreateIssue parent: expected feature_id %q, got %v", parentProjectID, parent.FeatureID)
 	}
 
 	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "Child with explicit project",
 		"parent_issue_id": parentID,
-		"project_id":      childProjectID,
+		"feature_id":      childProjectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
@@ -665,8 +665,8 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 	if child.ParentIssueID == nil || *child.ParentIssueID != parentID {
 		t.Fatalf("CreateIssue child: expected parent_issue_id %q, got %v", parentID, child.ParentIssueID)
 	}
-	if child.ProjectID == nil || *child.ProjectID != childProjectID {
-		t.Fatalf("CreateIssue child: expected explicit project_id %q, got %v", childProjectID, child.ProjectID)
+	if child.FeatureID == nil || *child.FeatureID != childProjectID {
+		t.Fatalf("CreateIssue child: expected explicit feature_id %q, got %v", childProjectID, child.FeatureID)
 	}
 }
 
@@ -681,16 +681,16 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 			}
 		}
 		if projectID != "" {
-			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+			testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, projectID)
 		}
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
+		INSERT INTO feature (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id
-	`, testWorkspaceID, "Duplicate guard project "+suffix).Scan(&projectID); err != nil {
-		t.Fatalf("create project fixture: %v", err)
+	`, testWorkspaceID, "Duplicate guard feature "+suffix).Scan(&projectID); err != nil {
+		t.Fatalf("create feature fixture: %v", err)
 	}
 
 	w := httptest.NewRecorder()
@@ -713,7 +713,7 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 		"title":           title,
 		"status":          "in_progress",
 		"parent_issue_id": parentID,
-		"project_id":      projectID,
+		"feature_id":      projectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
@@ -729,7 +729,7 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "  sh-pm-synth-01   synthesize recommendation-to-shortlist planning outputs " + suffix + "  ",
 		"parent_issue_id": parentID,
-		"project_id":      projectID,
+		"feature_id":      projectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusConflict {
@@ -757,7 +757,7 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           title,
 		"parent_issue_id": parentID,
-		"project_id":      projectID,
+		"feature_id":      projectID,
 		"allow_duplicate": true,
 	})
 	testHandler.CreateIssue(w, req)
@@ -777,7 +777,7 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           title,
 		"parent_issue_id": parentID,
-		"project_id":      projectID,
+		"feature_id":      projectID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusConflict {
@@ -1136,7 +1136,7 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 
 func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 	ctx := context.Background()
-	title := fmt.Sprintf("Autopilot project issue %d", time.Now().UnixNano())
+	title := fmt.Sprintf("Autopilot feature issue %d", time.Now().UnixNano())
 	var autopilotID, issueID, projectID string
 	defer func() {
 		if issueID != "" {
@@ -1146,16 +1146,16 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
 		if projectID != "" {
-			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+			testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, projectID)
 		}
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, $2)
+		INSERT INTO feature (workspace_id, title, status)
+		VALUES ($1, $2, 'in_progress')
 		RETURNING id::text
-	`, testWorkspaceID, "Autopilot project target").Scan(&projectID); err != nil {
-		t.Fatalf("create project fixture: %v", err)
+	`, testWorkspaceID, "Autopilot feature target").Scan(&projectID); err != nil {
+		t.Fatalf("create feature fixture: %v", err)
 	}
 
 	var agentID string
@@ -1169,7 +1169,7 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
-		"project_id":           projectID,
+		"feature_id":           projectID,
 	})
 	testHandler.CreateAutopilot(w, req)
 	if w.Code != http.StatusCreated {
@@ -1180,8 +1180,8 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 		t.Fatalf("decode autopilot: %v", err)
 	}
 	autopilotID = autopilot.ID
-	if autopilot.ProjectID == nil || *autopilot.ProjectID != projectID {
-		t.Fatalf("autopilot project_id = %v, want %q", autopilot.ProjectID, projectID)
+	if autopilot.FeatureID == nil || *autopilot.FeatureID != projectID {
+		t.Fatalf("autopilot feature_id = %v, want %q", autopilot.FeatureID, projectID)
 	}
 
 	queries := db.New(testPool)
@@ -1200,14 +1200,14 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 
 	var issueProjectID *string
 	if err := testPool.QueryRow(ctx, `
-		SELECT project_id::text
+		SELECT feature_id::text
 		FROM issue
 		WHERE id = $1
 	`, issueID).Scan(&issueProjectID); err != nil {
 		t.Fatalf("load created issue project: %v", err)
 	}
 	if issueProjectID == nil || *issueProjectID != projectID {
-		t.Fatalf("created issue project_id = %v, want %q", issueProjectID, projectID)
+		t.Fatalf("created issue feature_id = %v, want %q", issueProjectID, projectID)
 	}
 }
 
@@ -1219,16 +1219,16 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
 		if projectID != "" {
-			testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID)
+			testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, projectID)
 		}
 	}()
 
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, $2)
+		INSERT INTO feature (workspace_id, title, status)
+		VALUES ($1, $2, 'in_progress')
 		RETURNING id::text
-	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID); err != nil {
-		t.Fatalf("create project fixture: %v", err)
+	`, testWorkspaceID, "Autopilot update feature target").Scan(&projectID); err != nil {
+		t.Fatalf("create feature fixture: %v", err)
 	}
 
 	var agentID string
@@ -1251,13 +1251,13 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 		t.Fatalf("decode created autopilot: %v", err)
 	}
 	autopilotID = created.ID
-	if created.ProjectID != nil {
-		t.Fatalf("new autopilot project_id = %v, want nil", created.ProjectID)
+	if created.FeatureID != nil {
+		t.Fatalf("new autopilot feature_id = %v, want nil", created.FeatureID)
 	}
 
 	w = httptest.NewRecorder()
 	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
-		"project_id": projectID,
+		"feature_id": projectID,
 	})
 	req = withURLParam(req, "id", autopilotID)
 	testHandler.UpdateAutopilot(w, req)
@@ -1268,13 +1268,13 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
 		t.Fatalf("decode updated autopilot: %v", err)
 	}
-	if updated.ProjectID == nil || *updated.ProjectID != projectID {
-		t.Fatalf("updated project_id = %v, want %q", updated.ProjectID, projectID)
+	if updated.FeatureID == nil || *updated.FeatureID != projectID {
+		t.Fatalf("updated feature_id = %v, want %q", updated.FeatureID, projectID)
 	}
 
 	w = httptest.NewRecorder()
 	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
-		"project_id": nil,
+		"feature_id": nil,
 	})
 	req = withURLParam(req, "id", autopilotID)
 	testHandler.UpdateAutopilot(w, req)
@@ -1285,8 +1285,8 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
 		t.Fatalf("decode cleared autopilot: %v", err)
 	}
-	if cleared.ProjectID != nil {
-		t.Fatalf("cleared project_id = %v, want nil", cleared.ProjectID)
+	if cleared.FeatureID != nil {
+		t.Fatalf("cleared feature_id = %v, want nil", cleared.FeatureID)
 	}
 }
 

@@ -1,5 +1,5 @@
 import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
-import type { Project } from "./project";
+import type { Feature } from "./feature";
 
 // Issue API
 export interface CreateIssueRequest {
@@ -10,7 +10,7 @@ export interface CreateIssueRequest {
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
   parent_issue_id?: string;
-  project_id?: string;
+  feature_id?: string;
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
@@ -27,7 +27,7 @@ export interface UpdateIssueRequest {
   start_date?: string | null;
   due_date?: string | null;
   parent_issue_id?: string | null;
-  project_id?: string | null;
+  feature_id?: string | null;
   /** Attachment IDs to bind to this issue alongside the description update.
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */
@@ -43,7 +43,7 @@ export interface ListIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
-  project_id?: string;
+  feature_id?: string;
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
    * assignee — assignee is one of the user's owned agents, or a squad that
@@ -58,7 +58,7 @@ export interface ListIssuesParams {
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
-   * `due_date` set. Used by the Project Gantt view so it doesn't have to
+   * `due_date` set. Used by the Feature Gantt view so it doesn't have to
    * page through every issue on the project just to discard the unscheduled
    * majority on the client.
    */
@@ -83,7 +83,7 @@ export interface ListGroupedIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   creator_id?: string;
-  project_id?: string;
+  feature_id?: string;
   /** See `ListIssuesParams.involves_user_id` — same semantics. */
   involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
@@ -91,8 +91,8 @@ export interface ListGroupedIssuesParams {
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
-  project_ids?: string[];
-  include_no_project?: boolean;
+  feature_ids?: string[];
+  include_no_feature?: boolean;
   label_ids?: string[];
   group_assignee_type?: IssueAssigneeType | "none";
   group_assignee_id?: string;
@@ -146,13 +146,13 @@ export interface SearchIssuesResponse {
   total: number;
 }
 
-export interface SearchProjectResult extends Project {
+export interface SearchProjectResult extends Feature {
   match_source: "title" | "description";
   matched_snippet?: string;
 }
 
-export interface SearchProjectsResponse {
-  projects: SearchProjectResult[];
+export interface SearchFeaturesResponse {
+  features: SearchProjectResult[];
   total: number;
 }
 

@@ -68,7 +68,7 @@ const baseIssue: Issue = {
   creator_type: "member",
   creator_id: "user-1",
   parent_issue_id: null,
-  project_id: null,
+  feature_id: null,
   position: 0,
   start_date: null,
   due_date: null,
@@ -159,9 +159,9 @@ describe("onIssueLabelsChanged", () => {
     expect(detail?.labels).toEqual([labelB]);
   });
 
-  it("patches the Project Gantt cache so label filters react in place", () => {
-    const PROJECT_ID = "project-1";
-    qc.setQueryData<Issue[]>(issueKeys.projectGantt(WS_ID, PROJECT_ID), [
+  it("patches the Feature Gantt cache so label filters react in place", () => {
+    const FEATURE_ID = "feature-1";
+    qc.setQueryData<Issue[]>(issueKeys.featureGantt(WS_ID, FEATURE_ID), [
       baseIssue,
       otherIssue,
     ]);
@@ -169,7 +169,7 @@ describe("onIssueLabelsChanged", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
     const gantt = qc.getQueryData<Issue[]>(
-      issueKeys.projectGantt(WS_ID, PROJECT_ID),
+      issueKeys.featureGantt(WS_ID, FEATURE_ID),
     );
     expect(gantt?.find((i) => i.id === ISSUE_ID)?.labels).toEqual([labelB]);
     // Other issues in the same cache must not have their labels mutated.
@@ -456,25 +456,25 @@ describe("onIssueDeleted", () => {
   });
 });
 
-// Regression coverage for the Project Gantt cache. The Gantt view rides its
+// Regression coverage for the Feature Gantt cache. The Gantt view rides its
 // own dedicated cache (server-filtered to `scheduled=true`); every WS-driven
 // path that can shift Gantt membership has to invalidate the prefix or the
 // timeline goes stale.
-describe("project gantt cache invalidation", () => {
-  const PROJECT_ID = "project-1";
+describe("feature gantt cache invalidation", () => {
+  const FEATURE_ID = "feature-1";
   let qc: QueryClient;
 
   beforeEach(() => {
     qc = new QueryClient();
     qc.setQueryData<Issue[]>(
-      issueKeys.projectGantt(WS_ID, PROJECT_ID),
+      issueKeys.featureGantt(WS_ID, FEATURE_ID),
       [baseIssue],
     );
   });
 
   it("invalidates the project Gantt cache on issue:created", () => {
     onIssueCreated(qc, WS_ID, otherIssue);
-    expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
+    expectInvalidated(qc, issueKeys.featureGantt(WS_ID, FEATURE_ID));
   });
 
   it("invalidates the project Gantt cache on issue:updated", () => {
@@ -482,11 +482,11 @@ describe("project gantt cache invalidation", () => {
       id: ISSUE_ID,
       start_date: "2026-01-01T00:00:00Z",
     });
-    expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
+    expectInvalidated(qc, issueKeys.featureGantt(WS_ID, FEATURE_ID));
   });
 
   it("invalidates the project Gantt cache on issue:deleted", () => {
     onIssueDeleted(qc, WS_ID, ISSUE_ID);
-    expectInvalidated(qc, issueKeys.projectGantt(WS_ID, PROJECT_ID));
+    expectInvalidated(qc, issueKeys.featureGantt(WS_ID, FEATURE_ID));
   });
 });

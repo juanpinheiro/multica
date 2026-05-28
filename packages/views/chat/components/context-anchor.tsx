@@ -6,7 +6,7 @@ import type { ContextAnchor } from "@multica/core/chat";
 import { useChatStore } from "@multica/core/chat";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueDetailOptions } from "@multica/core/issues/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
+import { featureDetailOptions } from "@multica/core/features/queries";
 import { inboxListOptions } from "@multica/core/inbox/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -15,7 +15,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { IssueChip } from "../../issues/components/issue-chip";
-import { ProjectChip } from "../../projects/components/project-chip";
+import { FeatureChip } from "../../features/components/feature-chip";
 import { AppLink, useNavigation } from "../../navigation";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useT } from "../../i18n";
@@ -31,7 +31,7 @@ export function buildAnchorMarkdown(anchor: ContextAnchor): string {
     const base = `Context: [${anchor.label}](mention://issue/${anchor.id})`;
     return anchor.subtitle ? `${base} — "${anchor.subtitle}"` : base;
   }
-  return `Context: Project "${anchor.label}"`;
+  return `Context: Feature "${anchor.label}"`;
 }
 
 /**
@@ -49,12 +49,12 @@ export function useRouteAnchorCandidate(wsId: string): {
   const { pathname, searchParams } = useNavigation();
 
   const issueMatch = pathname.match(/^\/[^/]+\/issues\/([^/]+)$/);
-  const projectMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
+  const featureMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
   const isInbox = /^\/[^/]+\/inbox$/.test(pathname);
 
   const routeIssueId = issueMatch ? decodeURIComponent(issueMatch[1]!) : null;
-  const routeProjectId = projectMatch
-    ? decodeURIComponent(projectMatch[1]!)
+  const routeFeatureId = featureMatch
+    ? decodeURIComponent(featureMatch[1]!)
     : null;
 
   // Inbox: the anchor is the issue behind the currently selected notification.
@@ -76,9 +76,9 @@ export function useRouteAnchorCandidate(wsId: string): {
     enabled: !!issueIdToFetch,
   });
 
-  const { data: project, isLoading: projectLoading } = useQuery({
-    ...projectDetailOptions(wsId, routeProjectId ?? ""),
-    enabled: !!routeProjectId,
+  const { data: feature, isLoading: featureLoading } = useQuery({
+    ...featureDetailOptions(wsId, routeFeatureId ?? ""),
+    enabled: !!routeFeatureId,
   });
 
   if (issueIdToFetch) {
@@ -94,13 +94,13 @@ export function useRouteAnchorCandidate(wsId: string): {
     };
   }
 
-  if (routeProjectId) {
-    if (!project) return { candidate: null, isResolving: projectLoading };
+  if (routeFeatureId) {
+    if (!feature) return { candidate: null, isResolving: featureLoading };
     return {
       candidate: {
-        type: "project",
-        id: project.id,
-        label: project.title,
+        type: "feature",
+        id: feature.id,
+        label: feature.title,
       },
       isResolving: false,
     };
@@ -180,7 +180,7 @@ export function ContextAnchorCard() {
   const href =
     candidate.type === "issue"
       ? paths.issueDetail(candidate.id)
-      : paths.projectDetail(candidate.id);
+      : paths.featureDetail(candidate.id);
 
   const tooltipText =
     candidate.type === "issue"
@@ -209,8 +209,8 @@ export function ContextAnchorCard() {
                   className="cursor-pointer hover:bg-accent transition-colors"
                 />
               ) : (
-                <ProjectChip
-                  projectId={candidate.id}
+                <FeatureChip
+                  featureId={candidate.id}
                   fallbackLabel={candidate.label}
                   className="cursor-pointer hover:bg-accent transition-colors"
                 />

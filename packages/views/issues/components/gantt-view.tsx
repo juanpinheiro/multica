@@ -6,7 +6,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import type { GanttZoom } from "@multica/core/issues/stores/view-store";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { featureListOptions } from "@multica/core/features/queries";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import {
@@ -17,7 +17,7 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { IssueActionsContextMenu } from "../actions";
@@ -317,11 +317,11 @@ function ScheduledRow({
   const { t } = useT("issues");
   const p = useWorkspacePaths();
   const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: !!issue.project_id,
+  const { data: features = [] } = useQuery({
+    ...featureListOptions(wsId),
+    enabled: !!issue.feature_id,
   });
-  const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const feature = issue.feature_id ? features.find((pr) => pr.id === issue.feature_id) : undefined;
 
   const start = parseDay(issue.start_date);
   const due = parseDay(issue.due_date);
@@ -375,7 +375,7 @@ function ScheduledRow({
             {issue.identifier}
           </span>
           <span className="truncate flex-1">{issue.title}</span>
-          {project && <ProjectIcon project={project} size="sm" />}
+          {feature && <FeatureIcon feature={feature} size="sm" />}
           {issue.assignee_type && issue.assignee_id && (
             <ActorAvatar
               actorType={issue.assignee_type}

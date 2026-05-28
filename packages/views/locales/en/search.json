@@ -1,12 +1,12 @@
 {
   "title": "Search",
-  "description": "Search pages, issues, projects, and members",
+  "description": "Search pages, issues, features, and members",
   "placeholder": "Type a command or search...",
   "groups": {
     "pages": "Pages",
     "commands": "Commands",
     "members": "Members",
-    "projects": "Projects",
+    "features": "Features",
     "issues": "Issues",
     "recent": "Recent"
   },
@@ -14,7 +14,7 @@
     "inbox": "Inbox",
     "my_issues": "My Issues",
     "issues": "Issues",
-    "projects": "Projects",
+    "features": "Features",
     "agents": "Agents",
     "runtimes": "Runtimes",
     "skills": "Skills",
@@ -23,7 +23,7 @@
   "commands": {
     "current_theme_aria": "Current theme",
     "new_issue": "New Issue",
-    "new_project": "New Project",
+    "new_feature": "New Feature",
     "copy_issue_link": "Copy Issue Link",
     "copy_identifier": "Copy Identifier ({{identifier}})",
     "switch_to_light": "Switch to Light Theme",
@@ -36,7 +36,7 @@
   },
   "empty": {
     "no_results": "No results found.",
-    "type_to_search": "Type to search issues and projects"
+    "type_to_search": "Type to search issues and features"
   },
   "trigger": {
     "label": "Search..."

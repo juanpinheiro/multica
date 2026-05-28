@@ -531,6 +531,39 @@ WHERE id = (
               )
             )
       )
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_dependency d
+          JOIN issue b ON d.depends_on_issue_id = b.id
+          WHERE atq.issue_id IS NOT NULL
+            AND d.issue_id = atq.issue_id
+            AND d.type IN ('blocks', 'blocked_by')
+            AND b.status != 'done'
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue t2
+          JOIN issue i2 ON t2.issue_id = i2.id
+          JOIN workspace w2 ON i2.workspace_id = w2.id
+          LEFT JOIN feature f2 ON i2.feature_id = f2.id
+          WHERE atq.issue_id IS NOT NULL
+            AND t2.status = 'dispatched'
+            AND t2.id != atq.id
+            AND COALESCE(
+                  NULLIF(f2.target_branch, ''),
+                  NULLIF(i2.metadata->>'target_branch', ''),
+                  'issue/' || w2.issue_prefix || '-' || i2.number
+                )
+              = (
+                  SELECT COALESCE(
+                      NULLIF(f.target_branch, ''),
+                      NULLIF(i.metadata->>'target_branch', ''),
+                      'issue/' || w.issue_prefix || '-' || i.number
+                  )
+                  FROM issue i
+                  JOIN workspace w ON i.workspace_id = w.id
+                  LEFT JOIN feature f ON i.feature_id = f.id
+                  WHERE i.id = atq.issue_id
+              )
+      )
     ORDER BY atq.priority DESC, atq.created_at ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED
@@ -547,6 +580,20 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 // otherwise a user mashing the create button could fire concurrent quick-creates
 // whose completion lookup would race over "most recent issue by this agent".
+//
+// Dependency gate: a task whose issue has unsatisfied `blocks`/`blocked_by`
+// dependencies (blocker.status != 'done') is not claimable. `related`
+// dependencies are non-gating. Chat / quick-create tasks have no issue_id
+// and are unaffected.
+//
+// Branch gate: when two queued tasks would push to the same git branch, only
+// one can be dispatched at a time so two agents don't fight over the same
+// branch. The resolved branch mirrors feature.Resolve (server/internal/feature/branch.go):
+// feature.target_branch wins, else issue.metadata->>'target_branch', else
+// derived 'issue/<identifier>'. The branch_parity_test guards against drift
+// between this SQL and the Go resolver. Empty strings are skipped via NULLIF
+// so a feature with target_branch=” falls through to the per-issue override.
+// Chat / quick-create tasks have no issue_id and are unaffected.
 func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, agentID)
 	var i AgentTaskQueue

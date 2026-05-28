@@ -4,7 +4,7 @@ import type { InboxItem } from "./inbox";
 import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
 import type { Workspace } from "./workspace";
-import type { Project } from "./project";
+import type { Feature } from "./feature";
 import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
@@ -52,9 +52,9 @@ export type WSEventType =
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
-  | "project:created"
-  | "project:updated"
-  | "project:deleted"
+  | "feature:created"
+  | "feature:updated"
+  | "feature:deleted"
   | "squad:created"
   | "squad:updated"
   | "squad:deleted"
@@ -297,15 +297,15 @@ export interface ChatSessionDeletedPayload {
   chat_session_id: string;
 }
 
-export interface ProjectCreatedPayload {
-  project: Project;
+export interface FeatureCreatedPayload {
+  feature: Feature;
 }
 
-export interface ProjectUpdatedPayload {
-  project: Project;
+export interface FeatureUpdatedPayload {
+  feature: Feature;
 }
 
-export interface ProjectDeletedPayload {
+export interface FeatureDeletedPayload {
   project_id: string;
 }
 
@@ -362,9 +362,9 @@ export interface WSEventPayloadMap {
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;
-  "project:created": ProjectCreatedPayload;
-  "project:updated": ProjectUpdatedPayload;
-  "project:deleted": ProjectDeletedPayload;
+  "feature:created": FeatureCreatedPayload;
+  "feature:updated": FeatureUpdatedPayload;
+  "feature:deleted": FeatureDeletedPayload;
   // No formal payload interfaces yet — server emits domain objects clients
   // currently consume as opaque triggers (refetch on receipt).
   "daemon:heartbeat": unknown;

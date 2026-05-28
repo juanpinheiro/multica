@@ -202,8 +202,8 @@ vi.mock("../issues/components", () => ({
   DueDatePicker: () => <div data-testid="due-date-picker" />,
 }));
 
-vi.mock("../projects/components/project-picker", () => ({
-  ProjectPicker: () => <div data-testid="project-picker" />,
+vi.mock("../features/components/feature-picker", () => ({
+  FeaturePicker: () => <div data-testid="project-picker" />,
 }));
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
@@ -347,7 +347,7 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        feature_id: undefined,
       });
     });
 
@@ -394,7 +394,7 @@ describe("CreateIssueModal", () => {
         due_date: undefined,
         attachment_ids: undefined,
         parent_issue_id: undefined,
-        project_id: undefined,
+        feature_id: undefined,
       });
     });
 
@@ -444,9 +444,9 @@ describe("CreateIssueModal", () => {
     expect(carry).not.toHaveProperty("agent_id");
   });
 
-  // Manual → agent must forward the picked project so the new modal pins to
+  // Manual → agent must forward the picked feature so the new modal pins to
   // the same target. Without this the agent panel re-seeds from its own
-  // persisted `lastProjectId` and silently routes the issue to a stale one.
+  // persisted `lastFeatureId` and silently routes the issue to a stale one.
   // Reporter scenario: backend rejects same-titled create with a 409 +
   // structured duplicate body. The user should land on a duplicate toast
   // pointing at the existing issue, not a generic "create failed" message.
@@ -535,7 +535,7 @@ describe("CreateIssueModal", () => {
     expect(mockToastError).toHaveBeenCalledWith("Failed to create issue");
   });
 
-  it("forwards the picked project when switching to agent mode", async () => {
+  it("forwards the picked feature when switching to agent mode", async () => {
     const user = userEvent.setup();
     const onSwitchMode = vi.fn();
 
@@ -543,7 +543,7 @@ describe("CreateIssueModal", () => {
       <ManualCreatePanel
         onClose={vi.fn()}
         onSwitchMode={onSwitchMode}
-        data={{ project_id: "proj-1" }}
+        data={{ feature_id: "proj-1" }}
         isExpanded={false}
         setIsExpanded={vi.fn()}
         backlogHintIssueId={null}
@@ -559,7 +559,7 @@ describe("CreateIssueModal", () => {
     expect(onSwitchMode.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         prompt: "Refactor auth",
-        project_id: "proj-1",
+        feature_id: "proj-1",
       }),
     );
   });

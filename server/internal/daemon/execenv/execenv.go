@@ -18,12 +18,12 @@ type RepoContextForEnv struct {
 	Description string // optional repo description
 }
 
-// ProjectResourceForEnv describes a single resource attached to the issue's
+// FeatureResourceForEnv describes a single resource attached to the issue's
 // project. The resource_ref payload is type-specific JSON; the agent reads
 // resources.json on disk for the full structure. This struct only carries
 // fields the meta-skill template needs to render a human-readable summary
 // (URL for github_repo, generic label otherwise).
-type ProjectResourceForEnv struct {
+type FeatureResourceForEnv struct {
 	ID           string          // server-assigned UUID
 	ResourceType string          // e.g. "github_repo"
 	ResourceRef  json.RawMessage // raw JSONB payload from the API
@@ -51,9 +51,9 @@ type TaskContextForEnv struct {
 	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills             []SkillContextForEnv
 	Repos                   []RepoContextForEnv     // workspace repos available for checkout
-	ProjectID               string                  // issue's project, when present
-	ProjectTitle            string                  // human-readable project title
-	ProjectResources        []ProjectResourceForEnv // resources attached to the project
+	FeatureID               string                  // issue's feature, when present
+	FeatureTitle            string                  // human-readable feature title
+	FeatureResources        []FeatureResourceForEnv // resources attached to the feature
 	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
 	AutopilotID             string
@@ -76,6 +76,15 @@ type TaskContextForEnv struct {
 	// context and the agent stays anonymous-user mode.
 	RequestingUserName               string
 	RequestingUserProfileDescription string
+	// TargetBranch is the resolved git branch for this issue task, set by
+	// feature.Resolve on the server side (feature.target_branch wins, then
+	// issue.metadata.target_branch, then "issue/<identifier>"). Empty for
+	// chat / quick-create / autopilot tasks that have no issue.
+	TargetBranch string
+	// IsSharedBranch is true when TargetBranch came from feature.target_branch,
+	// meaning sibling issues of the same feature also push to this branch.
+	// The brief appends a "## Shared branch" safety section when set.
+	IsSharedBranch bool
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

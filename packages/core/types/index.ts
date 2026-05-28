@@ -68,18 +68,22 @@ export type { Attachment } from "./attachment";
 export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {
-  Project,
-  ProjectStatus,
-  ProjectPriority,
-  CreateProjectRequest,
-  UpdateProjectRequest,
-  ListProjectsResponse,
-  ProjectResource,
-  ProjectResourceType,
+  Feature,
+  FeatureStatus,
+  FeaturePriority,
+  CreateFeatureRequest,
+  UpdateFeatureRequest,
+  ListFeaturesResponse,
+  FeatureResource,
+  FeatureResourceType,
   GithubRepoResourceRef,
-  CreateProjectResourceRequest,
-  ListProjectResourcesResponse,
-} from "./project";
+  CreateFeatureResourceRequest,
+  ListFeatureResourcesResponse,
+  FeatureIssueSummary,
+  FeatureBlockedIssueSummary,
+  FeaturePRSummary,
+  FeatureIssuesResponse,
+} from "./feature";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   GitHubInstallation,

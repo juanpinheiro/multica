@@ -10,7 +10,7 @@ import enMyIssues from "./en/my-issues.json";
 import enSearch from "./en/search.json";
 import enInbox from "./en/inbox.json";
 import enWorkspace from "./en/workspace.json";
-import enProjects from "./en/projects.json";
+import enFeatures from "./en/features.json";
 import enAutopilots from "./en/autopilots.json";
 import enSkills from "./en/skills.json";
 import enChat from "./en/chat.json";
@@ -35,7 +35,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     search: enSearch,
     inbox: enInbox,
     workspace: enWorkspace,
-    projects: enProjects,
+    features: enFeatures,
     autopilots: enAutopilots,
     skills: enSkills,
     chat: enChat,

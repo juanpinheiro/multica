@@ -11,7 +11,7 @@ import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import { projectListOptions } from "@multica/core/projects/queries";
+import { featureListOptions } from "@multica/core/features/queries";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -29,7 +29,7 @@ import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
 import type { Agent, Squad } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
-import { ProjectPicker } from "../projects/components/project-picker";
+import { FeaturePicker } from "../features/components/feature-picker";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -61,10 +61,10 @@ type ActorSelection =
 // remounted, even inside a still-open Dialog Root.
 //
 // `onSwitchMode` is wired by the shell — the panel calls it with an optional
-// carry payload (currently `project_id`). The shared draft store carries the
-// description + agent across the agent→manual flip; project_id rides through
+// carry payload (currently `feature_id`). The shared draft store carries the
+// description + agent across the agent→manual flip; feature_id rides through
 // the same carry channel manual→agent uses, so the manual panel reads it
-// from `data?.project_id` without a parallel store.
+// from `data?.feature_id` without a parallel store.
 export function AgentCreatePanel({
   onClose,
   onSwitchMode,
@@ -91,8 +91,8 @@ export function AgentCreatePanel({
   // Pull `isSuccess` so the stale-id sweep below can distinguish "still
   // loading" from "loaded as empty". Reading length alone treats both as
   // empty and incorrectly clears a valid persisted preference on every open.
-  const { data: projects = [], isSuccess: projectsLoaded } = useQuery(
-    projectListOptions(wsId),
+  const { data: features = [], isSuccess: featuresLoaded } = useQuery(
+    featureListOptions(wsId),
   );
 
   const memberRole = useMemo(
@@ -126,8 +126,8 @@ export function AgentCreatePanel({
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
   const lastActorId = useQuickCreateStore((s) => s.lastActorId);
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
-  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
-  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
+  const lastFeatureId = useQuickCreateStore((s) => s.lastFeatureId);
+  const setLastFeatureId = useQuickCreateStore((s) => s.setLastFeatureId);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -192,27 +192,27 @@ export function AgentCreatePanel({
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
-  // Project selection — defaults to the last project the user picked in this
-  // workspace. `data?.project_id` lets the modal opener seed a one-shot
-  // override (e.g. a future "+ Issue" button on a project page); it does NOT
+  // Feature selection — defaults to the last feature the user picked in this
+  // workspace. `data?.feature_id` lets the modal opener seed a one-shot
+  // override (e.g. a future "+ Issue" button on a feature page); it does NOT
   // replace the persisted default.
-  const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+  const [featureId, setFeatureId] = useState<string | null>(() => {
+    const seed = (data?.feature_id as string | undefined) ?? lastFeatureId;
     return seed ?? null;
   });
 
-  // Stale-id sweep. Once the project list query has actually resolved
+  // Stale-id sweep. Once the feature list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
-  // a `projectId` that isn't in the list means the project was deleted in
+  // a `featureId` that isn't in the list means the feature was deleted in
   // another session. Clear BOTH local state and the persisted preference;
-  // dropping only local state would leave the deleted UUID in `lastProjectId`,
+  // dropping only local state would leave the deleted UUID in `lastFeatureId`,
   // and the next open would re-seed it and submit the same dead value.
   useEffect(() => {
-    if (!projectsLoaded || projectId === null) return;
-    if (projects.some((p) => p.id === projectId)) return;
-    setProjectId(null);
-    if (lastProjectId === projectId) setLastProjectId(null);
-  }, [projectsLoaded, projects, projectId, lastProjectId, setLastProjectId]);
+    if (!featuresLoaded || featureId === null) return;
+    if (features.some((p) => p.id === featureId)) return;
+    setFeatureId(null);
+    if (lastFeatureId === featureId) setLastFeatureId(null);
+  }, [featuresLoaded, features, featureId, lastFeatureId, setLastFeatureId]);
 
   // Daemon CLI version gate. The agent-create flow needs the runtime's
   // bundled multica CLI to be ≥ MIN_QUICK_CREATE_CLI_VERSION; older
@@ -279,10 +279,10 @@ export function AgentCreatePanel({
           ? { agent_id: actor.id }
           : { squad_id: actor.id }),
         prompt: md,
-        project_id: projectId ?? undefined,
+        feature_id: featureId ?? undefined,
       });
       setLastActor(actor.type, actor.id);
-      setLastProjectId(projectId);
+      setLastFeatureId(featureId);
       clearPrompt();
       setLastMode("agent");
       toast.success(t(($) => $.create_issue.agent.toast_sent), {
@@ -358,11 +358,11 @@ export function AgentCreatePanel({
         : {}),
     });
     setLastMode("manual");
-    // Hand the picked project to the manual panel through the same `data`
+    // Hand the picked feature to the manual panel through the same `data`
     // channel that already carries agent_id / parent_issue_id. The manual
-    // panel reads `data.project_id` on mount; this preserves the user's
+    // panel reads `data.feature_id` on mount; this preserves the user's
     // selection across the mode flip without piping a third store through.
-    onSwitchMode?.(projectId ? { project_id: projectId } : null);
+    onSwitchMode?.(featureId ? { feature_id: featureId } : null);
   };
 
   return (
@@ -463,15 +463,15 @@ export function AgentCreatePanel({
         )}
 
         {/* Property toolbar — mirrors the manual panel's pill row so the
-            project pill sits in the same place across both modes. Agent mode
-            owns only the project (status / priority / assignee / due-date are
+            feature pill sits in the same place across both modes. Agent mode
+            owns only the feature (status / priority / assignee / due-date are
             inferred from the prompt), so it's a single pill. The pick is
-            persisted per-workspace via useQuickCreateStore.lastProjectId so
-            users targeting one project skip retyping "in project X". */}
+            persisted per-workspace via useQuickCreateStore.lastFeatureId so
+            users targeting one feature skip retyping "in feature X". */}
         <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0 flex-wrap">
-          <ProjectPicker
-            projectId={projectId}
-            onUpdate={(u) => setProjectId(u.project_id ?? null)}
+          <FeaturePicker
+            featureId={featureId}
+            onUpdate={(u) => setFeatureId(u.feature_id ?? null)}
             triggerRender={<PillButton />}
             align="start"
           />

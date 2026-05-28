@@ -15,8 +15,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { projectListOptions } from "@multica/core/projects/queries";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { featureListOptions } from "@multica/core/features/queries";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -71,11 +71,11 @@ export const BoardCardContent = memo(function BoardCardContent({
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: storeProperties.project && !!issue.project_id,
+  const { data: features = [] } = useQuery({
+    ...featureListOptions(wsId),
+    enabled: storeProperties.feature && !!issue.feature_id,
   });
-  const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
+  const feature = issue.feature_id ? features.find((p) => p.id === issue.feature_id) : undefined;
   const labels = issue.labels ?? [];
 
   const updateIssueMutation = useUpdateIssue();
@@ -102,7 +102,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const hasAssignee = !!issue.assignee_type && !!issue.assignee_id;
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
-  const showProject = storeProperties.project && project;
+  const showFeature = storeProperties.feature && feature;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
 
@@ -206,13 +206,13 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: project + labels */}
-      {(showProject || showLabels) && (
+      {/* Chip row: feature + labels */}
+      {(showFeature || showLabels) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-          {showProject && (
+          {showFeature && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]">
-              <ProjectIcon project={project} size="sm" />
-              <span className="truncate">{project!.title}</span>
+              <FeatureIcon feature={feature} size="sm" />
+              <span className="truncate">{feature!.title}</span>
             </span>
           )}
           {showLabels && labels.map((label) => (

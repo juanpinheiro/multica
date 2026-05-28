@@ -36,7 +36,7 @@ import { Switch } from "@multica/ui/components/ui/switch";
 import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "../issues/components";
 import { BacklogAgentHintContent } from "../issues/components/backlog-agent-hint-dialog";
-import { ProjectPicker } from "../projects/components/project-picker";
+import { FeaturePicker } from "../features/components/feature-picker";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
@@ -122,8 +122,8 @@ export function ManualCreatePanel({
   });
   const [startDate, setStartDate] = useState<string | null>(draft.startDate);
   const [dueDate, setDueDate] = useState<string | null>(draft.dueDate);
-  const [projectId, setProjectId] = useState<string | undefined>(
-    (data?.project_id as string) || undefined,
+  const [featureId, setProjectId] = useState<string | undefined>(
+    (data?.feature_id as string) || undefined,
   );
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
@@ -209,7 +209,7 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
         parent_issue_id: parentIssueId,
-        project_id: projectId,
+        feature_id: featureId,
       });
 
       // Link queued children to the new parent. Deferred to after create
@@ -346,9 +346,9 @@ export function ManualCreatePanel({
   // panel reads `data.prompt` on mount. Concatenate title + description so
   // nothing the user typed is lost — the agent derives a fresh title from
   // the combined text. Persist the mode flip so the next `c` lands in agent.
-  // Also forward the picked project so the agent panel pins the new issue
+  // Also forward the picked feature so the agent panel pins the new issue
   // to it; without this the agent panel would fall back to its persisted
-  // `lastProjectId`, silently routing the issue to the wrong project.
+  // `lastFeatureId`, silently routing the issue to the wrong feature.
   // Forward squad picks alongside agent picks so the agent panel honors
   // the actor the user already chose — otherwise a squad selection silently
   // falls back to the persisted actor / first visible agent on flip.
@@ -368,7 +368,7 @@ export function ManualCreatePanel({
         : assigneeId && assigneeType === "squad"
           ? { squad_id: assigneeId }
           : {}),
-      ...(projectId ? { project_id: projectId } : {}),
+      ...(featureId ? { feature_id: featureId } : {}),
     });
   };
 
@@ -508,10 +508,10 @@ export function ManualCreatePanel({
                 align="start"
               />
 
-              {/* Project */}
-              <ProjectPicker
-                projectId={projectId ?? null}
-                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+              {/* Feature */}
+              <FeaturePicker
+                featureId={featureId ?? null}
+                onUpdate={(u) => setProjectId(u.feature_id ?? undefined)}
                 triggerRender={<PillButton />}
                 align="start"
               />

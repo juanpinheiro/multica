@@ -16,7 +16,7 @@ import (
 //
 // Asserts that (1) tasks belonging to a project show up under the workspace
 // view, (2) the project filter excludes tasks tied to issues without a
-// matching project_id, and (3) run-time aggregation accumulates the
+// matching feature_id, and (3) run-time aggregation accumulates the
 // completed_at − started_at delta correctly.
 func TestDashboardEndpoints(t *testing.T) {
 	if testHandler == nil {
@@ -37,15 +37,15 @@ func TestDashboardEndpoints(t *testing.T) {
 	}
 
 	// Two issues: one bound to a project, one not.
-	var projectID string
+	var featureID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
+		INSERT INTO feature (workspace_id, title)
 		VALUES ($1, 'dashboard test project')
 		RETURNING id
-	`, testWorkspaceID).Scan(&projectID); err != nil {
+	`, testWorkspaceID).Scan(&featureID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, featureID) })
 
 	// issue.number is `UNIQUE (workspace_id, number)` (migration 020) and
 	// defaults to 0. Two inserts into the same workspace would collide on the
@@ -56,10 +56,10 @@ func TestDashboardEndpoints(t *testing.T) {
 		var id string
 		var pid any
 		if withProject {
-			pid = projectID
+			pid = featureID
 		}
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+			INSERT INTO issue (workspace_id, title, creator_id, creator_type, feature_id, number)
 			VALUES (
 				$1, 'dashboard test', $2, 'member', $3,
 				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
@@ -148,7 +148,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// daily — project-scoped
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardUsageDaily(w, newRequest("GET", "/api/dashboard/usage/daily?days=1&feature_id="+featureID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("daily project: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -174,7 +174,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// by-agent — project-scoped
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardUsageByAgent(w, newRequest("GET", "/api/dashboard/usage/by-agent?days=1&feature_id="+featureID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("by-agent project: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -194,7 +194,7 @@ func TestDashboardEndpoints(t *testing.T) {
 	// agent-runtime — project-scoped
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?days=1&project_id="+projectID, nil))
+		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?days=1&feature_id="+featureID, nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("agent-runtime: expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -216,10 +216,10 @@ func TestDashboardEndpoints(t *testing.T) {
 		}
 	}
 
-	// agent-runtime — invalid project_id rejected
+	// agent-runtime — invalid feature_id rejected
 	{
 		w := httptest.NewRecorder()
-		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?project_id=not-a-uuid", nil))
+		testHandler.GetDashboardAgentRunTime(w, newRequest("GET", "/api/dashboard/agent-runtime?feature_id=not-a-uuid", nil))
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("agent-runtime: expected 400 for invalid uuid, got %d", w.Code)
 		}
@@ -274,7 +274,7 @@ func TestDashboardUsageDailyBucketsByViewerTimezone(t *testing.T) {
 	var bucketHour time.Time
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO task_usage_hourly (
-			bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+			bucket_hour, workspace_id, runtime_id, agent_id, feature_id,
 			provider, model,
 			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
 		)
@@ -730,10 +730,10 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 }
 
 // TestDashboardRollupReattributesOnProjectChange verifies the trigger that
-// fires on `UPDATE issue SET project_id` enqueues both old + new project
+// fires on `UPDATE issue SET feature_id` enqueues both old + new project
 // buckets so the next rollup tick re-attributes the affected tokens.
 // Uses the rollup window function directly to drain the dirty queue,
-// then asserts the rollup table reflects the new project_id.
+// then asserts the rollup table reflects the new feature_id.
 func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -751,23 +751,23 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	mkProject := func(name string) string {
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+			INSERT INTO feature (workspace_id, title) VALUES ($1, $2) RETURNING id
 		`, testWorkspaceID, name).Scan(&id); err != nil {
 			t.Fatalf("create project: %v", err)
 		}
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, id) })
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, id) })
 		return id
 	}
-	projectA := mkProject("dashboard reattr A")
-	projectB := mkProject("dashboard reattr B")
+	featureA := mkProject("dashboard reattr A")
+	featureB := mkProject("dashboard reattr B")
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, feature_id, number)
 		VALUES ($1, 'reattr issue', $2, 'member', $3,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
-	`, testWorkspaceID, testUserID, projectA).Scan(&issueID); err != nil {
+	`, testWorkspaceID, testUserID, featureA).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
@@ -797,8 +797,8 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	var aTokens int64
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id = $2 AND agent_id = $3
-	`, testWorkspaceID, projectA, agentID).Scan(&aTokens); err != nil {
+		WHERE workspace_id = $1 AND feature_id = $2 AND agent_id = $3
+	`, testWorkspaceID, featureA, agentID).Scan(&aTokens); err != nil {
 		t.Fatalf("read A rollup: %v", err)
 	}
 	if aTokens < 7777 {
@@ -806,7 +806,7 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	}
 
 	// Move the issue to project B. Trigger enqueues both A and B buckets.
-	if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectB, issueID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET feature_id = $1 WHERE id = $2`, featureB, issueID); err != nil {
 		t.Fatalf("reassign project: %v", err)
 	}
 	// Second rollup pass: A bucket drops to zero (deleted_empty), B
@@ -820,14 +820,14 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	var bTokens, aTokensAfter int64
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id = $2 AND agent_id = $3
-	`, testWorkspaceID, projectB, agentID).Scan(&bTokens); err != nil {
+		WHERE workspace_id = $1 AND feature_id = $2 AND agent_id = $3
+	`, testWorkspaceID, featureB, agentID).Scan(&bTokens); err != nil {
 		t.Fatalf("read B rollup: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id = $2 AND agent_id = $3
-	`, testWorkspaceID, projectA, agentID).Scan(&aTokensAfter); err != nil {
+		WHERE workspace_id = $1 AND feature_id = $2 AND agent_id = $3
+	`, testWorkspaceID, featureA, agentID).Scan(&aTokensAfter); err != nil {
 		t.Fatalf("read A rollup after move: %v", err)
 	}
 	if bTokens < 7777 {
@@ -842,7 +842,7 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 // (which cascades to its tasks and task_usage rows) also clears the
 // dashboard rollup row attributed to that issue's project. The
 // `issue BEFORE DELETE` trigger has to fire ahead of the cascade so the
-// dirty queue captures the original project_id while the issue row is
+// dirty queue captures the original feature_id while the issue row is
 // still readable.
 func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 	if testHandler == nil {
@@ -858,21 +858,21 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
-	var projectID string
+	var featureID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard cascade test') RETURNING id
-	`, testWorkspaceID).Scan(&projectID); err != nil {
+		INSERT INTO feature (workspace_id, title) VALUES ($1, 'dashboard cascade test') RETURNING id
+	`, testWorkspaceID).Scan(&featureID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, featureID) })
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, feature_id, number)
 		VALUES ($1, 'cascade issue', $2, 'member', $3,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
-	`, testWorkspaceID, testUserID, projectID).Scan(&issueID); err != nil {
+	`, testWorkspaceID, testUserID, featureID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	// No t.Cleanup deleting the issue — that's what the test exercises.
@@ -902,8 +902,8 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 	var before int64
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id = $2
-	`, testWorkspaceID, projectID).Scan(&before); err != nil {
+		WHERE workspace_id = $1 AND feature_id = $2
+	`, testWorkspaceID, featureID).Scan(&before); err != nil {
 		t.Fatalf("read before: %v", err)
 	}
 	if before < 4242 {
@@ -925,8 +925,8 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 	var after int64
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id = $2
-	`, testWorkspaceID, projectID).Scan(&after); err != nil {
+		WHERE workspace_id = $1 AND feature_id = $2
+	`, testWorkspaceID, featureID).Scan(&after); err != nil {
 		t.Fatalf("read after: %v", err)
 	}
 	if after != 0 {
@@ -979,7 +979,7 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 	var nullBefore int64
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id IS NULL AND agent_id = $2
+		WHERE workspace_id = $1 AND feature_id IS NULL AND agent_id = $2
 	`, testWorkspaceID, agentID).Scan(&nullBefore); err != nil {
 		t.Fatalf("read NULL bucket pre-link: %v", err)
 	}
@@ -991,21 +991,21 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 	// uses. The atq trigger should enqueue OLD (NULL project) AND NEW
 	// (the project's id) so the next rollup tick zeroes the NULL bucket
 	// and populates the project bucket.
-	var projectID string
+	var featureID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard link test') RETURNING id
-	`, testWorkspaceID).Scan(&projectID); err != nil {
+		INSERT INTO feature (workspace_id, title) VALUES ($1, 'dashboard link test') RETURNING id
+	`, testWorkspaceID).Scan(&featureID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM project WHERE id = $1`, projectID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM feature WHERE id = $1`, featureID) })
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, feature_id, number)
 		VALUES ($1, 'link test issue', $2, 'member', $3,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
-	`, testWorkspaceID, testUserID, projectID).Scan(&issueID); err != nil {
+	`, testWorkspaceID, testUserID, featureID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
@@ -1023,21 +1023,21 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 		t.Fatalf("rollup post-link: %v", err)
 	}
 
-	var projectAfter, nullAfter int64
+	var featureAfter, nullAfter int64
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id = $2 AND agent_id = $3
-	`, testWorkspaceID, projectID, agentID).Scan(&projectAfter); err != nil {
-		t.Fatalf("read project bucket post-link: %v", err)
+		WHERE workspace_id = $1 AND feature_id = $2 AND agent_id = $3
+	`, testWorkspaceID, featureID, agentID).Scan(&featureAfter); err != nil {
+		t.Fatalf("read feature bucket post-link: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(input_tokens), 0) FROM task_usage_hourly
-		WHERE workspace_id = $1 AND project_id IS NULL AND agent_id = $2
+		WHERE workspace_id = $1 AND feature_id IS NULL AND agent_id = $2
 	`, testWorkspaceID, agentID).Scan(&nullAfter); err != nil {
 		t.Fatalf("read NULL bucket post-link: %v", err)
 	}
-	if projectAfter < 1234 {
-		t.Errorf("project bucket: expected >=1234 tokens after link, got %d", projectAfter)
+	if featureAfter < 1234 {
+		t.Errorf("project bucket: expected >=1234 tokens after link, got %d", featureAfter)
 	}
 	if nullAfter != 0 {
 		t.Errorf("NULL bucket: expected 0 tokens after link, got %d", nullAfter)
@@ -1064,7 +1064,7 @@ func TestPruneTaskUsageHourlyDirty(t *testing.T) {
 	seed := func(model, age string) {
 		if _, err := testPool.Exec(ctx, `
 			INSERT INTO task_usage_hourly_dirty (
-				bucket_hour, workspace_id, runtime_id, agent_id, project_id,
+				bucket_hour, workspace_id, runtime_id, agent_id, feature_id,
 				provider, model, enqueued_at
 			)
 			VALUES (

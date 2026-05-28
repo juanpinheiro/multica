@@ -31,7 +31,7 @@ export function useCreateLabel() {
 }
 
 /**
- * Optimistic rename/recolor. Matches the useUpdateProject pattern: apply the
+ * Optimistic rename/recolor. Matches the useUpdateFeature pattern: apply the
  * change locally, snapshot for rollback, invalidate on settle. Without this
  * the UI freezes for the round-trip on every edit.
  */

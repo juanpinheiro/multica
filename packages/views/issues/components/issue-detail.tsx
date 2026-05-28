@@ -48,7 +48,7 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
-import { ProjectPicker } from "../../projects/components/project-picker";
+import { FeaturePicker } from "../../features/components/feature-picker";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -63,8 +63,8 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
-import { projectDetailOptions } from "@multica/core/projects/queries";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { featureDetailOptions } from "@multica/core/features/queries";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -283,7 +283,7 @@ const EMPTY_REPLIES: TimelineEntry[] = [];
 // ---------------------------------------------------------------------------
 //
 // Properties shown in the sidebar split into two groups:
-//   - core: always rendered (status / assignee / project)
+//   - core: always rendered (status / assignee / feature)
 //   - optional: rendered only when the issue has a value for that field OR
 //     the user explicitly added it via "+ Add property" in this session
 //     (priority / due_date / labels)
@@ -1015,11 +1015,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     initialData: () => allIssues.find((i) => i.id === parentIssueId),
   });
 
-  // Project segment in the breadcrumb. The issue's project_id is the source of
+  // Feature segment in the breadcrumb. The issue's feature_id is the source of
   // truth — same URL renders the same breadcrumb regardless of entry path.
-  const issueProjectId = issue?.project_id;
+  const issueProjectId = issue?.feature_id;
   const { data: breadcrumbProject = null, isError: breadcrumbProjectError } = useQuery({
-    ...projectDetailOptions(wsId, issueProjectId ?? ""),
+    ...featureDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
   const { data: childIssues = [] } = useQuery({
@@ -1302,9 +1302,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_project)}>
-            <ProjectPicker
-              projectId={issue.project_id}
+          <PropRow label={t(($) => $.detail.prop_feature)}>
+            <FeaturePicker
+              featureId={issue.feature_id}
               onUpdate={handleUpdateField}
             />
           </PropRow>
@@ -1617,15 +1617,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <>
                 {breadcrumbProject ? (
                   <AppLink
-                    href={paths.projectDetail(breadcrumbProject.id)}
+                    href={paths.featureDetail(breadcrumbProject.id)}
                     className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
                   >
-                    <ProjectIcon project={breadcrumbProject} size="sm" />
+                    <FeatureIcon feature={breadcrumbProject} size="sm" />
                     <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
                   </AppLink>
                 ) : breadcrumbProjectError ? (
                   <span className="italic text-muted-foreground/70 shrink-0">
-                    {t(($) => $.detail.breadcrumb_project_unknown)}
+                    {t(($) => $.detail.breadcrumb_feature_unknown)}
                   </span>
                 ) : (
                   <Skeleton className="h-3.5 w-20 shrink-0" />

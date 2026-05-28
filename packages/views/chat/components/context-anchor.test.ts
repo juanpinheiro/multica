@@ -25,10 +25,10 @@ describe("buildAnchorMarkdown", () => {
 
   it("formats a project anchor as plain text (no mention type)", () => {
     const md = buildAnchorMarkdown({
-      type: "project",
+      type: "feature",
       id: "proj-uuid",
       label: "Authentication",
     });
-    expect(md).toBe('Context: Project "Authentication"');
+    expect(md).toBe('Context: Feature "Authentication"');
   });
 });

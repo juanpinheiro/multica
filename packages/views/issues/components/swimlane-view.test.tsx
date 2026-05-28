@@ -33,9 +33,9 @@ vi.mock("@multica/core/paths", async () => {
 // swimlane feeds the result into a `useMemo(..., [getActorName, ...])`
 // that then drives a `useEffect(setLocalCells, [cells])` chain. A fresh
 // object per render therefore loops the effect indefinitely.
-vi.mock("@multica/core/projects/queries", () => ({
-  projectListOptions: (_wsId: string) => ({
-    queryKey: ["projects", _wsId, "list"],
+vi.mock("@multica/core/features/queries", () => ({
+  featureListOptions: (_wsId: string) => ({
+    queryKey: ["features", _wsId, "list"],
     queryFn: () => Promise.resolve([]),
   }),
 }));
@@ -123,7 +123,7 @@ vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
   };
 });
 
-type SwimlaneGroupingMock = "parent" | "project" | "assignee";
+type SwimlaneGroupingMock = "parent" | "feature" | "assignee";
 
 // Mock view store. The lane order and collapsed-lane fields are mutable
 // records on the captured object so tests can simulate persisted state
@@ -146,10 +146,10 @@ const mockViewState: {
 } = {
   sortBy: "position",
   sortDirection: "asc",
-  cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true, labels: true },
+  cardProperties: { priority: true, description: true, assignee: true, dueDate: true, feature: true, childProgress: true, labels: true },
   swimlaneGrouping: "parent",
-  swimlaneOrders: { parent: [], project: [], assignee: [] },
-  collapsedSwimlanes: { parent: [], project: [], assignee: [] },
+  swimlaneOrders: { parent: [], feature: [], assignee: [] },
+  collapsedSwimlanes: { parent: [], feature: [], assignee: [] },
   setSwimlaneGrouping: vi.fn(),
   setSwimlaneOrder: vi.fn(),
   toggleSwimlaneCollapsed: vi.fn(),
@@ -234,7 +234,7 @@ const mockIssues: Issue[] = [
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: null,
-    project_id: null,
+    feature_id: null,
     position: 100,
     start_date: null,
     due_date: null,
@@ -256,7 +256,7 @@ const mockIssues: Issue[] = [
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: "parent-1",
-    project_id: null,
+    feature_id: null,
     position: 200,
     start_date: null,
     due_date: null,
@@ -278,7 +278,7 @@ const mockIssues: Issue[] = [
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: null,
-    project_id: null,
+    feature_id: null,
     position: 300,
     start_date: null,
     due_date: null,
@@ -305,8 +305,8 @@ describe("SwimLaneView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockViewState.swimlaneGrouping = "parent";
-    mockViewState.swimlaneOrders = { parent: [], project: [], assignee: [] };
-    mockViewState.collapsedSwimlanes = { parent: [], project: [], assignee: [] };
+    mockViewState.swimlaneOrders = { parent: [], feature: [], assignee: [] };
+    mockViewState.collapsedSwimlanes = { parent: [], feature: [], assignee: [] };
     useLoadMoreByStatusMock.mockImplementation(() => ({
       total: 0,
       loaded: 0,
@@ -375,12 +375,12 @@ describe("SwimLaneView", () => {
     expect(mockOpenModal).toHaveBeenCalledWith("create-issue", expect.any(Object));
   });
 
-  it("includes project_id in the create payload when projectId prop is set", () => {
+  it("includes feature_id in the create payload when featureId prop is set", () => {
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
         onMoveIssue={vi.fn()}
-        projectId="proj-42"
+        featureId="proj-42"
       />,
     );
 
@@ -389,7 +389,7 @@ describe("SwimLaneView", () => {
 
     expect(mockOpenModal).toHaveBeenCalledWith(
       "create-issue",
-      expect.objectContaining({ project_id: "proj-42" }),
+      expect.objectContaining({ feature_id: "proj-42" }),
     );
   });
 
@@ -408,7 +408,7 @@ describe("SwimLaneView", () => {
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: "missing-parent",
-    project_id: null,
+    feature_id: null,
     position: 400,
     start_date: null,
     due_date: null,
@@ -680,7 +680,7 @@ describe("SwimLaneView", () => {
       creator_type: "member",
       creator_id: "user-1",
       parent_issue_id: null,
-      project_id: null,
+      feature_id: null,
       position: 100,
       start_date: null,
       due_date: null,
@@ -702,7 +702,7 @@ describe("SwimLaneView", () => {
       creator_type: "member",
       creator_id: "user-1",
       parent_issue_id: null,
-      project_id: null,
+      feature_id: null,
       position: 200,
       start_date: null,
       due_date: null,
@@ -724,7 +724,7 @@ describe("SwimLaneView", () => {
       creator_type: "member",
       creator_id: "user-1",
       parent_issue_id: "parent-1",
-      project_id: null,
+      feature_id: null,
       position: 300,
       start_date: null,
       due_date: null,
@@ -746,7 +746,7 @@ describe("SwimLaneView", () => {
       creator_type: "member",
       creator_id: "user-1",
       parent_issue_id: "parent-2",
-      project_id: null,
+      feature_id: null,
       position: 400,
       start_date: null,
       due_date: null,
@@ -943,7 +943,7 @@ describe("SwimLaneView", () => {
   });
 
   // ------------------------------------------------------------------
-  // Project grouping
+  // Feature grouping
   // ------------------------------------------------------------------
 
   const projectIssues: Issue[] = [
@@ -952,7 +952,7 @@ describe("SwimLaneView", () => {
       id: "issue-a",
       identifier: "PROJ-100",
       title: "Issue A",
-      project_id: "proj-1",
+      feature_id: "proj-1",
       parent_issue_id: null,
       status: "todo",
     },
@@ -961,7 +961,7 @@ describe("SwimLaneView", () => {
       id: "issue-b",
       identifier: "PROJ-101",
       title: "Issue B",
-      project_id: "proj-2",
+      feature_id: "proj-2",
       parent_issue_id: null,
       status: "in_progress",
     },
@@ -970,23 +970,23 @@ describe("SwimLaneView", () => {
       id: "issue-c",
       identifier: "PROJ-102",
       title: "Issue C",
-      project_id: null,
+      feature_id: null,
       parent_issue_id: null,
       status: "todo",
     },
   ];
 
-  it("groups by project when swimlaneGrouping is 'project'", () => {
-    mockViewState.swimlaneGrouping = "project";
+  it("groups by feature when swimlaneGrouping is 'feature'", () => {
+    mockViewState.swimlaneGrouping = "feature";
 
     renderWithI18n(
       <SwimLaneView issues={projectIssues} onMoveIssue={vi.fn()} />,
     );
 
-    // No-project pinned lane is always present.
-    expect(screen.getAllByText("No project").length).toBeGreaterThanOrEqual(1);
-    // Both issue cards from real projects render — production fetches
-    // project titles from the API; in tests the mocked listProjects
+    // No-feature pinned lane is always present.
+    expect(screen.getAllByText("No feature").length).toBeGreaterThanOrEqual(1);
+    // Both issue cards from real features render — production fetches
+    // feature titles from the API; in tests the mocked listFeatures
     // returns [] so the lane headers fall back to an empty title and
     // we assert on card visibility, not lane title text.
     expect(screen.getByText("Issue A")).toBeInTheDocument();
@@ -994,16 +994,16 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Issue C")).toBeInTheDocument();
   });
 
-  it("emits project_id when a card is dropped into a project lane", () => {
-    mockViewState.swimlaneGrouping = "project";
+  it("emits feature_id when a card is dropped into a project lane", () => {
+    mockViewState.swimlaneGrouping = "feature";
     const mockOnMoveIssue = vi.fn();
 
     renderWithI18n(
       <SwimLaneView issues={projectIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    // Drop "issue-c" (no project) into proj-1's todo cell.
-    const target = "swim:project:proj-1:todo";
+    // Drop "issue-c" (no feature) into proj-1's todo cell.
+    const target = "swim:feature:proj-1:todo";
     act(() => {
       lastOnDragOver({ active: { id: "issue-c" }, over: { id: target } });
     });
@@ -1013,19 +1013,19 @@ describe("SwimLaneView", () => {
 
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-c",
-      expect.objectContaining({ project_id: "proj-1", status: "todo" }),
+      expect.objectContaining({ feature_id: "proj-1", status: "todo" }),
     );
   });
 
-  it("emits null project_id when a card is dropped into the 'No project' lane", () => {
-    mockViewState.swimlaneGrouping = "project";
+  it("emits null feature_id when a card is dropped into the 'No project' lane", () => {
+    mockViewState.swimlaneGrouping = "feature";
     const mockOnMoveIssue = vi.fn();
 
     renderWithI18n(
       <SwimLaneView issues={projectIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:project:none:in_review";
+    const target = "swim:feature:none:in_review";
     act(() => {
       lastOnDragOver({ active: { id: "issue-a" }, over: { id: target } });
     });
@@ -1035,7 +1035,7 @@ describe("SwimLaneView", () => {
 
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-a",
-      expect.objectContaining({ project_id: null, status: "in_review" }),
+      expect.objectContaining({ feature_id: null, status: "in_review" }),
     );
   });
 
@@ -1052,7 +1052,7 @@ describe("SwimLaneView", () => {
       assignee_type: "member",
       assignee_id: "user-1",
       parent_issue_id: null,
-      project_id: null,
+      feature_id: null,
       status: "todo",
     },
     {
@@ -1063,7 +1063,7 @@ describe("SwimLaneView", () => {
       assignee_type: "agent",
       assignee_id: "agent-1",
       parent_issue_id: null,
-      project_id: null,
+      feature_id: null,
       status: "in_progress",
     },
     {
@@ -1074,7 +1074,7 @@ describe("SwimLaneView", () => {
       assignee_type: null,
       assignee_id: null,
       parent_issue_id: null,
-      project_id: null,
+      feature_id: null,
       status: "todo",
     },
   ];

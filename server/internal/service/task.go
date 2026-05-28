@@ -332,7 +332,7 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 // and switches to the quick-create prompt template; the completion path
 // uses RequesterID + WorkspaceID to write the inbox notification.
 //
-// ProjectID is the optional project the user picked in the modal. When
+// FeatureID is the optional feature the user picked in the modal. When
 // non-empty the daemon claim handler resolves the project's title +
 // resources, and the prompt template instructs the agent to pass
 // `--project <uuid>` so the new issue lands in that project.
@@ -348,7 +348,7 @@ type QuickCreateContext struct {
 	Prompt      string `json:"prompt"`
 	RequesterID string `json:"requester_id"`
 	WorkspaceID string `json:"workspace_id"`
-	ProjectID   string `json:"project_id,omitempty"`
+	FeatureID   string `json:"feature_id,omitempty"`
 	SquadID     string `json:"squad_id,omitempty"`
 }
 
@@ -389,7 +389,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		WorkspaceID: util.UUIDToString(workspaceID),
 	}
 	if projectID.Valid {
-		payload.ProjectID = util.UUIDToString(projectID)
+		payload.FeatureID = util.UUIDToString(projectID)
 	}
 	if squadID.Valid {
 		payload.SquadID = util.UUIDToString(squadID)
@@ -415,7 +415,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		"squad_id", payload.SquadID,
 		"requester_id", util.UUIDToString(requesterID),
 		"workspace_id", util.UUIDToString(workspaceID),
-		"project_id", payload.ProjectID,
+		"feature_id", payload.FeatureID,
 	)
 	// Match every other Enqueue* path: kick the daemon WS so the task
 	// gets claimed promptly instead of waiting for the next 30 s poll

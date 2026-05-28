@@ -6,27 +6,27 @@ export const dashboardKeys = {
   daily: (
     wsId: string,
     days: number,
-    projectId: string | null,
+    featureId: string | null,
     tz: string,
-  ) => [...dashboardKeys.all(wsId), "daily", days, projectId, tz] as const,
+  ) => [...dashboardKeys.all(wsId), "daily", days, featureId, tz] as const,
   byAgent: (
     wsId: string,
     days: number,
-    projectId: string | null,
+    featureId: string | null,
     tz: string,
-  ) => [...dashboardKeys.all(wsId), "by-agent", days, projectId, tz] as const,
+  ) => [...dashboardKeys.all(wsId), "by-agent", days, featureId, tz] as const,
   agentRuntime: (
     wsId: string,
     days: number,
-    projectId: string | null,
+    featureId: string | null,
     tz: string,
-  ) => [...dashboardKeys.all(wsId), "agent-runtime", days, projectId, tz] as const,
+  ) => [...dashboardKeys.all(wsId), "agent-runtime", days, featureId, tz] as const,
   runTimeDaily: (
     wsId: string,
     days: number,
-    projectId: string | null,
+    featureId: string | null,
     tz: string,
-  ) => [...dashboardKeys.all(wsId), "runtime-daily", days, projectId, tz] as const,
+  ) => [...dashboardKeys.all(wsId), "runtime-daily", days, featureId, tz] as const,
 };
 
 // 5-min rollup cadence on the server, 60s background refetch on the client.
@@ -39,15 +39,15 @@ const STALE_TIME = 60 * 1000;
 export function dashboardUsageDailyOptions(
   wsId: string,
   days: number,
-  projectId: string | null,
+  featureId: string | null,
   tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.daily(wsId, days, projectId, tz),
+    queryKey: dashboardKeys.daily(wsId, days, featureId, tz),
     queryFn: () =>
       api.getDashboardUsageDaily({
         days,
-        project_id: projectId ?? undefined,
+        feature_id: featureId ?? undefined,
         tz,
       }),
     enabled: !!wsId,
@@ -58,15 +58,15 @@ export function dashboardUsageDailyOptions(
 export function dashboardUsageByAgentOptions(
   wsId: string,
   days: number,
-  projectId: string | null,
+  featureId: string | null,
   tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.byAgent(wsId, days, projectId, tz),
+    queryKey: dashboardKeys.byAgent(wsId, days, featureId, tz),
     queryFn: () =>
       api.getDashboardUsageByAgent({
         days,
-        project_id: projectId ?? undefined,
+        feature_id: featureId ?? undefined,
         tz,
       }),
     enabled: !!wsId,
@@ -77,15 +77,15 @@ export function dashboardUsageByAgentOptions(
 export function dashboardAgentRunTimeOptions(
   wsId: string,
   days: number,
-  projectId: string | null,
+  featureId: string | null,
   tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.agentRuntime(wsId, days, projectId, tz),
+    queryKey: dashboardKeys.agentRuntime(wsId, days, featureId, tz),
     queryFn: () =>
       api.getDashboardAgentRunTime({
         days,
-        project_id: projectId ?? undefined,
+        feature_id: featureId ?? undefined,
         tz,
       }),
     enabled: !!wsId,
@@ -96,15 +96,15 @@ export function dashboardAgentRunTimeOptions(
 export function dashboardRunTimeDailyOptions(
   wsId: string,
   days: number,
-  projectId: string | null,
+  featureId: string | null,
   tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.runTimeDaily(wsId, days, projectId, tz),
+    queryKey: dashboardKeys.runTimeDaily(wsId, days, featureId, tz),
     queryFn: () =>
       api.getDashboardRunTimeDaily({
         days,
-        project_id: projectId ?? undefined,
+        feature_id: featureId ?? undefined,
         tz,
       }),
     enabled: !!wsId,

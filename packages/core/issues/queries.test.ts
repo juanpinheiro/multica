@@ -5,14 +5,14 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { Issue, ListIssuesParams, ListIssuesResponse } from "../types";
 import {
-  PROJECT_GANTT_MAX_ISSUES,
-  PROJECT_GANTT_PAGE_LIMIT,
+  FEATURE_GANTT_MAX_ISSUES,
+  FEATURE_GANTT_PAGE_LIMIT,
   issueKeys,
-  projectGanttIssuesOptions,
+  featureGanttIssuesOptions,
 } from "./queries";
 
 const WS_ID = "ws-1";
-const PROJECT_ID = "project-1";
+const FEATURE_ID = "feature-1";
 
 function makeIssue(idx: number): Issue {
   return {
@@ -29,7 +29,7 @@ function makeIssue(idx: number): Issue {
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: null,
-    project_id: PROJECT_ID,
+    feature_id: FEATURE_ID,
     position: idx,
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,
@@ -45,7 +45,7 @@ function installFakeApi(listIssues: (params?: ListIssuesParams) => Promise<ListI
   setApiInstance({ listIssues } as unknown as ApiClient);
 }
 
-describe("projectGanttIssuesOptions", () => {
+describe("featureGanttIssuesOptions", () => {
   let qc: QueryClient;
 
   beforeEach(() => {
@@ -59,7 +59,7 @@ describe("projectGanttIssuesOptions", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns the first page directly when it fits under PROJECT_GANTT_PAGE_LIMIT", async () => {
+  it("returns the first page directly when it fits under FEATURE_GANTT_PAGE_LIMIT", async () => {
     const listIssues = vi
       .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
       .mockResolvedValue({
@@ -68,25 +68,25 @@ describe("projectGanttIssuesOptions", () => {
       });
     installFakeApi(listIssues);
 
-    const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
+    const data = await qc.fetchQuery(featureGanttIssuesOptions(WS_ID, FEATURE_ID));
 
     expect(listIssues).toHaveBeenCalledTimes(1);
     expect(listIssues).toHaveBeenCalledWith({
-      project_id: PROJECT_ID,
+      feature_id: FEATURE_ID,
       scheduled: true,
-      limit: PROJECT_GANTT_PAGE_LIMIT,
+      limit: FEATURE_GANTT_PAGE_LIMIT,
       offset: 0,
     });
     expect(data).toHaveLength(2);
   });
 
   it("loops through pages until total is satisfied (no silent truncation)", async () => {
-    const total = PROJECT_GANTT_PAGE_LIMIT + 7;
-    const firstPage = Array.from({ length: PROJECT_GANTT_PAGE_LIMIT }, (_, i) =>
+    const total = FEATURE_GANTT_PAGE_LIMIT + 7;
+    const firstPage = Array.from({ length: FEATURE_GANTT_PAGE_LIMIT }, (_, i) =>
       makeIssue(i),
     );
     const secondPage = Array.from({ length: 7 }, (_, i) =>
-      makeIssue(PROJECT_GANTT_PAGE_LIMIT + i),
+      makeIssue(FEATURE_GANTT_PAGE_LIMIT + i),
     );
 
     const listIssues = vi
@@ -96,13 +96,13 @@ describe("projectGanttIssuesOptions", () => {
         const offset = params.offset ?? 0;
         if (offset === 0)
           return { issues: firstPage, total };
-        if (offset === PROJECT_GANTT_PAGE_LIMIT)
+        if (offset === FEATURE_GANTT_PAGE_LIMIT)
           return { issues: secondPage, total };
         throw new Error(`unexpected offset ${offset}`);
       });
     installFakeApi(listIssues);
 
-    const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
+    const data = await qc.fetchQuery(featureGanttIssuesOptions(WS_ID, FEATURE_ID));
 
     expect(listIssues).toHaveBeenCalledTimes(2);
     expect(data).toHaveLength(total);
@@ -115,18 +115,18 @@ describe("projectGanttIssuesOptions", () => {
       .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
       .mockResolvedValue({
         issues: [makeIssue(1)],
-        total: PROJECT_GANTT_MAX_ISSUES,
+        total: FEATURE_GANTT_MAX_ISSUES,
       });
     installFakeApi(listIssues);
 
-    const data = await qc.fetchQuery(projectGanttIssuesOptions(WS_ID, PROJECT_ID));
+    const data = await qc.fetchQuery(featureGanttIssuesOptions(WS_ID, FEATURE_ID));
 
     expect(listIssues).toHaveBeenCalledTimes(1);
     expect(data).toHaveLength(1);
   });
 
   it("uses the project-scoped Gantt cache key", () => {
-    const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
-    expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+    const options = featureGanttIssuesOptions(WS_ID, FEATURE_ID);
+    expect(options.queryKey).toEqual(issueKeys.featureGantt(WS_ID, FEATURE_ID));
   });
 });

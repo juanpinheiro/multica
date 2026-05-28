@@ -16,16 +16,21 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 const testWorkspaceID = "test-workspace"
 const testUserID = "test-user"
 
-// mockMembershipChecker always returns true.
+// mockMembershipChecker accepts only the explicit test user. Rejecting the
+// singleton user keeps the loopback bypass in HandleWebSocket from firing
+// in these tests — they're designed to exercise the first-message-auth path,
+// which only runs when the server cannot resolve a user via cookie OR
+// loopback bypass.
 type mockMembershipChecker struct{}
 
-func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) bool {
-	return true
+func (m *mockMembershipChecker) IsMember(_ context.Context, userID, _ string) bool {
+	return userID == testUserID
 }
 
 func makeTestToken(t *testing.T) string {
@@ -388,4 +393,53 @@ func TestCheckOrigin(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestHandleWebSocket_LoopbackBypassConnectsAsSingleton verifies the
+// personal-fork loopback shortcut: a WS client connecting from 127.0.0.1
+// with no auth cookie does NOT need to send a first-message `auth` frame.
+// The handler resolves the user as middleware.SingletonUserID and proceeds
+// directly into the read loop (no `auth_ack` is sent — the cookie/loopback
+// paths are silent on success). This matches the HTTP LoopbackAuth flow.
+func TestHandleWebSocket_LoopbackBypassConnectsAsSingleton(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+	mc := &singletonMembershipChecker{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		HandleWebSocket(hub, mc, nil, nil, w, r)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?workspace_id=" + testWorkspaceID
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	// Broadcast a message; if the bypass works, the client receives it
+	// without ever sending an `auth` frame.
+	time.Sleep(50 * time.Millisecond)
+	want := []byte(`{"type":"issue:created","payload":{}}`)
+	hub.Broadcast(want)
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, got, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read after bypass: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("broadcast = %q, want %q", got, want)
+	}
+}
+
+// singletonMembershipChecker accepts only the personal-fork singleton user,
+// used to exercise the loopback bypass without also letting the test JWT
+// through.
+type singletonMembershipChecker struct{}
+
+func (m *singletonMembershipChecker) IsMember(_ context.Context, userID, _ string) bool {
+	return userID == middleware.SingletonUserID
 }

@@ -12,8 +12,8 @@ import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-st
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
-import { projectListOptions } from "@multica/core/projects/queries";
-import { ProjectIcon } from "../../projects/components/project-icon";
+import { featureListOptions } from "@multica/core/features/queries";
+import { FeatureIcon } from "../../features/components/feature-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
@@ -54,14 +54,14 @@ function ListRowContent({
   const p = useWorkspacePaths();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: storeProperties.project && !!issue.project_id,
+  const { data: features = [] } = useQuery({
+    ...featureListOptions(wsId),
+    enabled: storeProperties.feature && !!issue.feature_id,
   });
-  const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const feature = issue.feature_id ? features.find((pr) => pr.id === issue.feature_id) : undefined;
   const labels = issue.labels ?? [];
 
-  const showProject = storeProperties.project && project;
+  const showFeature = storeProperties.feature && feature;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showAssignee = storeProperties.assignee && issue.assignee_type && issue.assignee_id;
   const showStartDate = storeProperties.startDate && issue.start_date;
@@ -127,10 +127,10 @@ function ListRowContent({
               </span>
             )}
           </span>
-          {showProject && (
+          {showFeature && (
             <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
-              <ProjectIcon project={project} size="sm" />
-              <span className="truncate">{project!.title}</span>
+              <FeatureIcon feature={feature} size="sm" />
+              <span className="truncate">{feature!.title}</span>
             </span>
           )}
           {showStartDate && (

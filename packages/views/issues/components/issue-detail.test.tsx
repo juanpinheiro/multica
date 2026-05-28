@@ -188,8 +188,8 @@ vi.mock("../../common/actor-avatar", () => ({
   ),
 }));
 
-vi.mock("../../projects/components/project-picker", () => ({
-  ProjectPicker: () => <span data-testid="project-picker">Project</span>,
+vi.mock("../../features/components/feature-picker", () => ({
+  FeaturePicker: () => <span data-testid="project-picker">Project</span>,
 }));
 
 // Mock api
@@ -219,8 +219,8 @@ const mockApiObj = vi.hoisted(() => ({
   removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
-  getProject: vi.fn(),
-  listProjects: vi.fn().mockResolvedValue({ projects: [] }),
+  getFeature: vi.fn(),
+  listFeatures: vi.fn().mockResolvedValue({ features: [] }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -396,7 +396,7 @@ const mockIssue: Issue = {
   creator_type: "member",
   creator_id: "user-1",
   parent_issue_id: null,
-  project_id: null,
+  feature_id: null,
   position: 0,
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
@@ -507,8 +507,8 @@ describe("IssueDetail (shared)", () => {
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
     // Reset project mock — individual tests override per case. Default fixture
-    // has project_id: null so getProject is not invoked.
-    mockApiObj.getProject.mockReset();
+    // has feature_id: null so getProject is not invoked.
+    mockApiObj.getFeature.mockReset();
   });
 
   it("shows loading skeleton while data is loading", () => {
@@ -544,22 +544,22 @@ describe("IssueDetail (shared)", () => {
     expect(wsLink.closest("a")).toHaveAttribute("href", "/test/issues");
   });
 
-  it("omits the project breadcrumb segment when the issue has no project_id", async () => {
-    // Default fixture has project_id: null.
+  it("omits the project breadcrumb segment when the issue has no feature_id", async () => {
+    // Default fixture has feature_id: null.
     renderIssueDetail();
 
     await waitFor(() => {
       expect(screen.getByText("Test WS")).toBeInTheDocument();
     });
 
-    // Project should not have been fetched.
-    expect(mockApiObj.getProject).not.toHaveBeenCalled();
-    expect(screen.queryByText("Unknown project")).not.toBeInTheDocument();
+    // Feature should not have been fetched.
+    expect(mockApiObj.getFeature).not.toHaveBeenCalled();
+    expect(screen.queryByText("Unknown feature")).not.toBeInTheDocument();
   });
 
-  it("renders the project breadcrumb segment when the issue belongs to a project", async () => {
-    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-1" });
-    mockApiObj.getProject.mockResolvedValue({
+  it("renders the feature breadcrumb segment when the issue belongs to a feature", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, feature_id: "p-1" });
+    mockApiObj.getFeature.mockResolvedValue({
       id: "p-1",
       workspace_id: "ws-1",
       title: "Marketing site refresh",
@@ -581,20 +581,20 @@ describe("IssueDetail (shared)", () => {
     const projectLink = await screen.findByText("Marketing site refresh");
     // The whole project segment is a single AppLink pointing at the project
     // detail route under the active workspace slug.
-    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/projects/p-1");
+    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/features/p-1");
   });
 
-  it("shows an Unknown project placeholder when the project query fails", async () => {
-    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "p-missing" });
-    mockApiObj.getProject.mockRejectedValue(new Error("not found"));
+  it("shows an Unknown feature placeholder when the feature query fails", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, feature_id: "p-missing" });
+    mockApiObj.getFeature.mockRejectedValue(new Error("not found"));
 
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByText("Unknown project")).toBeInTheDocument();
+      expect(screen.getByText("Unknown feature")).toBeInTheDocument();
     });
     // Placeholder is non-interactive — no link wraps the text.
-    const placeholder = screen.getByText("Unknown project");
+    const placeholder = screen.getByText("Unknown feature");
     expect(placeholder.closest("a")).toBeNull();
   });
 
@@ -642,7 +642,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByText("Priority")).not.toBeInTheDocument();
     expect(screen.queryByText("Due date")).not.toBeInTheDocument();
     expect(screen.queryByText("Labels")).not.toBeInTheDocument();
-    // Project stays as a core row regardless of value.
+    // Feature stays as a core row regardless of value.
     expect(screen.getByTestId("project-picker")).toBeInTheDocument();
     // No parent → no standalone Parent issue section either.
     expect(screen.queryByText("Parent issue")).not.toBeInTheDocument();

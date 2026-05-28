@@ -12,11 +12,11 @@ import { defaultStorage } from "../../platform/storage";
 export type ViewMode = "board" | "list" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
 export type IssueGrouping = "status" | "assignee";
-export type SwimlaneGrouping = "parent" | "project" | "assignee";
+export type SwimlaneGrouping = "parent" | "feature" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
 export type SortDirection = "asc" | "desc";
 
-export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];
+export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "feature", "assignee"];
 
 export interface CardProperties {
   priority: boolean;
@@ -24,7 +24,7 @@ export interface CardProperties {
   assignee: boolean;
   startDate: boolean;
   dueDate: boolean;
-  project: boolean;
+  feature: boolean;
   childProgress: boolean;
   labels: boolean;
 }
@@ -54,7 +54,7 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
   { key: "assignee", label: "Assignee" },
   { key: "startDate", label: "Start date" },
   { key: "dueDate", label: "Due date" },
-  { key: "project", label: "Project" },
+  { key: "feature", label: "Feature" },
   { key: "labels", label: "Labels" },
   { key: "childProgress", label: "Sub-issue progress" },
 ];
@@ -67,8 +67,8 @@ export interface IssueViewState {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
-  projectFilters: string[];
-  includeNoProject: boolean;
+  featureFilters: string[];
+  includeNoFeature: boolean;
   labelFilters: string[];
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
@@ -85,7 +85,7 @@ export interface IssueViewState {
   /** Active swimlane grouping dimension. */
   swimlaneGrouping: SwimlaneGrouping;
   /** Persisted lane order, keyed by grouping. Entries are raw lane ids
-   *  (parent issue id, project id, or `<assigneeType>:<assigneeId>`). */
+   *  (parent issue id, feature id, or `<assigneeType>:<assigneeId>`). */
   swimlaneOrders: Record<SwimlaneGrouping, string[]>;
   /** Persisted collapsed lanes, keyed by grouping. Same id space as
    *  `swimlaneOrders`, plus the sentinel `"none"` for the pinned
@@ -100,8 +100,8 @@ export interface IssueViewState {
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
   toggleNoAssignee: () => void;
   toggleCreatorFilter: (value: ActorFilterValue) => void;
-  toggleProjectFilter: (projectId: string) => void;
-  toggleNoProject: () => void;
+  toggleFeatureFilter: (featureId: string) => void;
+  toggleNoFeature: () => void;
   toggleLabelFilter: (labelId: string) => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
@@ -126,8 +126,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   assigneeFilters: [],
   includeNoAssignee: false,
   creatorFilters: [],
-  projectFilters: [],
-  includeNoProject: false,
+  featureFilters: [],
+  includeNoFeature: false,
   labelFilters: [],
   agentRunningFilter: false,
   sortBy: "position",
@@ -138,7 +138,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     assignee: true,
     startDate: true,
     dueDate: true,
-    project: true,
+    feature: true,
     childProgress: true,
     labels: true,
   },
@@ -146,8 +146,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   ganttZoom: "week",
   ganttShowCompleted: false,
   swimlaneGrouping: "assignee",
-  swimlaneOrders: { parent: [], project: [], assignee: [] },
-  collapsedSwimlanes: { parent: [], project: [], assignee: [] },
+  swimlaneOrders: { parent: [], feature: [], assignee: [] },
+  collapsedSwimlanes: { parent: [], feature: [], assignee: [] },
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setGanttZoom: (zoom) => set({ ganttZoom: zoom }),
@@ -194,14 +194,14 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
           : [...state.creatorFilters, value],
       };
     }),
-  toggleProjectFilter: (projectId) =>
+  toggleFeatureFilter: (featureId) =>
     set((state) => ({
-      projectFilters: state.projectFilters.includes(projectId)
-        ? state.projectFilters.filter((id) => id !== projectId)
-        : [...state.projectFilters, projectId],
+      featureFilters: state.featureFilters.includes(featureId)
+        ? state.featureFilters.filter((id) => id !== featureId)
+        : [...state.featureFilters, featureId],
     })),
-  toggleNoProject: () =>
-    set((state) => ({ includeNoProject: !state.includeNoProject })),
+  toggleNoFeature: () =>
+    set((state) => ({ includeNoFeature: !state.includeNoFeature })),
   toggleLabelFilter: (labelId) =>
     set((state) => ({
       labelFilters: state.labelFilters.includes(labelId)
@@ -233,8 +233,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       assigneeFilters: [],
       includeNoAssignee: false,
       creatorFilters: [],
-      projectFilters: [],
-      includeNoProject: false,
+      featureFilters: [],
+      includeNoFeature: false,
       labelFilters: [],
       agentRunningFilter: false,
     }),
@@ -286,8 +286,8 @@ export const viewStorePersistOptions = (name: string) => ({
     assigneeFilters: state.assigneeFilters,
     includeNoAssignee: state.includeNoAssignee,
     creatorFilters: state.creatorFilters,
-    projectFilters: state.projectFilters,
-    includeNoProject: state.includeNoProject,
+    featureFilters: state.featureFilters,
+    includeNoFeature: state.includeNoFeature,
     labelFilters: state.labelFilters,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
