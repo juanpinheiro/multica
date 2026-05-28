@@ -64,7 +64,7 @@ export function CapabilityBanner({
 function getCopy(reason: Reason, noun: string, ownerName?: string): string {
   switch (reason) {
     case "not_authenticated":
-      return `Sign in to edit this ${noun}.`;
+      return `View only.`;
     case "not_member":
       return `Join this workspace to edit this ${noun}.`;
     case "not_owner_role":

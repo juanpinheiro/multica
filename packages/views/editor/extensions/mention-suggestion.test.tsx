@@ -7,12 +7,11 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueStatus, ListIssuesCache } from "@multica/core/types";
 import type { QueryClient } from "@tanstack/react-query";
 import enCommon from "../../locales/en/common.json";
-import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
 import enEditor from "../../locales/en/editor.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings, editor: enEditor },
+  en: { common: enCommon, settings: enSettings, editor: enEditor },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {

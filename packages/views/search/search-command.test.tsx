@@ -6,12 +6,11 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import { SearchCommand } from "./search-command";
 import { useSearchStore } from "./search-store";
 import enCommon from "../locales/en/common.json";
-import enAuth from "../locales/en/auth.json";
 import enSettings from "../locales/en/settings.json";
 import enSearch from "../locales/en/search.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings, search: enSearch },
+  en: { common: enCommon, settings: enSettings, search: enSearch },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {

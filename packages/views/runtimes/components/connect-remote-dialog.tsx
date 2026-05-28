@@ -24,9 +24,8 @@ type Step = "instructions" | "success";
 const INSTALL_CMD =
   "git clone https://github.com/multica-ai/multica.git && cd multica && make build && cp server/bin/multica /usr/local/bin/";
 const SETUP_CMD = "multica setup";
-const TOKEN_CMD = `multica config set server_url https://api.multica.ai
-multica config set app_url https://multica.ai
-multica login --token <YOUR_TOKEN>
+const TOKEN_CMD = `export MULTICA_TOKEN=<YOUR_SERVER_TOKEN>
+multica config set server_url http://<YOUR_SERVER>:8080
 multica daemon start`;
 
 export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {

@@ -16,14 +16,12 @@
   },
   "new_page": {
     "back": "Back",
-    "log_out": "Log out",
     "title": "Welcome to Multica",
     "description": "One workspace where you and your AI teammates work side by side — taking issues, leaving comments, sharing the same context."
   },
   "no_access": {
     "title": "Workspace not available",
     "description": "This workspace doesn't exist or you don't have access.",
-    "go_to_workspaces": "Go to my workspaces",
-    "sign_in_different": "Sign in as a different user"
+    "go_to_workspaces": "Go to my workspaces"
   }
 }
