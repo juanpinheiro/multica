@@ -5,8 +5,6 @@
 package db
 
 import (
-	"net/netip"
-
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -218,23 +216,6 @@ type CommentReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
-type ContactSalesInquiry struct {
-	ID              pgtype.UUID        `json:"id"`
-	FirstName       string             `json:"first_name"`
-	LastName        string             `json:"last_name"`
-	BusinessEmail   string             `json:"business_email"`
-	CompanyName     string             `json:"company_name"`
-	CompanySize     string             `json:"company_size"`
-	CountryRegion   string             `json:"country_region"`
-	UseCase         string             `json:"use_case"`
-	Goals           string             `json:"goals"`
-	ConsentOutreach bool               `json:"consent_outreach"`
-	ConsentUpdates  bool               `json:"consent_updates"`
-	SubmitterIp     *netip.Addr        `json:"submitter_ip"`
-	UserAgent       string             `json:"user_agent"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-}
-
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`
@@ -252,15 +233,6 @@ type DaemonToken struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	DaemonID    string             `json:"daemon_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
-type Feedback struct {
-	ID          pgtype.UUID        `json:"id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Message     string             `json:"message"`
-	Metadata    []byte             `json:"metadata"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -421,18 +393,6 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-type PersonalAccessToken struct {
-	ID          pgtype.UUID        `json:"id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	Name        string             `json:"name"`
-	TokenHash   string             `json:"token_hash"`
-	TokenPrefix string             `json:"token_prefix"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
-	Revoked     bool               `json:"revoked"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type PinnedItem struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -588,31 +548,15 @@ type TaskUsageHourlyRollupState struct {
 }
 
 type User struct {
-	ID                      pgtype.UUID        `json:"id"`
-	Name                    string             `json:"name"`
-	Email                   string             `json:"email"`
-	AvatarUrl               pgtype.Text        `json:"avatar_url"`
-	CreatedAt               pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt               pgtype.Timestamptz `json:"updated_at"`
-	OnboardedAt             pgtype.Timestamptz `json:"onboarded_at"`
-	OnboardingQuestionnaire []byte             `json:"onboarding_questionnaire"`
-	CloudWaitlistEmail      pgtype.Text        `json:"cloud_waitlist_email"`
-	CloudWaitlistReason     pgtype.Text        `json:"cloud_waitlist_reason"`
-	StarterContentState     pgtype.Text        `json:"starter_content_state"`
-	Language                pgtype.Text        `json:"language"`
-	ProfileDescription      string             `json:"profile_description"`
-	// User-preferred IANA timezone for report rendering (Viewing tz). NULL means "use the browser-detected tz at render time". Affects dashboards, charts, and any "today" label shown to this user. Does not affect data materialisation — all rollups remain in UTC.
-	Timezone pgtype.Text `json:"timezone"`
-}
-
-type VerificationCode struct {
-	ID        pgtype.UUID        `json:"id"`
-	Email     string             `json:"email"`
-	Code      string             `json:"code"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-	Used      bool               `json:"used"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	Attempts  int32              `json:"attempts"`
+	ID                 pgtype.UUID        `json:"id"`
+	Name               string             `json:"name"`
+	Email              string             `json:"email"`
+	AvatarUrl          pgtype.Text        `json:"avatar_url"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	Language           pgtype.Text        `json:"language"`
+	ProfileDescription string             `json:"profile_description"`
+	Timezone           pgtype.Text        `json:"timezone"`
 }
 
 type WebhookDelivery struct {
@@ -653,4 +597,3 @@ type Workspace struct {
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 }
-

@@ -1,13 +1,5 @@
-DROP TABLE IF EXISTS activity_log;
-DROP TABLE IF EXISTS daemon_connection;
-DROP TABLE IF EXISTS agent_task_queue;
-DROP TABLE IF EXISTS inbox_item;
-DROP TABLE IF EXISTS comment;
-DROP TABLE IF EXISTS issue_dependency;
-DROP TABLE IF EXISTS issue_to_label;
-DROP TABLE IF EXISTS issue_label;
-DROP TABLE IF EXISTS issue;
-DROP TABLE IF EXISTS agent;
-DROP TABLE IF EXISTS member;
-DROP TABLE IF EXISTS workspace;
-DROP TABLE IF EXISTS "user";
+-- Drop all schema objects. Public-schema-only; tables drop with their indexes,
+-- constraints, sequences, and triggers via CASCADE. Functions and extensions
+-- drop separately. Order doesn't matter under CASCADE.
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
