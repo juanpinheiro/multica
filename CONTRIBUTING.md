@@ -290,15 +290,13 @@ This runs:
 1. TypeScript typecheck
 2. TypeScript unit tests
 3. Go tests
-4. Playwright E2E tests
 
 Notes:
 
 - Go tests create their own fixture data
-- E2E tests create their own workspace and issue fixtures
 - the check flow starts backend/frontend only if they are not already running
 
-## Local Codex Daemon
+## Local Daemon
 
 Run the local daemon:
 
@@ -306,35 +304,20 @@ Run the local daemon:
 make daemon
 ```
 
-The daemon authenticates using the CLI's stored token (`multica login`).
+The daemon uses the server URL from the CLI's profile config. When the backend runs on `localhost`, no token is needed — loopback requests are trusted automatically.
 It registers runtimes for all watched workspaces from the CLI config.
 
 ## Full-Stack Isolated Testing
 
-This section covers running the complete stack (backend, frontend, daemon) from
-source in a fully isolated environment. Useful for testing end-to-end changes
-that span multiple components, or for automated CI/AI workflows that need zero
-human intervention.
+This section covers running the complete stack (backend, frontend, daemon) from source in a fully isolated environment. Useful for testing end-to-end changes that span multiple components.
 
-### Why Not Just `make daemon`?
-
-`make daemon` uses the system-installed CLI's stored token and connects to
-whatever server is configured in `~/.multica/config.json`. That's fine for
-day-to-day development against a shared server, but for fully isolated testing
-you need:
-
-- a local backend and frontend (from source)
-- a local daemon (from source) with its own profile
-- automated authentication (no browser login)
-- no interference with your production CLI config
+Authentication is automatic — backend requests from `localhost` are trusted with no token required.
 
 ### Dynamic Profile Naming
 
-Each worktree must use a unique daemon profile to avoid collisions when
-multiple features run in parallel.
+Each worktree must use a unique daemon profile to avoid collisions when multiple features run in parallel.
 
-The profile name is derived from the worktree directory using the same
-slug + hash pattern as `scripts/init-worktree-env.sh`:
+The profile name is derived from the worktree directory using the same slug + hash pattern as `scripts/init-worktree-env.sh`:
 
 ```bash
 WORKTREE_DIR="$(basename "$PWD")"
@@ -344,9 +327,7 @@ OFFSET=$((HASH % 1000))
 PROFILE="dev-${SLUG}-${OFFSET}"
 ```
 
-Example: worktree at `../multica-feat-auth` produces profile
-`dev-multica_feat_auth-347`, matching that worktree's port and database
-allocation.
+Example: worktree at `../multica-feat-auth` produces profile `dev-multica_feat_auth-347`, matching that worktree's port and database allocation.
 
 ### Start the Isolated Environment
 
@@ -371,39 +352,19 @@ for i in $(seq 1 30); do
 done
 ```
 
-#### 2. Create a test user and token (automated auth)
+#### 2. Create a workspace
 
-For deterministic local automation, set `MULTICA_DEV_VERIFICATION_CODE=888888`
-in your env file before starting the backend:
-
-```bash
-curl -s -X POST "$SERVER/auth/send-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost"}'
-
-JWT=$(curl -s -X POST "$SERVER/auth/verify-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost", "code": "888888"}' | jq -r '.token')
-
-PAT=$(curl -s -X POST "$SERVER/api/tokens" \
-  -H "Authorization: Bearer $JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "auto-dev", "expires_in_days": 365}' | jq -r '.token')
-```
-
-#### 3. Create a workspace
+No authentication needed — loopback requests are trusted automatically.
 
 ```bash
 WS=$(curl -s -X POST "$SERVER/api/workspaces" \
-  -H "Authorization: Bearer $PAT" \
   -H "Content-Type: application/json" \
   -d '{"name": "Dev", "slug": "dev"}' | jq -r '.id')
 ```
 
-#### 4. Compute profile name and write CLI config
+#### 3. Compute profile name and write CLI config
 
 ```bash
-# Compute profile (see Dynamic Profile Naming above)
 WORKTREE_DIR="$(basename "$PWD")"
 SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
 HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
@@ -420,22 +381,19 @@ cat > "$CONFIG_DIR/config.json" << EOF
 {
   "server_url": "$SERVER",
   "app_url": "http://localhost:${FRONTEND_PORT}",
-  "token": "$PAT",
   "workspace_id": "$WS",
   "watched_workspaces": [{"id": "$WS", "name": "Dev"}]
 }
 EOF
 ```
 
-#### 5. Start the daemon from source
+#### 4. Start the daemon from source
 
 ```bash
 make cli ARGS="daemon start --profile $PROFILE"
 ```
 
-The daemon runs from the current worktree's Go source, connecting to the
-local backend. Agent-executed `multica` commands automatically use the same
-binary (the daemon prepends its own directory to `PATH`).
+The daemon runs from the current worktree's Go source, connecting to the local backend. Agent-executed `multica` commands automatically use the same binary (the daemon prepends its own directory to `PATH`).
 
 ### Stop the Isolated Environment
 
@@ -460,39 +418,9 @@ make clean
 rm -rf "$HOME/.multica/profiles/$PROFILE"
 ```
 
-### Desktop App Local Testing
-
-To test the Electron desktop app against a local backend:
-
-```bash
-# After backend is running (make dev)
-pnpm dev:desktop
-```
-
-This automatically:
-
-1. Compiles the `multica` CLI from `server/cmd/multica` into
-   `apps/desktop/resources/bin/multica`
-2. Creates an isolated profile named `desktop-localhost-<PORT>`
-3. Starts and manages its own daemon instance
-4. Connects to the local backend
-
-Login in the Desktop UI with `dev@localhost` and the generated code from the
-backend logs. If you set `MULTICA_DEV_VERIFICATION_CODE=888888` before starting
-the backend, you can use `888888` instead.
-
-If the backend runs on a non-default port (worktree), create
-`apps/desktop/.env.development.local`:
-
-```bash
-VITE_API_URL=http://localhost:<backend-port>
-VITE_WS_URL=ws://localhost:<backend-port>/ws
-```
-
 ### Isolation Guarantee
 
-Nothing in this flow touches the system-installed `multica` or the default
-`~/.multica/config.json`:
+Nothing in this flow touches the system-installed `multica` or the default `~/.multica/config.json`:
 
 | Resource | System / Production | Local Dev (per-worktree) |
 |---|---|---|
@@ -501,7 +429,6 @@ Nothing in this flow touches the system-installed `multica` or the default
 | Health port | `19514` | `19514 + 1 + (name_hash % 1000)` |
 | Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<hash>/` |
 | Database | remote / production | local Docker: `multica_<slug>_<hash>` |
-| Desktop profile | `desktop-api.multica.ai` | `desktop-localhost-<port>` |
 
 Multiple worktrees can run simultaneously without conflict.
 

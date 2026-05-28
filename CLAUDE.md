@@ -61,11 +61,7 @@ Conventional format: `feat(scope)`, `fix(scope)`, `refactor(scope)`, `docs`, `te
 
 ## Project Context
 
-Multica is an AI-native task management platform — like Linear, but with AI agents as first-class citizens.
-
-- Agents can be assigned issues, create issues, comment, and change status
-- Supports local (daemon) and cloud agent runtimes
-- Built for 2-10 person AI-native teams
+Multica is a personal AI agent management platform — like Linear, but with AI agents as first-class citizens and a single implicit user. Agents are assigned issues, create issues, comment, and change status. The local daemon runs on the developer's machine and executes work via whatever agent CLIs are on PATH (Claude Code, Codex, Gemini, etc.).
 
 ## Architecture
 
@@ -141,15 +137,12 @@ make migrate-up       # Run database migrations
 make migrate-down     # Rollback migrations
 
 # Run a single TS test (works for any package with a test script)
-pnpm --filter @multica/views exec vitest run auth/login-page.test.tsx
-pnpm --filter @multica/core exec vitest run runtimes/version.test.ts
-pnpm --filter @multica/web exec vitest run app/\(auth\)/login/page.test.tsx
+pnpm --filter @multica/views exec vitest run autopilots/components/autopilot-dialog-i18n.test.ts
+pnpm --filter @multica/core exec vitest run i18n/pick-locale.test.ts
+pnpm --filter @multica/web exec vitest run lib/locale-routing.test.ts
 
 # Run a single Go test
 cd server && go test ./internal/handler/ -run TestName
-
-# Run a single E2E test (requires backend + frontend running)
-pnpm exec playwright test e2e/tests/specific-test.spec.ts
 
 # shadcn — config lives in packages/ui/components.json (Base UI variant, base-nova style)
 pnpm ui:add badge                # Adds component to packages/ui/components/ui/
@@ -259,7 +252,6 @@ Tests follow the code, not the app. This is the most important testing principle
 | Shared business logic (stores, queries, hooks) | `packages/core/*.test.ts` | No DOM needed, pure logic |
 | Shared UI components (pages, forms, modals) | `packages/views/*.test.tsx` | jsdom, no framework mocks |
 | Platform-specific wiring (cookies, redirects, searchParams) | `apps/web/*.test.tsx` | Needs framework-specific mocks |
-| End-to-end user flows | `e2e/*.spec.ts` | Real browser, real backend |
 
 **Never test shared component behavior in an app's test file.** If a test requires mocking framework-specific behavior (cookies, server actions) to test a component from `@multica/views`, the test is in the wrong place — move it to `packages/views/` and mock `@multica/core` instead.
 
@@ -268,7 +260,6 @@ Tests follow the code, not the app. This is the most important testing principle
 - `packages/core/` — Vitest, Node environment (no DOM)
 - `packages/views/` — Vitest, jsdom environment, `@testing-library/react`
 - `apps/web/` — Vitest, jsdom environment, framework-specific mocks
-- `e2e/` — Playwright
 - `server/` — Go standard `go test`
 
 All test deps are in the pnpm catalog for unified versioning.
@@ -291,31 +282,6 @@ All test deps are in the pnpm catalog for unified versioning.
 
 Standard `go test`. Tests should create their own fixture data in a test database.
 
-### E2E tests
-
-E2E tests should be self-contained. Use the `TestApiClient` fixture for data setup/teardown:
-
-```typescript
-import { loginAsDefault, createTestApi } from "./helpers";
-import type { TestApiClient } from "./fixtures";
-
-let api: TestApiClient;
-
-test.beforeEach(async ({ page }) => {
-  api = await createTestApi();
-  await loginAsDefault(page);
-});
-
-test.afterEach(async () => {
-  await api.cleanup();
-});
-
-test("example", async ({ page }) => {
-  const issue = await api.createIssue("Test Issue");
-  await page.goto(`/issues/${issue.id}`);
-});
-```
-
 ## Commit Rules
 
 - Use atomic commits grouped by logical intent.
@@ -324,7 +290,7 @@ test("example", async ({ page }) => {
 ## Minimum Pre-Push Checks
 
 ```bash
-make check    # Runs all checks: typecheck, unit tests, Go tests, E2E
+make check    # Runs all checks: typecheck, unit tests, Go tests
 ```
 
 Run verification only when the user explicitly asks for it.
@@ -334,7 +300,6 @@ For targeted checks when requested:
 pnpm typecheck        # TypeScript type errors only
 pnpm test             # TS unit tests only (Vitest, all packages)
 make test             # Go tests only
-pnpm exec playwright test   # E2E only (requires backend + frontend running)
 ```
 
 ## AI Agent Verification Loop
@@ -356,7 +321,7 @@ make check
 
 ## Multi-tenancy
 
-All queries filter by `workspace_id`. Membership checks gate access. `X-Workspace-ID` header routes requests to the correct workspace.
+All queries filter by `workspace_id`. A singleton implicit user owns all data; workspaces exist as organizational folders. The `X-Workspace-ID` header routes requests to the correct workspace.
 
 ## Agent Assignees
 

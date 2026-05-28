@@ -15,138 +15,42 @@
  * common user workspace names — see PR for full discussion.
  */
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
-  // Auth flow
-  // `onboarding` is historical, kept reserved post-removal of the route.
+  // Pre-workspace frontend routes
+  // Top-level routes in apps/web/app/ that exist before the user enters a
+  // workspace.
   "login",
-  "logout",
-  "signin",
-  "signout",
-  "signup",
   "auth",
-  "oauth",
-  "callback",
-  "invite",
-  "invitations",
-  "verify",
-  "reset",
-  "password",
-  "onboarding",
+  "workspaces",
 
-  // Platform / marketing routes (current + likely-future)
-  // `multica` is reserved as the brand name to block impersonation workspaces.
-  // `www`, `new`, `home`, `homepage`, `dashboard` are confusables or
-  // likely-future global landing/entry routes; `homepage` matches the existing
-  // `/homepage` landing variant in apps/web.
+  // Backend API / health routes
+  // `/api` covers all API traffic; `/ws` is the WebSocket endpoint; `/uploads`
+  // serves attachments; `/health`, `/readyz`, `/healthz` are backend
+  // health-check paths.
   "api",
-  "admin",
-  "multica",
-  "www",
-  "new",
-  "home",
-  "homepage",
-  "dashboard",
-  "help",
-  "about",
-  "pricing",
-  "changelog",
-  "docs",
-  "support",
-  "status",
-  "legal",
-  "privacy",
-  "terms",
-  "security",
-  "contact",
-  "contact-sales",
-  "blog",
-  "careers",
-  "press",
-  "download",
-  "usecases",
-
-  // Account / billing (likely-future global routes in the avatar menu)
-  "profile",
-  "account",
-  "billing",
-  "notifications",
-  "search",
-  "members",
+  "ws",
+  "uploads",
+  "health",
+  "healthz",
+  "readyz",
 
   // Workspace route segments
-  // Reserving each segment name prevents `/{slug}/{view}` from being visually
-  // ambiguous (e.g. a workspace named `issues` would make `/issues/abc` mean two
-  // things). `workspaces` covers the global `/workspaces/new` workspace-creation
-  // page; `teams` is reserved for future team management.
-  "issues",
-  "projects",
-  "autopilots",
+  // Reserving each segment name prevents `/{slug}/{view}` from being ambiguous —
+  // e.g. a workspace named `issues` would make `/issues/abc` mean two things.
+  // `members` is kept even though the members tab is removed, to prevent it from
+  // being chosen as a workspace slug.
   "agents",
-  "squads",
+  "attachments",
+  "autopilots",
   "inbox",
+  "issues",
+  "members",
   "my-issues",
-  "usage",
+  "projects",
   "runtimes",
-  "skills",
   "settings",
-  "workspaces",
-  "teams",
-
-  // API / integration prefixes
-  // `api` above already covers `/api/*`; these guard against future top-level
-  // API alias routes (e.g. `/v1`, `/graphql`) and against accidental workspace
-  // slugs that read like API identifiers.
-  "v1",
-  "v2",
-  "graphql",
-  "webhooks",
-  "sdk",
-  "tokens",
-  "cli",
-
-  // Backend ops / observability
-  // `/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host;
-  // reserving them on the workspace slug space prevents naming confusion if/when
-  // these paths are ever proxied through the web origin.
-  "health",
-  "readyz",
-  "healthz",
-  "ws",
-  "metrics",
-  "ping",
-
-  // RFC 2142 — privileged email mailboxes
-  // Allowing user workspaces with these slugs would let attackers spoof system
-  // messaging.
-  "postmaster",
-  "abuse",
-  "noreply",
-  "webmaster",
-  "hostmaster",
-
-  // Hostname / subdomain confusables
-  // Even on path-based routing these names attract phishing and
-  // subdomain-takeover attempts.
-  "mail",
-  "ftp",
-  "static",
-  "cdn",
-  "assets",
-  "public",
-  "files",
-  "uploads",
-
-  // Next.js / web standards
-  // These entries contain characters (dots, underscores) that today's slug regex
-  // `^[a-z0-9]+(?:-[a-z0-9]+)*$` already rejects at the format-validation step —
-  // so `isReservedSlug` never actually matches them. They are kept as
-  // defense-in-depth so that if the slug regex is ever relaxed (e.g. to support
-  // dotted corporate slugs like `acme.io`), these system paths stay protected.
-  "_next",
-  "favicon.ico",
-  "robots.txt",
-  "sitemap.xml",
-  "manifest.json",
-  ".well-known",
+  "skills",
+  "squads",
+  "usage",
 ]);
 
 export function isReservedSlug(slug: string): boolean {

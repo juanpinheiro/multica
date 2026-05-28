@@ -68,11 +68,7 @@ describe("global path / reserved slug consistency", () => {
   //
   // GLOBAL_PREFIXES from paths.ts is private — we re-derive the list from
   // probing isGlobalPath. Order matters: keep this list in sync with paths.ts.
-  const globalPrefixes = [
-    "/logout",
-    "/signup",
-    "/workspaces/",
-  ];
+  const globalPrefixes = ["/workspaces/"];
 
   it("isGlobalPath agrees with the canonical global prefix list", () => {
     for (const prefix of globalPrefixes) {

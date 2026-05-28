@@ -106,7 +106,7 @@ describe("CreateWorkspaceForm", () => {
       target: { value: "Valid Name" },
     });
     fireEvent.change(screen.getByLabelText(/workspace url/i), {
-      target: { value: "admin" },
+      target: { value: "api" },
     });
     expect(
       screen.getByRole("button", { name: /create workspace/i }),
