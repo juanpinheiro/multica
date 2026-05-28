@@ -36,9 +36,6 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
-  PersonalAccessToken,
-  CreatePersonalAccessTokenRequest,
-  CreatePersonalAccessTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
@@ -1135,22 +1132,6 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
-  }
-
-  // Personal Access Tokens
-  async listPersonalAccessTokens(): Promise<PersonalAccessToken[]> {
-    return this.fetch("/api/tokens");
-  }
-
-  async createPersonalAccessToken(data: CreatePersonalAccessTokenRequest): Promise<CreatePersonalAccessTokenResponse> {
-    return this.fetch("/api/tokens", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async revokePersonalAccessToken(id: string): Promise<void> {
-    await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
   }
 
   // File Upload & Attachments
