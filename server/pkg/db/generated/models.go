@@ -60,6 +60,7 @@ type AgentRuntime struct {
 	OwnerID        pgtype.UUID        `json:"owner_id"`
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
 	Visibility     string             `json:"visibility"`
+	DeviceName     string             `json:"device_name"`
 }
 
 type AgentSkill struct {
@@ -94,6 +95,7 @@ type AgentTaskQueue struct {
 	TriggerSummary    pgtype.Text        `json:"trigger_summary"`
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
+	WaitReason        pgtype.Text        `json:"wait_reason"`
 }
 
 type Attachment struct {
@@ -162,6 +164,7 @@ type AutopilotTrigger struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 	Provider       string             `json:"provider"`
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
+	EventFilters   []string           `json:"event_filters"`
 }
 
 type ChatMessage struct {
@@ -609,4 +612,5 @@ type Workspace struct {
 	Context      pgtype.Text        `json:"context"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
+	Mode         string             `json:"mode"`
 }

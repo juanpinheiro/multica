@@ -34,7 +34,8 @@ export function CodeBlockStatic({ language, body, className }: CodeBlockStaticPr
       const tree = language
         ? lowlight.highlight(language, code)
         : lowlight.highlightAuto(code);
-      return toHtml(tree) as string;
+      const highlighted = toHtml(tree) as string;
+      return highlighted || escapeHtml(code);
     } catch {
       // Unknown language tag — fall back to escaped plain text so we don't
       // crash on an esoteric extension.

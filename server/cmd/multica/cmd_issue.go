@@ -1002,7 +1002,18 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("list comments: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "Showing %d comments.\n", len(comments))
+	// Default to roots-only so callers (humans and the MCP server) get a clean
+	// overview of all threads. Thread and recent modes have their own semantics
+	// and are left unfiltered.
+	if thread == "" && !recentSet {
+		roots := comments[:0]
+		for _, c := range comments {
+			if strVal(c, "parent_id") == "" {
+				roots = append(roots, c)
+			}
+		}
+		comments = roots
+	}
 	// The server emits the next-page cursor in headers when there is likely
 	// an older page. Surface it on stderr so an operator (and the agent
 	// prompt update that follows this PR) can scroll deeper without having

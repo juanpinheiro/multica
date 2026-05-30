@@ -1146,4 +1146,52 @@ describe("SwimLaneView", () => {
       }),
     );
   });
+
+  // ------------------------------------------------------------------
+  // Feature lane visibility under pagination
+  // ------------------------------------------------------------------
+
+  it("renders a feature lane for a feature with no issues on the current page (pagination gap)", async () => {
+    mockViewState.swimlaneGrouping = "feature";
+
+    const unloadedFeature = {
+      id: "feat-with-no-loaded-issues",
+      workspace_id: "ws-1",
+      title: "Unloaded Feature",
+      description: null,
+      icon: null,
+      status: "in_progress" as const,
+      priority: "medium" as const,
+      lead_type: null as null,
+      lead_id: null as null,
+      branch_slug: null as null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 5,
+      done_count: 0,
+      resource_count: 0,
+    };
+
+    // Pre-seed the QueryClient with the feature list so that the swimlane's
+    // useQuery returns the feature even though no loaded issue references it.
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    qc.setQueryData(["features", "ws-1", "list"], [unloadedFeature]);
+
+    // No issue in the current page references feat-with-no-loaded-issues.
+    const issuesWithoutFeature = projectIssues.map((i) => ({ ...i, feature_id: null }));
+
+    const { findByText } = render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider resources={TEST_RESOURCES} locale="en">
+          <SwimLaneView issues={issuesWithoutFeature} onMoveIssue={vi.fn()} />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+
+    // The lane header for the feature must still render even though no
+    // issue in the current page belongs to it.
+    expect(await findByText("Unloaded Feature")).toBeInTheDocument();
+  });
 });

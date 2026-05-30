@@ -24,10 +24,10 @@ function FileUploadButton({
   const attachLabel = t(($) => $.attach_file);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files?.length) return;
     e.target.value = "";
-    onSelect(file);
+    Array.from(files).forEach(onSelect);
   };
 
   const iconSize = size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4";
@@ -52,6 +52,7 @@ function FileUploadButton({
       <input
         ref={inputRef}
         type="file"
+        multiple
         className="hidden"
         onChange={handleChange}
       />

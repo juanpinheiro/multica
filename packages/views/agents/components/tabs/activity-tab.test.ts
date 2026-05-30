@@ -3,6 +3,7 @@ import type { AgentTask } from "@multica/core/types";
 import {
   deriveAvgDurationLast30d,
   formatDurationMs,
+  isNonTerminalStatus,
 } from "./activity-tab";
 
 const NOW = new Date("2026-04-28T12:00:00Z").getTime();
@@ -82,6 +83,28 @@ describe("deriveAvgDurationLast30d", () => {
       }), // 4s
     ];
     expect(deriveAvgDurationLast30d(tasks, NOW)).toBe(4000);
+  });
+});
+
+describe("isNonTerminalStatus", () => {
+  it("includes classic active statuses", () => {
+    expect(isNonTerminalStatus("queued")).toBe(true);
+    expect(isNonTerminalStatus("dispatched")).toBe(true);
+    expect(isNonTerminalStatus("running")).toBe(true);
+  });
+
+  it("includes waiting_local_directory", () => {
+    expect(isNonTerminalStatus("waiting_local_directory")).toBe(true);
+  });
+
+  it("excludes terminal statuses", () => {
+    expect(isNonTerminalStatus("completed")).toBe(false);
+    expect(isNonTerminalStatus("failed")).toBe(false);
+    expect(isNonTerminalStatus("cancelled")).toBe(false);
+  });
+
+  it("returns false for unknown statuses (enum-drift fallback)", () => {
+    expect(isNonTerminalStatus("future_unknown_status")).toBe(false);
   });
 });
 

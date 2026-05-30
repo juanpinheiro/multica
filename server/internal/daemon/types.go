@@ -65,6 +65,7 @@ type Task struct {
 	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
 	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
+	QuickCreateParentIssueID string               `json:"quick_create_parent_issue_id,omitempty"` // parent issue ID for quick-create sub-issues
 	SquadID                 string                `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
 	// RequestingUserName + RequestingUserProfileDescription describe the human
@@ -107,6 +108,12 @@ type Task struct {
 	// different repos. Only populated when the feature spans multiple repos.
 	// Used by the daemon to inject cross-repo context into the agent brief.
 	CrossRepoSiblings []CrossRepoSiblingData `json:"cross_repo_siblings,omitempty"`
+	// Mode is the workspace's execution mode: "worktree" (default) or
+	// "in_place". The server projects it from workspace.mode at claim time.
+	// In in_place mode the daemon runs the agent in the workspace's real
+	// umbrella directory, serialized per workspace; an empty or unknown value
+	// is treated as worktree.
+	Mode string `json:"mode,omitempty"`
 }
 
 // CrossRepoSiblingData describes a sibling issue in a different repo within

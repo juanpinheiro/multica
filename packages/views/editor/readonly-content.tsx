@@ -241,10 +241,18 @@ function buildComponents(): Partial<Components> {
         const tree = lang
           ? lowlight.highlight(lang, code)
           : lowlight.highlightAuto(code);
+        const highlighted = toHtml(tree);
+        if (!highlighted) {
+          return (
+            <code className={cn("hljs", lang && `language-${lang}`)}>
+              {code}
+            </code>
+          );
+        }
         return (
           <code
             className={cn("hljs", lang && `language-${lang}`)}
-            dangerouslySetInnerHTML={{ __html: toHtml(tree) }}
+            dangerouslySetInnerHTML={{ __html: highlighted }}
           />
         );
       } catch {

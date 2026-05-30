@@ -150,6 +150,16 @@ WHERE id = $1
   AND kind = 'webhook'
 RETURNING *;
 
+-- name: SetAutopilotTriggerEventFilters :one
+-- Sets the event type filter for a webhook trigger. An empty array means
+-- the trigger fires on all events (no filter). Restricted to webhook triggers.
+UPDATE autopilot_trigger
+SET event_filters = $2,
+    updated_at = now()
+WHERE id = $1
+  AND kind = 'webhook'
+RETURNING *;
+
 -- =====================
 -- Autopilot Run Management
 -- =====================

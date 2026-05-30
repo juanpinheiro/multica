@@ -78,7 +78,7 @@ func TestAutopilotFeatureGate(t *testing.T) {
 		featureID := makeFeature(t, "planned")
 		ap := makeAutopilot(t, featureID)
 
-		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 		if err != nil {
 			t.Fatalf("DispatchAutopilot: %v", err)
 		}
@@ -109,7 +109,7 @@ func TestAutopilotFeatureGate(t *testing.T) {
 			testPool.Exec(context.Background(), `DELETE FROM issue WHERE origin_id = $1`, ap.ID)
 		})
 
-		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 		if err != nil {
 			t.Fatalf("DispatchAutopilot: %v", err)
 		}
@@ -133,7 +133,7 @@ func TestAutopilotFeatureGate(t *testing.T) {
 		featureID := makeFeature(t, "completed")
 		ap := makeAutopilot(t, featureID)
 
-		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 		if err != nil {
 			t.Fatalf("DispatchAutopilot: %v", err)
 		}
@@ -151,7 +151,7 @@ func TestAutopilotFeatureGate(t *testing.T) {
 			testPool.Exec(context.Background(), `DELETE FROM issue WHERE origin_id = $1`, ap.ID)
 		})
 
-		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 		if err != nil {
 			t.Fatalf("DispatchAutopilot: %v", err)
 		}

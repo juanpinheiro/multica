@@ -8,6 +8,8 @@ export interface Workspace {
   context: string | null;
   settings: Record<string, unknown>;
   issue_prefix: string;
+  /** Execution mode set by the workspace manifest. Absent on older backends — treat undefined as "worktree". */
+  mode?: "worktree" | "in_place";
   created_at: string;
   updated_at: string;
 }

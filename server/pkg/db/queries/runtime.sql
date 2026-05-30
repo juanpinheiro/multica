@@ -36,6 +36,7 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO agent_runtime (
     workspace_id,
     daemon_id,
+    device_name,
     name,
     runtime_mode,
     provider,
@@ -44,17 +45,18 @@ INSERT INTO agent_runtime (
     metadata,
     owner_id,
     last_seen_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
 ON CONFLICT (workspace_id, daemon_id, provider)
 DO UPDATE SET
-    name = EXCLUDED.name,
+    device_name  = EXCLUDED.device_name,
+    name         = EXCLUDED.name,
     runtime_mode = EXCLUDED.runtime_mode,
-    status = EXCLUDED.status,
-    device_info = EXCLUDED.device_info,
-    metadata = EXCLUDED.metadata,
-    owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
+    status       = EXCLUDED.status,
+    device_info  = EXCLUDED.device_info,
+    metadata     = EXCLUDED.metadata,
+    owner_id     = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
-    updated_at = now()
+    updated_at   = now()
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: UpdateAgentRuntimeVisibility :one
@@ -272,3 +274,16 @@ WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND id NOT IN (SELECT DISTINCT runtime_id FROM agent)
 RETURNING id, workspace_id;
+
+-- name: FindRuntimesByDeviceName :many
+-- Looks up runtime rows for the same physical device (same normalized device_name)
+-- but a different daemon_id. Used at register time to consolidate WSL2 and
+-- Windows daemons that share a physical host but generate distinct daemon UUIDs.
+-- Comparison is case-insensitive so hostname casing drift does not prevent matching.
+-- Excludes the row we just upserted (by daemon_id) so callers only see stale rows.
+SELECT * FROM agent_runtime
+WHERE workspace_id = @workspace_id
+  AND provider     = @provider
+  AND LOWER(device_name) = LOWER(@device_name)
+  AND daemon_id != @daemon_id
+  AND device_name != '';

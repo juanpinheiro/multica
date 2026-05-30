@@ -412,6 +412,98 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsFullCleanup(t *testing.T) {
 	}
 }
 
+// TestShouldCleanTaskDir_EmptyParentID_* lock in the empty-parent-id guard:
+// a meta file whose relevant parent ID is empty must never trigger an API call
+// and must return gcActionSkip rather than acting on garbage data.
+
+func TestShouldCleanTaskDir_EmptyIssueID_Skip(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected API call for empty issue_id: %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.client = NewClient(srv.URL)
+	d.client.SetToken("test-token")
+
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "empty-issue-id", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     "",
+		WorkspaceID: "ws1",
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for empty issue_id, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_EmptyChatSessionID_Skip(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected API call for empty chat_session_id: %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.client = NewClient(srv.URL)
+	d.client.SetToken("test-token")
+
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "empty-chat-id", &execenv.GCMeta{
+		Kind:          execenv.GCKindChat,
+		ChatSessionID: "",
+		WorkspaceID:   "ws1",
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for empty chat_session_id, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_EmptyAutopilotRunID_Skip(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected API call for empty autopilot_run_id: %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.client = NewClient(srv.URL)
+	d.client.SetToken("test-token")
+
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "empty-ar-id", &execenv.GCMeta{
+		Kind:           execenv.GCKindAutopilotRun,
+		AutopilotRunID: "",
+		WorkspaceID:    "ws1",
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for empty autopilot_run_id, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_EmptyTaskID_Skip(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected API call for empty task_id: %s", r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.client = NewClient(srv.URL)
+	d.client.SetToken("test-token")
+
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "empty-task-id", &execenv.GCMeta{
+		Kind:        execenv.GCKindQuickCreate,
+		TaskID:      "",
+		WorkspaceID: "ws1",
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected gcActionSkip for empty task_id, got %d", action)
+	}
+}
+
 func TestShouldCleanTaskDir_ActiveEnvRootSkipsOrphan404(t *testing.T) {
 	t.Parallel()
 	issueID := "99999999-9999-9999-9999-99999999999a"

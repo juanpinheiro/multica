@@ -216,7 +216,7 @@ func TestPrepareWithFeatureResources(t *testing.T) {
 		"GitHub repo",
 		"https://github.com/multica-ai/multica",
 		"default branch: `main`",
-		".multica/project/resources.json",
+		".multica/feature/resources.json",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)

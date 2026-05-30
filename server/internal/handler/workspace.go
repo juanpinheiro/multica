@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/workspace/execmode"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -38,6 +39,7 @@ type WorkspaceResponse struct {
 	Context     *string `json:"context"`
 	Settings    any     `json:"settings"`
 	IssuePrefix string  `json:"issue_prefix"`
+	Mode        string  `json:"mode"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 }
@@ -58,6 +60,7 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Context:     textToPtr(w.Context),
 		Settings:    settings,
 		IssuePrefix: w.IssuePrefix,
+		Mode:        w.Mode,
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
 	}
@@ -115,6 +118,7 @@ type CreateWorkspaceRequest struct {
 	Description *string `json:"description"`
 	Context     *string `json:"context"`
 	IssuePrefix *string `json:"issue_prefix"`
+	Mode        *string `json:"mode"`
 }
 
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -156,6 +160,11 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		issuePrefix = strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))
 	}
 
+	mode := execmode.Worktree
+	if req.Mode != nil {
+		mode, _ = execmode.Normalize(*req.Mode)
+	}
+
 	qtx := h.Queries.WithTx(tx)
 	ws, err := qtx.CreateWorkspace(r.Context(), db.CreateWorkspaceParams{
 		Name:        req.Name,
@@ -163,6 +172,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		Description: ptrToText(req.Description),
 		Context:     ptrToText(req.Context),
 		IssuePrefix: issuePrefix,
+		Mode:        mode,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -200,6 +210,7 @@ type UpdateWorkspaceRequest struct {
 	Context     *string `json:"context"`
 	Settings    any     `json:"settings"`
 	IssuePrefix *string `json:"issue_prefix"`
+	Mode        *string `json:"mode"`
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -241,6 +252,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if prefix != "" {
 			params.IssuePrefix = pgtype.Text{String: prefix, Valid: true}
 		}
+	}
+	if req.Mode != nil {
+		mode, _ := execmode.Normalize(*req.Mode)
+		params.Mode = pgtype.Text{String: mode, Valid: true}
 	}
 
 	ws, err := h.Queries.UpdateWorkspace(r.Context(), params)

@@ -74,7 +74,10 @@ type AutopilotTriggerResponse struct {
 	// surfaced to help operators tell two secrets apart in the UI. Nil when
 	// no secret is configured.
 	SigningSecretHint *string `json:"signing_secret_hint"`
-	Label             *string `json:"label"`
+	// EventFilters holds the list of event-type patterns this webhook trigger
+	// responds to. An empty slice means the trigger fires on all events.
+	EventFilters []string `json:"event_filters"`
+	Label        *string  `json:"label"`
 	LastFiredAt       *string `json:"last_fired_at"`
 	CreatedAt         string  `json:"created_at"`
 	UpdatedAt         string  `json:"updated_at"`
@@ -135,6 +138,7 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 		Timezone:       textToPtr(t.Timezone),
 		NextRunAt:      timestampToPtr(t.NextRunAt),
 		WebhookToken:   textToPtr(t.WebhookToken),
+		EventFilters:   nonNilStringSlice(t.EventFilters),
 		Label:          textToPtr(t.Label),
 		LastFiredAt:    timestampToPtr(t.LastFiredAt),
 		CreatedAt:      timestampToString(t.CreatedAt),
@@ -170,6 +174,15 @@ func signingSecretHint(secret string) string {
 		return ""
 	}
 	return secret[len(secret)-4:]
+}
+
+// nonNilStringSlice returns s unchanged if non-nil, otherwise an empty slice.
+// Used in response converters so JSON never renders a nil []string as null.
+func nonNilStringSlice(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 // webhookPathForToken composes the path used by the public ingress route.
@@ -265,10 +278,14 @@ type SetSigningSecretRequest struct {
 }
 
 type UpdateAutopilotTriggerRequest struct {
-	Enabled        *bool   `json:"enabled"`
-	CronExpression *string `json:"cron_expression"`
-	Timezone       *string `json:"timezone"`
-	Label          *string `json:"label"`
+	Enabled        *bool     `json:"enabled"`
+	CronExpression *string   `json:"cron_expression"`
+	Timezone       *string   `json:"timezone"`
+	Label          *string   `json:"label"`
+	// EventFilters, when non-nil, replaces the trigger's event-type filter.
+	// An empty slice clears the filter (trigger fires on all events).
+	// Only valid for webhook triggers.
+	EventFilters *[]string `json:"event_filters"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -943,6 +960,21 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	if req.EventFilters != nil {
+		if prev.Kind != "webhook" {
+			writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook triggers")
+			return
+		}
+		trigger, err = h.Queries.SetAutopilotTriggerEventFilters(r.Context(), db.SetAutopilotTriggerEventFiltersParams{
+			ID:           trigger.ID,
+			EventFilters: *req.EventFilters,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update event filters")
+			return
+		}
+	}
+
 	resp := h.triggerToResponse(trigger)
 	userID, _ := requireUserID(w, r)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
@@ -1228,7 +1260,7 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil)
+	run, err := h.AutopilotService.DispatchAutopilot(r.Context(), autopilot, pgtype.UUID{}, "manual", nil, "")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return

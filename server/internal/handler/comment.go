@@ -1024,8 +1024,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Content       string   `json:"content"`
-		AttachmentIDs []string `json:"attachment_ids"`
+		Content             string   `json:"content"`
+		AttachmentIDs       []string `json:"attachment_ids"`
+		RemoveAttachmentIDs []string `json:"remove_attachment_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1040,6 +1041,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	removeAttachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.RemoveAttachmentIDs, "remove_attachment_ids")
+	if !ok {
+		return
+	}
 
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
@@ -1051,6 +1056,11 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
 		writeError(w, http.StatusInternalServerError, "failed to update comment")
 		return
+	}
+
+	// Unlink any attachments the user explicitly removed during edit.
+	if len(removeAttachmentIDs) > 0 {
+		h.unlinkAttachmentsFromComment(r.Context(), comment.ID, wsUUID, removeAttachmentIDs)
 	}
 
 	// Bind any newly uploaded attachments referenced in the edited content so

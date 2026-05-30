@@ -20,8 +20,14 @@ type RepoEntry struct {
 }
 
 // Manifest is the decoded content of a .multica/workspace.toml file.
+//
+// Mode holds the raw execution-mode string as written in the file (empty when
+// absent). It is normalized to a known value via execmode.Normalize by the
+// layer that projects it onto the server, so the unknown-value warning is
+// raised once, where a logger is available.
 type Manifest struct {
 	Workspace string      `toml:"workspace"`
+	Mode      string      `toml:"mode"`
 	Repos     []RepoEntry `toml:"repo"`
 }
 

@@ -341,6 +341,7 @@ export function useDeleteIssue() {
       pruneDeletedIssueFromListCaches(qc, wsId, id);
       pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
+      useRecentIssuesStore.getState().removeId(wsId, id);
       return { id, metadata, prevLists, prevMyLists, prevDetail, prevChildren };
     },
     onError: (_err, _id, ctx) => {
@@ -492,6 +493,7 @@ export function useBatchDeleteIssues() {
         if (metadata) {
           pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
         }
+        useRecentIssuesStore.getState().removeId(wsId, id);
       }
       return { prevLists, prevMyLists, prevChildren, parentIssueIds, metadataById };
     },
@@ -611,13 +613,19 @@ export function useCreateComment(issueId: string) {
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ commentId, content, attachmentIds }: { commentId: string; content: string; attachmentIds?: string[] }) =>
-      api.updateComment(commentId, content, attachmentIds),
-    onMutate: async ({ commentId, content }) => {
+    mutationFn: ({ commentId, content, attachmentIds, removeAttachmentIds }: { commentId: string; content: string; attachmentIds?: string[]; removeAttachmentIds?: string[] }) =>
+      api.updateComment(commentId, content, attachmentIds, removeAttachmentIds),
+    onMutate: async ({ commentId, content, removeAttachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
       qc.setQueryData<TimelineCache>(issueKeys.timeline(issueId), (old) =>
-        old?.map((e) => (e.id === commentId ? { ...e, content } : e)),
+        old?.map((e) => {
+          if (e.id !== commentId) return e;
+          const attachments = removeAttachmentIds?.length
+            ? (e.attachments ?? []).filter((a) => !removeAttachmentIds.includes(a.id))
+            : e.attachments;
+          return { ...e, content, attachments };
+        }),
       );
       return { prev };
     },

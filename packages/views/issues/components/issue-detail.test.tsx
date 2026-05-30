@@ -94,6 +94,22 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
+// Mock layout — BreadcrumbHeader uses AppLink internally which requires Next.js router
+vi.mock("../../layout", () => ({
+  BreadcrumbHeader: ({ segments, actions }: any) => (
+    <header>
+      {segments?.map((seg: any, i: number) =>
+        seg.href ? (
+          <a key={seg.href} href={seg.href}>{seg.label}</a>
+        ) : (
+          <span key={i}>{seg.label}</span>
+        )
+      )}
+      {actions}
+    </header>
+  ),
+}));
+
 // Mock navigation
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, href, ...props }: any) => (

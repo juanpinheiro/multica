@@ -344,12 +344,13 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 // onto the agent's Instructions, matching the behavior of issue-bound
 // tasks assigned to the squad.
 type QuickCreateContext struct {
-	Type        string `json:"type"`
-	Prompt      string `json:"prompt"`
-	RequesterID string `json:"requester_id"`
-	WorkspaceID string `json:"workspace_id"`
-	FeatureID   string `json:"feature_id,omitempty"`
-	SquadID     string `json:"squad_id,omitempty"`
+	Type          string `json:"type"`
+	Prompt        string `json:"prompt"`
+	RequesterID   string `json:"requester_id"`
+	WorkspaceID   string `json:"workspace_id"`
+	FeatureID     string `json:"feature_id,omitempty"`
+	SquadID       string `json:"squad_id,omitempty"`
+	ParentIssueID string `json:"parent_issue_id,omitempty"`
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
@@ -370,7 +371,11 @@ const QuickCreateContextType = "quick_create"
 // The handler has already resolved it to the squad's leader agent for
 // agentID; the squadID hint is stamped into the task context so the daemon
 // claim handler can inject the squad-leader briefing on dispatch.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID pgtype.UUID) (db.AgentTaskQueue, error) {
+//
+// parentIssueID is optional (zero-valued pgtype.UUID when no parent was
+// selected). The handler is responsible for validating it belongs to the same
+// workspace before passing it in.
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID pgtype.UUID, parentIssueID pgtype.UUID) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -394,6 +399,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if squadID.Valid {
 		payload.SquadID = util.UUIDToString(squadID)
 	}
+	if parentIssueID.Valid {
+		payload.ParentIssueID = util.UUIDToString(parentIssueID)
+	}
 	contextJSON, err := json.Marshal(payload)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("marshal quick-create context: %w", err)
@@ -416,6 +424,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		"requester_id", util.UUIDToString(requesterID),
 		"workspace_id", util.UUIDToString(workspaceID),
 		"feature_id", payload.FeatureID,
+		"parent_issue_id", payload.ParentIssueID,
 	)
 	// Match every other Enqueue* path: kick the daemon WS so the task
 	// gets claimed promptly instead of waiting for the next 30 s poll
@@ -764,6 +773,28 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	// agent activity indicator) lags by up to half a minute on the
 	// transition users care about most.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskRunning, task)
+	return &task, nil
+}
+
+// WaitTaskForLocalDirectory parks a dispatched in-place task while the umbrella
+// directory it needs is held by another task. The reason names the held path
+// and current holder so the UI can explain why the run is waiting. StartTask
+// clears the reason once the lock is acquired.
+func (s *TaskService) WaitTaskForLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string) (*db.AgentTaskQueue, error) {
+	task, err := s.Queries.WaitTaskForLocalDirectory(ctx, db.WaitTaskForLocalDirectoryParams{
+		ID:         taskID,
+		WaitReason: pgtype.Text{String: reason, Valid: reason != ""},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("wait task for local directory: %w", err)
+	}
+
+	slog.Info("task waiting on local directory",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(task.IssueID),
+		"reason", reason,
+	)
+	s.broadcastTaskEvent(ctx, protocol.EventTaskWaiting, task)
 	return &task, nil
 }
 

@@ -70,7 +70,7 @@ export interface AgentTask {
   // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
   // which source produced it.
   issue_id: string;
-  status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled";
+  status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled" | "waiting_local_directory";
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;
@@ -111,6 +111,12 @@ export interface AgentTask {
    * the daemon reports a work_dir (typically once execution starts).
    */
   work_dir?: string;
+  /**
+   * Human-readable reason why the task is parked in waiting_local_directory
+   * (e.g. path + holder task id). Cleared when the task transitions to running.
+   * Older backends that pre-date in-place mode omit this field.
+   */
+  wait_reason?: string | null;
 }
 
 export interface Agent {
@@ -141,6 +147,20 @@ export interface Agent {
    * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
    */
   custom_env_key_count?: number;
+  /**
+   * MCP server configuration forwarded verbatim to the agent CLI via
+   * --mcp-config at task start. Opaque JSONB on the server; shape is
+   * { mcpServers: Record<string, unknown> } by convention but not enforced.
+   * Optional so older backends that omit the field don't crash the renderer;
+   * null means "no config set".
+   */
+  mcp_config?: Record<string, unknown> | null;
+  /**
+   * True when mcp_config exists on the server but was stripped because the
+   * requesting token (agent-actor or restricted member) is not allowed to
+   * read it. When true, mcp_config is null even though config is stored.
+   */
+  mcp_config_redacted?: boolean;
   visibility: AgentVisibility;
   status: AgentStatus;
   max_concurrent_tasks: number;
@@ -283,6 +303,12 @@ export interface UpdateAgentRequest {
    * MUL-2600.
    */
   custom_args?: string[];
+  /**
+   * Set to null to clear; omit to leave unchanged. Forwarded verbatim to
+   * the agent CLI via --mcp-config at task start. Agent-actor tokens are
+   * rejected by the server when they attempt to set this field.
+   */
+  mcp_config?: Record<string, unknown> | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
   max_concurrent_tasks?: number;

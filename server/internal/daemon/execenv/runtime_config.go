@@ -114,6 +114,49 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 	}
 }
 
+// WriteInPlaceContextFiles writes the additive context an in-place run needs
+// (.agent_context, provider-native skills, feature resources) directly into the
+// umbrella working directory. Unlike Prepare it creates no isolated env and
+// touches no instruction file, so it never overwrites the developer's own
+// repository contents — only adds the daemon's per-task context alongside them.
+func WriteInPlaceContextFiles(workDir, provider string, ctx TaskContextForEnv) error {
+	return writeContextFiles(workDir, provider, ctx)
+}
+
+// instructionFileFor returns the instruction file a provider reads from its
+// working directory, or "" for prompt-only providers that read no such file.
+func instructionFileFor(provider string) string {
+	switch provider {
+	case "claude":
+		return "CLAUDE.md"
+	case "gemini":
+		return "GEMINI.md"
+	case "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro":
+		return "AGENTS.md"
+	default:
+		return ""
+	}
+}
+
+// InjectRuntimeConfigPreserving writes the runtime brief like InjectRuntimeConfig
+// but never clobbers a user's existing instruction file — the guarantee in-place
+// runs need, since the working directory is the developer's real umbrella. It
+// returns the brief and wrote=false when an existing file was preserved; the
+// daemon then delivers the brief inline so the agent still receives runtime
+// context without the user's CLAUDE.md / AGENTS.md / GEMINI.md being overwritten.
+func InjectRuntimeConfigPreserving(workDir, provider string, ctx TaskContextForEnv) (brief string, wrote bool, err error) {
+	content := buildMetaSkillContent(provider, ctx)
+	name := instructionFileFor(provider)
+	if name == "" {
+		return content, false, nil
+	}
+	path := filepath.Join(workDir, name)
+	if _, statErr := os.Stat(path); statErr == nil {
+		return content, false, nil
+	}
+	return content, true, os.WriteFile(path, []byte(content), 0o644)
+}
+
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
@@ -268,7 +311,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	}
 
 	// Inject project-scoped context (resources attached to the issue's project).
-	// The full structured payload is also available at .multica/project/resources.json
+	// The full structured payload is also available at .multica/feature/resources.json
 	// so skills can consume it programmatically.
 	if ctx.FeatureID != "" || len(ctx.FeatureResources) > 0 {
 		b.WriteString("## Project Context\n\n")
@@ -276,7 +319,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			fmt.Fprintf(&b, "This issue belongs to **%s**.\n\n", ctx.FeatureTitle)
 		}
 		if len(ctx.FeatureResources) > 0 {
-			b.WriteString("Project resources (also written to `.multica/project/resources.json`):\n\n")
+			b.WriteString("Project resources (also written to `.multica/feature/resources.json`):\n\n")
 			for _, r := range ctx.FeatureResources {
 				fmt.Fprintf(&b, "- %s\n", formatProjectResource(r))
 			}

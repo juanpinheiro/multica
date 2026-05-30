@@ -556,6 +556,7 @@ CREATE TABLE public.agent_runtime (
     owner_id uuid,
     legacy_daemon_id text,
     visibility text DEFAULT 'private'::text NOT NULL,
+    device_name text DEFAULT ''::text NOT NULL,
     CONSTRAINT agent_runtime_runtime_mode_check CHECK ((runtime_mode = ANY (ARRAY['local'::text, 'cloud'::text]))),
     CONSTRAINT agent_runtime_status_check CHECK ((status = ANY (ARRAY['online'::text, 'offline'::text]))),
     CONSTRAINT agent_runtime_visibility_check CHECK ((visibility = ANY (ARRAY['private'::text, 'public'::text])))
@@ -603,7 +604,8 @@ CREATE TABLE public.agent_task_queue (
     trigger_summary text,
     force_fresh_session boolean DEFAULT false NOT NULL,
     is_leader_task boolean DEFAULT false NOT NULL,
-    CONSTRAINT agent_task_queue_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'dispatched'::text, 'running'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
+    wait_reason text,
+    CONSTRAINT agent_task_queue_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'dispatched'::text, 'running'::text, 'waiting_local_directory'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
 );
 
 
@@ -699,6 +701,7 @@ CREATE TABLE public.autopilot_trigger (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     provider text DEFAULT 'generic'::text NOT NULL,
     signing_secret text,
+    event_filters text[] DEFAULT '{}'::text[] NOT NULL,
     CONSTRAINT autopilot_trigger_kind_check CHECK ((kind = ANY (ARRAY['schedule'::text, 'webhook'::text, 'api'::text]))),
     CONSTRAINT autopilot_trigger_provider_check CHECK ((provider = ANY (ARRAY['generic'::text, 'github'::text])))
 );
@@ -1343,7 +1346,8 @@ CREATE TABLE public.workspace (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     context text,
     issue_prefix text DEFAULT ''::text NOT NULL,
-    issue_counter integer DEFAULT 0 NOT NULL
+    issue_counter integer DEFAULT 0 NOT NULL,
+    mode text DEFAULT 'worktree'::text NOT NULL
 );
 
 

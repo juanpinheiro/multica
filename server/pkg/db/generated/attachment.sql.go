@@ -447,3 +447,22 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 	}
 	return items, nil
 }
+
+const unlinkAttachmentsFromComment = `-- name: UnlinkAttachmentsFromComment :exec
+UPDATE attachment
+SET comment_id = NULL
+WHERE comment_id = $1
+  AND workspace_id = $2
+  AND id = ANY($3::uuid[])
+`
+
+type UnlinkAttachmentsFromCommentParams struct {
+	CommentID   pgtype.UUID   `json:"comment_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Column3     []pgtype.UUID `json:"column_3"`
+}
+
+func (q *Queries) UnlinkAttachmentsFromComment(ctx context.Context, arg UnlinkAttachmentsFromCommentParams) error {
+	_, err := q.db.Exec(ctx, unlinkAttachmentsFromComment, arg.CommentID, arg.WorkspaceID, arg.Column3)
+	return err
+}

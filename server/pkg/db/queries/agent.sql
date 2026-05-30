@@ -357,8 +357,22 @@ WHERE id = (
 RETURNING *;
 
 -- name: StartAgentTask :one
+-- Transitions a task to running. A task may arrive here straight from
+-- 'dispatched' (worktree mode, or an in-place run whose umbrella was free)
+-- or from 'waiting_local_directory' (an in-place run that parked while the
+-- umbrella was held). Either way wait_reason is cleared so the row no longer
+-- advertises a stale wait hint.
 UPDATE agent_task_queue
-SET status = 'running', started_at = now()
+SET status = 'running', started_at = now(), wait_reason = NULL
+WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
+RETURNING *;
+
+-- name: WaitTaskForLocalDirectory :one
+-- Parks a dispatched in-place task while the umbrella directory it needs is
+-- held by another task. The reason names the held path and current holder so
+-- the UI can explain why the task is waiting instead of running.
+UPDATE agent_task_queue
+SET status = 'waiting_local_directory', wait_reason = $2
 WHERE id = $1 AND status = 'dispatched'
 RETURNING *;
 

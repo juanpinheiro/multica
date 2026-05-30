@@ -53,7 +53,9 @@ func (s *AutopilotService) DispatchAutopilot(
 	triggerID pgtype.UUID,
 	source string,
 	payload []byte,
+	timezone string,
 ) (*db.AutopilotRun, error) {
+	loc := ResolveTimezone(timezone)
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, reason)
 	}
@@ -79,7 +81,7 @@ func (s *AutopilotService) DispatchAutopilot(
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run); err != nil {
+		if err := s.dispatchCreateIssue(ctx, autopilot, &run, loc); err != nil {
 			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
 				return skipped, nil
 			}
@@ -132,7 +134,7 @@ func (s *AutopilotService) DispatchAutopilot(
 // Creator on the issue is always the agent that will actually do the work
 // (the resolved leader for a squad autopilot, otherwise the assignee agent
 // itself), so activity / mentions render with the right author identity.
-func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun) error {
+func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, loc *time.Location) error {
 	leader, _, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
@@ -146,8 +148,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
-	title := s.interpolateTemplate(ap)
-	description := s.buildIssueDescription(ap, *run)
+	title := s.interpolateTemplate(ap, loc)
+	description := s.buildIssueDescription(ap, *run, loc)
 
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
 	if err != nil {
@@ -709,6 +711,19 @@ func (s *AutopilotService) recordSkippedRun(
 	return &run, nil
 }
 
+// RecordEventFilterSkip creates a skipped autopilot_run for an incoming webhook
+// event that did not match the trigger's event_filters. The delivery has already
+// been persisted by the handler; this records the skip in the run audit trail so
+// the operator can see which events were filtered and why.
+func (s *AutopilotService) RecordEventFilterSkip(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	payload []byte,
+) (*db.AutopilotRun, error) {
+	return s.recordSkippedRun(ctx, autopilot, triggerID, "webhook", payload, "event_filter_mismatch")
+}
+
 func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRun, status string) {
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventAutopilotRunDone,
@@ -783,8 +798,8 @@ func autopilotRunDurationMS(run db.AutopilotRun) int64 {
 // it understands the actual work. For webhook-sourced runs, also appends
 // a payload section so the agent has the event context inline (otherwise
 // the agent only sees the issue body, never the run's trigger_payload).
-func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun) pgtype.Text {
-	now := time.Now().UTC().Format("2006-01-02 15:04 UTC")
+func (s *AutopilotService) buildIssueDescription(ap db.Autopilot, run db.AutopilotRun, loc *time.Location) pgtype.Text {
+	now := time.Now().In(loc).Format("2006-01-02 15:04 MST")
 	var b strings.Builder
 	b.WriteString(ap.Description.String)
 	b.WriteString("\n\n---\n*Autopilot run triggered at ")
@@ -844,12 +859,12 @@ var issueTitleTemplateTokenRE = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 // tolerated so the render layer accepts every form that
 // ValidateIssueTitleTemplate accepts — otherwise users would save templates
 // that pass validation but still emit a literal token at trigger time.
-func (s *AutopilotService) interpolateTemplate(ap db.Autopilot) string {
+func (s *AutopilotService) interpolateTemplate(ap db.Autopilot, loc *time.Location) string {
 	tmpl := ap.Title
 	if ap.IssueTitleTemplate.Valid && ap.IssueTitleTemplate.String != "" {
 		tmpl = ap.IssueTitleTemplate.String
 	}
-	now := time.Now().UTC().Format("2006-01-02")
+	now := time.Now().In(loc).Format("2006-01-02")
 	return issueTitleTemplateTokenRE.ReplaceAllStringFunc(tmpl, func(match string) string {
 		name := strings.TrimSpace(match[2 : len(match)-2])
 		switch name {

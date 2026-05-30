@@ -315,12 +315,106 @@ describe("AgentLiveCard queued rendering", () => {
 
     await waitFor(() => {
       expect(screen.getByText(/is working/)).toBeTruthy();
-      expect(screen.getByText(/is queued/)).toBeTruthy();
+    });
+
+    // The running task is the primary — it takes the sticky slot.
+    // The queued task is behind the accordion; expand to see it.
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText(/\+1 more/));
     });
 
     const working = screen.getByText(/is working/);
     const queued = screen.getByText(/is queued/);
     // Running banner appears earlier in the document order.
     expect(working.compareDocumentPosition(queued) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("AgentLiveCard — zero, one, multiple agents", () => {
+  it("renders nothing when there are no active tasks", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [] });
+
+    const { container } = renderCard();
+
+    await waitFor(() => {
+      expect(mockApi.getActiveTasksForIssue).toHaveBeenCalled();
+    });
+
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByText(/is working/)).toBeNull();
+    expect(screen.queryByText(/is queued/)).toBeNull();
+  });
+
+  it("shows banner for one running agent without accordion toggle", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({
+      tasks: [makeTask("task-1")],
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/is working/)).toBeTruthy();
+    });
+
+    expect(screen.queryByText(/more agent/)).toBeNull();
+    expect(screen.queryByText("Hide additional agents")).toBeNull();
+  });
+
+  it("shows accordion toggle (collapsed) when multiple agents are active", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({
+      tasks: [
+        makeTask("task-1"),
+        makeTask("task-2", { agent_id: "agent-2" }),
+      ],
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/is working/)).toBeTruthy();
+    });
+
+    // Secondary agent count should be visible as toggle
+    expect(screen.getByText(/\+1 more agent running/)).toBeTruthy();
+    // Secondary agent banner must NOT be in the DOM yet (collapsed by default)
+    const allBanners = screen.queryAllByText(/is working/);
+    expect(allBanners).toHaveLength(1);
+  });
+
+  it("accordion toggle expands to show additional agents and collapses again", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({
+      tasks: [
+        makeTask("task-1"),
+        makeTask("task-2", { agent_id: "agent-2" }),
+        makeTask("task-3", { agent_id: "agent-3" }),
+      ],
+    });
+
+    renderCard();
+
+    await waitFor(() => {
+      expect(screen.getByText(/is working/)).toBeTruthy();
+    });
+
+    // Collapsed: shows count, only primary is visible
+    expect(screen.getByText(/\+2 more agents running/)).toBeTruthy();
+    expect(screen.queryAllByText(/is working/)).toHaveLength(1);
+
+    // Click to expand
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText(/\+2 more agents running/));
+    });
+
+    // Expanded: all three are visible and toggle shows "hide" text
+    expect(screen.getAllByText(/is working/)).toHaveLength(3);
+    expect(screen.getByText("Hide additional agents")).toBeTruthy();
+
+    // Click again to collapse
+    await act(async () => {
+      rtlFireEvent.click(screen.getByText("Hide additional agents"));
+    });
+
+    expect(screen.queryAllByText(/is working/)).toHaveLength(1);
+    expect(screen.getByText(/\+2 more agents running/)).toBeTruthy();
   });
 });

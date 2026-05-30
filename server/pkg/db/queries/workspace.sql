@@ -1,7 +1,7 @@
 -- name: ListWorkspaces :many
 SELECT w.id, w.name, w.slug, w.description, w.settings,
        w.created_at, w.updated_at, w.context,
-       w.issue_prefix, w.issue_counter
+       w.issue_prefix, w.issue_counter, w.mode
 FROM member m
 JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
@@ -16,8 +16,8 @@ SELECT * FROM workspace
 WHERE slug = $1;
 
 -- name: CreateWorkspace :one
-INSERT INTO workspace (name, slug, description, context, issue_prefix)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO workspace (name, slug, description, context, issue_prefix, mode)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: UpdateWorkspace :one
@@ -27,6 +27,7 @@ UPDATE workspace SET
     context = COALESCE(sqlc.narg('context'), context),
     settings = COALESCE(sqlc.narg('settings'), settings),
     issue_prefix = COALESCE(sqlc.narg('issue_prefix'), issue_prefix),
+    mode = COALESCE(sqlc.narg('mode'), mode),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

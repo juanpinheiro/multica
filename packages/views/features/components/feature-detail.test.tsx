@@ -24,8 +24,12 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
+const mockCurrentWorkspace = vi.hoisted((): { value: { id: string; name: string; slug: string; mode?: string } } => ({
+  value: { id: "ws-1", name: "Test WS", slug: "test" },
+}));
+
 vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ id: "ws-1", name: "Test WS", slug: "test" }),
+  useCurrentWorkspace: () => mockCurrentWorkspace.value,
   useWorkspacePaths: () => ({
     features: () => "/test/features",
     featureDetail: (id: string) => `/test/features/${id}`,
@@ -136,8 +140,19 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({ push: vi.fn() }),
 }));
 
-vi.mock("../../layout/page-header", () => ({
-  PageHeader: ({ children }: any) => <header>{children}</header>,
+vi.mock("../../layout", () => ({
+  BreadcrumbHeader: ({ segments, actions }: any) => (
+    <header>
+      {segments?.map((seg: any, i: number) =>
+        seg.href ? (
+          <a key={seg.href} href={seg.href}>{seg.label}</a>
+        ) : (
+          <span key={i}>{seg.label}</span>
+        )
+      )}
+      {actions}
+    </header>
+  ),
 }));
 
 vi.mock("../../common/actor-avatar", () => ({
@@ -454,5 +469,36 @@ describe("FeatureDetail", () => {
       blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
       pull_requests: [],
     };
+  });
+
+  it("shows in-place exec mode indicator when workspace mode is in_place", () => {
+    mockCurrentWorkspace.value = { id: "ws-1", name: "Test WS", slug: "test", mode: "in_place" };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.getByTestId("inplace-mode-indicator")).toBeInTheDocument();
+    mockCurrentWorkspace.value = { id: "ws-1", name: "Test WS", slug: "test" };
+  });
+
+  it("does not show exec mode indicator when workspace mode is worktree", () => {
+    mockCurrentWorkspace.value = { id: "ws-1", name: "Test WS", slug: "test", mode: "worktree" };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.queryByTestId("inplace-mode-indicator")).not.toBeInTheDocument();
+    mockCurrentWorkspace.value = { id: "ws-1", name: "Test WS", slug: "test" };
+  });
+
+  it("does not show exec mode indicator for unknown mode (enum-drift fallback)", () => {
+    mockCurrentWorkspace.value = { id: "ws-1", name: "Test WS", slug: "test", mode: "future_unknown_mode" };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.queryByTestId("inplace-mode-indicator")).not.toBeInTheDocument();
+    mockCurrentWorkspace.value = { id: "ws-1", name: "Test WS", slug: "test" };
+  });
+
+  it("renders workspace name as first breadcrumb segment", () => {
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.getByText("Test WS")).toBeInTheDocument();
+  });
+
+  it("renders feature title as last breadcrumb segment", () => {
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.getByText("Auth v2")).toBeInTheDocument();
   });
 });
