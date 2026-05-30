@@ -21,7 +21,7 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { memberListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { memberListOptions, repoListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import {
   deriveGitHubSettings,
   githubInstallationsOptions,
@@ -70,8 +70,8 @@ export function GitHubTab() {
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const githubRepoCount =
-    workspace?.repos?.filter((r) => /github\.com/i.test(r.url ?? "")).length ?? 0;
+  const { data: repos = [] } = useQuery(repoListOptions(wsId));
+  const githubRepoCount = repos.filter((r) => /github\.com/i.test(r.remote_url)).length;
 
   async function persistSetting(key: SettingsKey, next: boolean) {
     if (!workspace || savingKey) return;

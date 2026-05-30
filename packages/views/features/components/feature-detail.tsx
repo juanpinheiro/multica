@@ -85,8 +85,41 @@ function PropRow({
 }
 
 // ---------------------------------------------------------------------------
-// Issue pipeline — ready/blocked two-section view
+// Issue pipeline — repo-grouped ready/blocked view
 // ---------------------------------------------------------------------------
+
+type RepoGroup = {
+  repoName: string | null;
+  readyNow: FeatureIssueSummary[];
+  blocked: FeatureBlockedIssueSummary[];
+};
+
+function groupIssuesByRepo(
+  readyNow: FeatureIssueSummary[],
+  blocked: FeatureBlockedIssueSummary[],
+): RepoGroup[] {
+  const order: (string | null)[] = [];
+  const byRepo = new Map<string | null, RepoGroup>();
+
+  function getOrCreate(name: string | null): RepoGroup {
+    if (!byRepo.has(name)) {
+      order.push(name);
+      byRepo.set(name, { repoName: name, readyNow: [], blocked: [] });
+    }
+    return byRepo.get(name)!;
+  }
+
+  for (const issue of readyNow) {
+    getOrCreate(issue.repo_name ?? null).readyNow.push(issue);
+  }
+  for (const issue of blocked) {
+    getOrCreate(issue.repo_name ?? null).blocked.push(issue);
+  }
+
+  const named = order.filter((n): n is string => n !== null).sort((a, b) => a.localeCompare(b));
+  const hasNull = order.includes(null);
+  return [...named, ...(hasNull ? [null] : [])].map((name) => byRepo.get(name)!);
+}
 
 function IssueRow({ issue, blockedBy }: { issue: FeatureIssueSummary; blockedBy?: string[] }) {
   const statusCfg = STATUS_CONFIG[issue.status] ?? STATUS_CONFIG.backlog;
@@ -166,19 +199,36 @@ function FeatureIssuePipelineView({
     );
   }
 
+  const groups = groupIssuesByRepo(readyNow, blocked);
+  const showRepoHeaders = groups.length > 1;
+
   return (
-    <div className="space-y-4">
-      <IssueSection
-        title={t(($) => $.detail.section_ready_now)}
-        issues={readyNow}
-      />
-      {blocked.length > 0 && (
-        <IssueSection
-          title={t(($) => $.detail.section_blocked)}
-          issues={blocked}
-          blockedMap={blockedMap}
-        />
-      )}
+    <div className="space-y-6">
+      {groups.map((group) => (
+        <div key={group.repoName ?? "__unassigned__"}>
+          {showRepoHeaders && (
+            <div
+              className="text-xs font-semibold text-muted-foreground mb-2"
+              data-testid="repo-group-header"
+            >
+              {group.repoName ?? "Unassigned"}
+            </div>
+          )}
+          <div className="space-y-4">
+            <IssueSection
+              title={t(($) => $.detail.section_ready_now)}
+              issues={group.readyNow}
+            />
+            {group.blocked.length > 0 && (
+              <IssueSection
+                title={t(($) => $.detail.section_blocked)}
+                issues={group.blocked}
+                blockedMap={blockedMap}
+              />
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -187,29 +237,50 @@ function FeatureIssuePipelineView({
 // PR header badge
 // ---------------------------------------------------------------------------
 
-function PRHeaderBadge({ prs }: { prs: FeaturePRSummary[] }) {
-  const openPRs = prs.filter((pr) => pr.state === "open" || pr.state === "draft");
-  if (openPRs.length === 0) return null;
-
-  const first = openPRs[0];
-  if (openPRs.length === 1 && first) {
-    return (
-      <a
-        href={first.html_url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-accent hover:bg-accent/80 transition-colors text-foreground"
-        data-testid="pr-link"
-      >
-        {`PR #${first.number}`}
-      </a>
-    );
+function groupOpenPRsByRepo(prs: FeaturePRSummary[]): Map<string, FeaturePRSummary[]> {
+  const byRepo = new Map<string, FeaturePRSummary[]>();
+  for (const pr of prs) {
+    if (pr.state !== "open" && pr.state !== "draft") continue;
+    const key = pr.repo_id ?? "__no_repo__";
+    if (!byRepo.has(key)) byRepo.set(key, []);
+    byRepo.get(key)!.push(pr);
   }
+  return byRepo;
+}
+
+function PRHeaderBadge({ prs }: { prs: FeaturePRSummary[] }) {
+  const openByRepo = groupOpenPRsByRepo(prs);
+  if (openByRepo.size === 0) return null;
 
   return (
-    <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-accent text-foreground" data-testid="pr-count">
-      {`${openPRs.length} PRs`}
-    </span>
+    <>
+      {Array.from(openByRepo.values()).map((group) => {
+        const first = group[0]!;
+        if (group.length === 1) {
+          return (
+            <a
+              key={first.html_url}
+              href={first.html_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-accent hover:bg-accent/80 transition-colors text-foreground"
+              data-testid="pr-link"
+            >
+              {`PR #${first.number}`}
+            </a>
+          );
+        }
+        return (
+          <span
+            key={first.html_url}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-accent text-foreground"
+            data-testid="pr-count"
+          >
+            {`${group.length} PRs`}
+          </span>
+        );
+      })}
+    </>
   );
 }
 
@@ -505,6 +576,10 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
     </div>
   );
 
+  // Plain TS literal (allowed by i18next jsx-text-only) so the branch chip can
+  // show the full ref the daemon checks out, not just the slug.
+  const featureBranch = feature.branch_slug ? `feature/${feature.branch_slug}` : null;
+
   return (
     <>
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
@@ -517,10 +592,10 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
                 </AppLink>
                 <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
                 <span className="truncate">{feature.title}</span>
-                {feature.target_branch && (
+                {featureBranch && (
                   <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-accent text-foreground shrink-0" data-testid="branch-indicator">
                     <GitBranch className="h-3 w-3" />
-                    {feature.target_branch}
+                    {featureBranch}
                   </span>
                 )}
                 <PRHeaderBadge prs={prs} />

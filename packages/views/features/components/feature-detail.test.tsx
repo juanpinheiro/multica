@@ -221,7 +221,7 @@ const mockFeature = vi.hoisted((): { value: Feature } => ({
     priority: "high",
     lead_type: null,
     lead_id: null,
-    target_branch: null,
+    branch_slug: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     issue_count: 2,
@@ -317,15 +317,15 @@ describe("FeatureDetail", () => {
     expect(screen.getByText(/blocked by MUL-1/i)).toBeInTheDocument();
   });
 
-  it("shows target branch in header when set", () => {
-    mockFeature.value = { ...mockFeature.value, target_branch: "feature/auth-v2" };
+  it("shows feature branch in header when branch_slug is set", () => {
+    mockFeature.value = { ...mockFeature.value, branch_slug: "auth-v2" };
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
     expect(screen.getByTestId("branch-indicator")).toHaveTextContent("feature/auth-v2");
-    mockFeature.value = { ...mockFeature.value, target_branch: null };
+    mockFeature.value = { ...mockFeature.value, branch_slug: null };
   });
 
-  it("does not show branch indicator when target_branch is null", () => {
-    mockFeature.value = { ...mockFeature.value, target_branch: null };
+  it("does not show branch indicator when branch_slug is null", () => {
+    mockFeature.value = { ...mockFeature.value, branch_slug: null };
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
     expect(screen.queryByTestId("branch-indicator")).not.toBeInTheDocument();
   });
@@ -369,6 +369,66 @@ describe("FeatureDetail", () => {
     mockIssuesResponse.value = { ...mockIssuesResponse.value, pull_requests: [] };
   });
 
+
+  it("groups issues by repo when repo_name is set on multiple repos", () => {
+    mockIssuesResponse.value = {
+      ready_now: [
+        { id: "i1", identifier: "MUL-1", title: "Backend task", status: "todo", priority: "high", repo_id: "r1", repo_name: "backend" },
+        { id: "i3", identifier: "MUL-3", title: "Frontend task", status: "todo", priority: "medium", repo_id: "r2", repo_name: "frontend" },
+      ],
+      blocked: [],
+      pull_requests: [],
+    };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    const headers = screen.getAllByTestId("repo-group-header");
+    expect(headers).toHaveLength(2);
+    const texts = headers.map((h) => h.textContent);
+    expect(texts).toContain("backend");
+    expect(texts).toContain("frontend");
+    mockIssuesResponse.value = {
+      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Add login page", status: "todo", priority: "high" }],
+      blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
+      pull_requests: [],
+    };
+  });
+
+  it("does not show repo group headers when all issues share one repo", () => {
+    mockIssuesResponse.value = {
+      ready_now: [
+        { id: "i1", identifier: "MUL-1", title: "Backend task", status: "todo", priority: "high", repo_id: "r1", repo_name: "backend" },
+      ],
+      blocked: [],
+      pull_requests: [],
+    };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.queryByTestId("repo-group-header")).not.toBeInTheDocument();
+    mockIssuesResponse.value = {
+      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Add login page", status: "todo", priority: "high" }],
+      blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
+      pull_requests: [],
+    };
+  });
+
+  it("shows one PR badge per repo for multi-repo features", () => {
+    mockIssuesResponse.value = {
+      ready_now: [],
+      blocked: [],
+      pull_requests: [
+        { number: 1, html_url: "https://github.com/owner/backend/pull/1", state: "open", title: "Backend PR", repo_id: "r1" },
+        { number: 2, html_url: "https://github.com/owner/frontend/pull/2", state: "open", title: "Frontend PR", repo_id: "r2" },
+      ],
+    };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    const prLinks = screen.getAllByTestId("pr-link");
+    expect(prLinks).toHaveLength(2);
+    expect(prLinks[0]).toHaveAttribute("href", "https://github.com/owner/backend/pull/1");
+    expect(prLinks[1]).toHaveAttribute("href", "https://github.com/owner/frontend/pull/2");
+    mockIssuesResponse.value = {
+      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Add login page", status: "todo", priority: "high" }],
+      blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
+      pull_requests: [],
+    };
+  });
 
   it("does not render a New Issue button in the empty state", () => {
     mockIssuesResponse.value = { ready_now: [], blocked: [], pull_requests: [] };

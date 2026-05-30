@@ -5,7 +5,10 @@ import type {
   AgentTemplateSummary,
   Attachment,
   CreateAgentFromTemplateResponse,
+  Feature,
+  FeatureIssuesResponse,
   GroupedIssuesResponse,
+  ListFeaturesResponse,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   Squad,
@@ -610,4 +613,100 @@ export const EMPTY_USER: User = {
   timezone: null,
   created_at: "",
   updated_at: "",
+};
+
+const IssueSummarySchema = z.object({
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  status: z.string(),
+  priority: z.string(),
+  repo_id: z.string().nullable().optional(),
+  repo_name: z.string().nullable().optional(),
+}).loose();
+
+const BlockedIssueSummarySchema = IssueSummarySchema.extend({
+  blocked_by: z.array(z.string()).default([]),
+}).loose();
+
+const PRSummarySchema = z.object({
+  number: z.number(),
+  html_url: z.string(),
+  state: z.string(),
+  title: z.string(),
+  repo_id: z.string().nullable().optional(),
+}).loose();
+
+export const FeatureIssuesResponseSchema = z.object({
+  ready_now: z.array(IssueSummarySchema).default([]),
+  blocked: z.array(BlockedIssueSummarySchema).default([]),
+  pull_requests: z.array(PRSummarySchema).default([]),
+}).loose();
+
+export const EMPTY_FEATURE_ISSUES_RESPONSE: FeatureIssuesResponse = {
+  ready_now: [],
+  blocked: [],
+  pull_requests: [],
+};
+
+// Repo — first-class git repository under a workspace (settings → Repositories).
+export const RepoSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  remote_url: z.string(),
+  local_path: z.string().nullable().optional(),
+  default_branch: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const RepoListSchema = z.array(RepoSchema);
+
+// Feature — the PRD row rendered on the feature detail and list pages. String
+// enums stay lenient (a new server status downgrades gracefully); counts default.
+export const FeatureSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  title: z.string(),
+  description: z.string().nullable().optional(),
+  icon: z.string().nullable().optional(),
+  status: z.string(),
+  priority: z.string(),
+  lead_type: z.string().nullable().optional(),
+  lead_id: z.string().nullable().optional(),
+  branch_slug: z.string().nullable().optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  issue_count: z.number().default(0),
+  done_count: z.number().default(0),
+  resource_count: z.number().default(0),
+}).loose();
+
+export const EMPTY_FEATURE: Feature = {
+  id: "",
+  workspace_id: "",
+  title: "",
+  description: null,
+  icon: null,
+  status: "planned",
+  priority: "none",
+  lead_type: null,
+  lead_id: null,
+  branch_slug: null,
+  created_at: "",
+  updated_at: "",
+  issue_count: 0,
+  done_count: 0,
+  resource_count: 0,
+};
+
+export const ListFeaturesResponseSchema = z.object({
+  features: z.array(FeatureSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_FEATURES_RESPONSE: ListFeaturesResponse = {
+  features: [],
+  total: 0,
 };

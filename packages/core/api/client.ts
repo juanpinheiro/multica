@@ -29,7 +29,7 @@ import type {
   Reaction,
   IssueReaction,
   Workspace,
-  WorkspaceRepo,
+  Repo,
   MemberWithUser,
   User,
   Skill,
@@ -116,7 +116,10 @@ import {
   EMPTY_AGENT_TEMPLATE_SUMMARY_LIST,
   EMPTY_ATTACHMENT,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_FEATURE,
+  EMPTY_FEATURE_ISSUES_RESPONSE,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_LIST_FEATURES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SQUAD,
   EMPTY_SQUAD_LIST,
@@ -125,9 +128,13 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  FeatureIssuesResponseSchema,
+  FeatureSchema,
   GroupedIssuesResponseSchema,
+  ListFeaturesResponseSchema,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
+  RepoListSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -1072,9 +1079,22 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; issue_prefix?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Repos — workspace is resolved server-side from the X-Workspace-Slug header.
+  async listRepos(): Promise<Repo[]> {
+    const raw = await this.fetch<unknown>("/api/repos");
+    return parseWithFallback(raw, RepoListSchema, [], { endpoint: "GET /api/repos" });
+  }
+
+  async createRepo(data: { name: string; remote_url: string; local_path?: string; default_branch?: string }): Promise<Repo> {
+    return this.fetch("/api/repos", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -1289,15 +1309,22 @@ export class ApiClient {
   async listFeatures(params?: { status?: string }): Promise<ListFeaturesResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/features?${search}`);
+    const raw = await this.fetch<unknown>(`/api/features?${search}`);
+    return parseWithFallback(raw, ListFeaturesResponseSchema, EMPTY_LIST_FEATURES_RESPONSE, {
+      endpoint: "GET /api/features",
+    });
   }
 
   async getFeature(id: string): Promise<Feature> {
-    return this.fetch(`/api/features/${id}`);
+    const raw = await this.fetch<unknown>(`/api/features/${id}`);
+    return parseWithFallback(raw, FeatureSchema, EMPTY_FEATURE, { endpoint: `GET /api/features/${id}` });
   }
 
   async getFeatureIssues(id: string): Promise<FeatureIssuesResponse> {
-    return this.fetch(`/api/features/${id}/issues`);
+    const raw = await this.fetch<unknown>(`/api/features/${id}/issues`);
+    return parseWithFallback(raw, FeatureIssuesResponseSchema, EMPTY_FEATURE_ISSUES_RESPONSE, {
+      endpoint: `GET /api/features/${id}/issues`,
+    });
   }
 
   async createFeature(data: CreateFeatureRequest): Promise<Feature> {

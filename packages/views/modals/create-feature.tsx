@@ -31,7 +31,7 @@ import {
 } from "@multica/core/features/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, repoListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { FeatureStatus, FeaturePriority } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
@@ -138,10 +138,10 @@ export function CreateFeatureModal({ onClose }: { onClose: () => void }) {
   const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [customRepoUrl, setCustomRepoUrl] = useState("");
-  const workspaceRepos = workspace?.repos ?? [];
+  const { data: workspaceRepos = [] } = useQuery(repoListOptions(wsId));
   const repoQuery = repoSearch.trim().toLowerCase();
   const filteredWorkspaceRepos = workspaceRepos.filter((repo) =>
-    repo.url.toLowerCase().includes(repoQuery),
+    repo.remote_url.toLowerCase().includes(repoQuery),
   );
 
   // Sync field changes to draft store
@@ -499,12 +499,12 @@ export function CreateFeatureModal({ onClose }: { onClose: () => void }) {
                       </p>
                     )}
                     {filteredWorkspaceRepos.map((repo) => {
-                      const checked = selectedRepos.includes(repo.url);
+                      const checked = selectedRepos.includes(repo.remote_url);
                       return (
                         <button
                           type="button"
-                          key={repo.url}
-                          onClick={() => toggleRepo(repo.url)}
+                          key={repo.id}
+                          onClick={() => toggleRepo(repo.remote_url)}
                           className={cn(
                             "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
                             checked && "bg-accent",
@@ -517,7 +517,7 @@ export function CreateFeatureModal({ onClose }: { onClose: () => void }) {
                             className="size-3.5"
                           />
                           <GithubIcon className="size-3.5" />
-                          <RepoUrlText url={repo.url} />
+                          <RepoUrlText url={repo.remote_url} />
                         </button>
                       );
                     })}

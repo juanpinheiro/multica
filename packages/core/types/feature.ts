@@ -14,7 +14,7 @@ export interface Feature {
   priority: FeaturePriority;
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
-  target_branch: string | null;
+  branch_slug: string | null;
   created_at: string;
   updated_at: string;
   issue_count: number;
@@ -92,6 +92,8 @@ export interface FeatureIssueSummary {
   title: string;
   status: IssueStatus;
   priority: IssuePriority;
+  repo_id?: string | null;
+  repo_name?: string | null;
 }
 
 export interface FeatureBlockedIssueSummary extends FeatureIssueSummary {
@@ -103,6 +105,7 @@ export interface FeaturePRSummary {
   html_url: string;
   state: string;
   title: string;
+  repo_id?: string | null;
 }
 
 export interface FeatureIssuesResponse {

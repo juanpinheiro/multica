@@ -19,7 +19,6 @@ const workspaceRef = vi.hoisted(() => ({
     name: "Acme",
     slug: "acme",
     settings: {} as Record<string, unknown>,
-    repos: [{ url: "https://github.com/acme/api" }] as { url: string }[],
   },
 }));
 type MemberRole = "owner" | "admin" | "member" | "guest";
@@ -63,6 +62,7 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
+  repoListOptions: () => ({ queryKey: ["repos"], queryFn: vi.fn() }),
   workspaceKeys: { list: () => ["workspaces"] },
 }));
 
@@ -131,7 +131,6 @@ function resetFixtures() {
     name: "Acme",
     slug: "acme",
     settings: {},
-    repos: [{ url: "https://github.com/acme/api" }],
   };
   membersRef.current = [{ user_id: "user-1", role: "owner" }];
   installationsRef.current = { installations: [], configured: true, can_manage: true };
