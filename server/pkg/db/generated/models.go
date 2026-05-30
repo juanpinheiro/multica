@@ -237,18 +237,18 @@ type DaemonToken struct {
 }
 
 type Feature struct {
-	ID           pgtype.UUID        `json:"id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	Title        string             `json:"title"`
-	Description  pgtype.Text        `json:"description"`
-	Icon         pgtype.Text        `json:"icon"`
-	Status       string             `json:"status"`
-	LeadType     pgtype.Text        `json:"lead_type"`
-	LeadID       pgtype.UUID        `json:"lead_id"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	Priority     string             `json:"priority"`
-	TargetBranch pgtype.Text        `json:"target_branch"`
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Title       string             `json:"title"`
+	Description pgtype.Text        `json:"description"`
+	Icon        pgtype.Text        `json:"icon"`
+	Status      string             `json:"status"`
+	LeadType    pgtype.Text        `json:"lead_type"`
+	LeadID      pgtype.UUID        `json:"lead_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Priority    string             `json:"priority"`
+	BranchSlug  pgtype.Text        `json:"branch_slug"`
 }
 
 type FeatureResource struct {
@@ -299,6 +299,7 @@ type GithubPullRequest struct {
 	Additions       int32              `json:"additions"`
 	Deletions       int32              `json:"deletions"`
 	ChangedFiles    int32              `json:"changed_files"`
+	RepoID          pgtype.UUID        `json:"repo_id"`
 }
 
 type GithubPullRequestCheckSuite struct {
@@ -349,6 +350,7 @@ type Issue struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	Number             int32              `json:"number"`
 	FeatureID          pgtype.UUID        `json:"feature_id"`
+	RepoID             pgtype.UUID        `json:"repo_id"`
 	OriginType         pgtype.Text        `json:"origin_type"`
 	OriginID           pgtype.UUID        `json:"origin_id"`
 	FirstExecutedAt    pgtype.Timestamptz `json:"first_executed_at"`
@@ -428,6 +430,17 @@ type PinnedItem struct {
 	ItemID      pgtype.UUID        `json:"item_id"`
 	Position    float64            `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Repo struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Name          string             `json:"name"`
+	RemoteUrl     string             `json:"remote_url"`
+	LocalPath     pgtype.Text        `json:"local_path"`
+	DefaultBranch string             `json:"default_branch"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Skill struct {
@@ -594,7 +607,6 @@ type Workspace struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	Context      pgtype.Text        `json:"context"`
-	Repos        []byte             `json:"repos"`
 	IssuePrefix  string             `json:"issue_prefix"`
 	IssueCounter int32              `json:"issue_counter"`
 }

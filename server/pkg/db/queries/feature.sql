@@ -16,7 +16,7 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateFeature :one
 INSERT INTO feature (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, target_branch
+    lead_type, lead_id, priority, branch_slug
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
 ) RETURNING *;
@@ -30,7 +30,7 @@ UPDATE feature SET
     priority = COALESCE(sqlc.narg('priority'), priority),
     lead_type = sqlc.narg('lead_type'),
     lead_id = sqlc.narg('lead_id'),
-    target_branch = sqlc.narg('target_branch'),
+    branch_slug = sqlc.narg('branch_slug'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -69,3 +69,14 @@ SELECT feature_id,
 FROM issue
 WHERE feature_id = ANY(sqlc.arg('feature_ids')::uuid[])
 GROUP BY feature_id;
+
+-- name: ListFeatureIssueSummaries :many
+-- Returns minimal issue data for cross-repo brief injection.
+-- Used by the daemon claim handler to build the cross-repo context section
+-- when a feature spans multiple repos.
+SELECT i.id, i.title, i.number, i.repo_id,
+       COALESCE(r.name, '') AS repo_name
+FROM issue i
+LEFT JOIN repo r ON r.id = i.repo_id AND r.workspace_id = i.workspace_id
+WHERE i.feature_id = $1
+ORDER BY i.number ASC;

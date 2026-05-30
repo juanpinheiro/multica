@@ -85,6 +85,26 @@ type TaskContextForEnv struct {
 	// meaning sibling issues of the same feature also push to this branch.
 	// The brief appends a "## Shared branch" safety section when set.
 	IsSharedBranch bool
+	// RepoName is the human-readable name of the repo this issue targets.
+	// Empty when the issue has no repo_id.
+	RepoName string
+	// RepoRemoteURL is the remote URL of the repo this issue targets.
+	// When non-empty and IsSharedBranch, the brief emits a specific checkout
+	// command pointing at this URL and the feature branch.
+	RepoRemoteURL string
+	// RepoLocalPath is the local filesystem path for the repo (from repo.local_path).
+	// Informational; may be used by future CLI resolution logic.
+	RepoLocalPath string
+	// CrossRepoSiblings lists sibling issues in other repos within the same feature.
+	// When non-empty, the brief appends a "## Cross-repo context" section.
+	CrossRepoSiblings []CrossRepoSiblingContext
+}
+
+// CrossRepoSiblingContext describes a sibling issue in a different repo.
+type CrossRepoSiblingContext struct {
+	IssueIdentifier string
+	IssueTitle      string
+	RepoName        string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

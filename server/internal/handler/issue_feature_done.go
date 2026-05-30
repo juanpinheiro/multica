@@ -19,7 +19,7 @@ import (
 // Guards:
 //   - transition must be non-done → done (prev.Status != "done" and issue.Status == "done")
 //   - issue must belong to a feature (feature_id set)
-//   - feature must have a target_branch (shared-branch model only)
+//   - feature must have a branch_slug (shared-branch model only)
 //   - no siblings may remain outside done status
 //
 // Errors are logged at warn and swallowed — this is a best-effort side-effect
@@ -40,7 +40,7 @@ func (h *Handler) notifyFeatureReadyForReview(ctx context.Context, prev, issue d
 			"feature_id", uuidToString(issue.FeatureID))
 		return
 	}
-	if !feature.TargetBranch.Valid || feature.TargetBranch.String == "" {
+	if !feature.BranchSlug.Valid || feature.BranchSlug.String == "" {
 		return
 	}
 
@@ -77,7 +77,7 @@ func (h *Handler) notifyFeatureReadyForReview(ctx context.Context, prev, issue d
 	body, prURL := h.buildFeatureReadyBody(ctx, feature, int(total))
 	details, _ := json.Marshal(map[string]any{
 		"feature_id":    uuidToString(feature.ID),
-		"target_branch": feature.TargetBranch.String,
+		"branch_slug":   feature.BranchSlug.String,
 		"issues_done":   total,
 		"pr_url":        prURL,
 	})

@@ -1994,6 +1994,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		TargetBranch:                     task.TargetBranch,
 		IsSharedBranch:                   task.IsSharedBranch,
+		RepoName:                         task.RepoName,
+		RepoRemoteURL:                    task.RepoRemoteURL,
+		RepoLocalPath:                    task.RepoLocalPath,
+		CrossRepoSiblings:                convertCrossRepoSiblingsForEnv(task.CrossRepoSiblings),
 	}
 
 	// Mark candidate env roots as active before any env work so the GC loop
@@ -2851,6 +2855,21 @@ func convertFeatureResourcesForEnv(resources []FeatureResourceData) []execenv.Fe
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertCrossRepoSiblingsForEnv(siblings []CrossRepoSiblingData) []execenv.CrossRepoSiblingContext {
+	if len(siblings) == 0 {
+		return nil
+	}
+	result := make([]execenv.CrossRepoSiblingContext, len(siblings))
+	for i, s := range siblings {
+		result[i] = execenv.CrossRepoSiblingContext{
+			IssueIdentifier: s.IssueIdentifier,
+			IssueTitle:      s.IssueTitle,
+			RepoName:        s.RepoName,
 		}
 	}
 	return result

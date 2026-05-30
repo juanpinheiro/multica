@@ -45,12 +45,17 @@ func normalizeGOOS(goos string) string {
 // Used by ctrl subcommands (agent, runtime, status, etc.). Requests
 // automatically include auth and execution context headers when configured.
 type APIClient struct {
-	BaseURL     string
+	BaseURL string
+	// WorkspaceID is the workspace UUID. Sent as X-Workspace-ID.
 	WorkspaceID string
-	Token       string
-	AgentID     string // When set, requests are attributed to this agent instead of the user.
-	TaskID      string // When set, sent as X-Task-ID for agent-task validation.
-	HTTPClient  *http.Client
+	// WorkspaceSlug is the workspace slug. Sent as X-Workspace-Slug, which the
+	// server resolves to a UUID. Set by manifest-driven resolution, which knows
+	// the slug offline but not necessarily the ID.
+	WorkspaceSlug string
+	Token         string
+	AgentID       string // When set, requests are attributed to this agent instead of the user.
+	TaskID        string // When set, sent as X-Task-ID for agent-task validation.
+	HTTPClient    *http.Client
 
 	// Identity overrides. Empty values fall back to the package-level
 	// ClientPlatform / ClientVersion / ClientOS.
@@ -86,6 +91,9 @@ func (c *APIClient) setHeaders(req *http.Request) {
 	}
 	if c.WorkspaceID != "" {
 		req.Header.Set("X-Workspace-ID", c.WorkspaceID)
+	}
+	if c.WorkspaceSlug != "" {
+		req.Header.Set("X-Workspace-Slug", c.WorkspaceSlug)
 	}
 	if c.AgentID != "" {
 		req.Header.Set("X-Agent-ID", c.AgentID)

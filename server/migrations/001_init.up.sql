@@ -460,6 +460,27 @@ CREATE FUNCTION public.task_usage_hourly_rollup_lag_seconds() RETURNS double pre
 $$;
 
 
+--
+-- Name: feature_resolve_branch; Type: FUNCTION; Schema: public; Owner: -
+--
+-- Single source of truth for the git branch an issue's task targets. Mirrors
+-- the Go resolver in server/internal/feature/branch.go and is the only place
+-- the claim query and the parity test reference, so the SQL and Go cannot
+-- drift. Priority: per-issue metadata override → feature branch (slug or
+-- feature UUID) → derived issue branch. Empty strings are skipped via NULLIF.
+--
+CREATE FUNCTION public.feature_resolve_branch(p_metadata jsonb, p_feature_id uuid, p_branch_slug text, p_issue_prefix text, p_issue_number integer) RETURNS text
+    LANGUAGE sql IMMUTABLE
+    AS $$
+    SELECT COALESCE(
+        NULLIF(p_metadata->>'target_branch', ''),
+        CASE WHEN p_feature_id IS NOT NULL
+             THEN 'feature/' || COALESCE(NULLIF(p_branch_slug, ''), p_feature_id::text) END,
+        'issue/' || p_issue_prefix || '-' || p_issue_number
+    );
+$$;
+
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -838,6 +859,7 @@ CREATE TABLE public.github_pull_request (
     additions integer DEFAULT 0 NOT NULL,
     deletions integer DEFAULT 0 NOT NULL,
     changed_files integer DEFAULT 0 NOT NULL,
+    repo_id uuid,
     CONSTRAINT github_pull_request_state_check CHECK ((state = ANY (ARRAY['open'::text, 'closed'::text, 'merged'::text, 'draft'::text])))
 );
 
@@ -906,6 +928,7 @@ CREATE TABLE public.issue (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     number integer DEFAULT 0 NOT NULL,
     feature_id uuid,
+    repo_id uuid,
     origin_type text,
     origin_id uuid,
     first_executed_at timestamp with time zone,
@@ -1062,7 +1085,7 @@ CREATE TABLE public.feature (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     priority text DEFAULT 'none'::text NOT NULL,
-    target_branch text,
+    branch_slug text,
     CONSTRAINT feature_lead_type_check CHECK ((lead_type = ANY (ARRAY['member'::text, 'agent'::text]))),
     CONSTRAINT feature_priority_check CHECK ((priority = ANY (ARRAY['urgent'::text, 'high'::text, 'medium'::text, 'low'::text, 'none'::text]))),
     CONSTRAINT feature_status_check CHECK ((status = ANY (ARRAY['planned'::text, 'in_progress'::text, 'paused'::text, 'completed'::text, 'cancelled'::text])))
@@ -1319,7 +1342,6 @@ CREATE TABLE public.workspace (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     context text,
-    repos jsonb DEFAULT '[]'::jsonb NOT NULL,
     issue_prefix text DEFAULT ''::text NOT NULL,
     issue_counter integer DEFAULT 0 NOT NULL
 );
@@ -3124,6 +3146,47 @@ ALTER TABLE ONLY public.webhook_delivery
 
 ALTER TABLE ONLY public.webhook_delivery
     ADD CONSTRAINT webhook_delivery_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspace(id) ON DELETE CASCADE;
+
+--
+-- Name: repo; Type: TABLE; Schema: public; Owner: -
+--
+-- A repository is a first-class git repo grouped under a workspace. Issues and
+-- pull requests reference a repo; the daemon checks it out by remote_url/local_path.
+
+CREATE TABLE public.repo (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    workspace_id uuid NOT NULL,
+    name text NOT NULL,
+    remote_url text NOT NULL,
+    local_path text,
+    default_branch text DEFAULT 'main'::text NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.repo
+    ADD CONSTRAINT repo_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY public.repo
+    ADD CONSTRAINT repo_workspace_id_remote_url_key UNIQUE (workspace_id, remote_url);
+
+ALTER TABLE ONLY public.repo
+    ADD CONSTRAINT repo_workspace_id_name_key UNIQUE (workspace_id, name);
+
+CREATE INDEX idx_repo_workspace_id ON public.repo USING btree (workspace_id);
+
+CREATE INDEX idx_issue_repo_id ON public.issue USING btree (repo_id);
+
+CREATE INDEX idx_github_pull_request_repo_id ON public.github_pull_request USING btree (repo_id);
+
+ALTER TABLE ONLY public.repo
+    ADD CONSTRAINT repo_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES public.workspace(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY public.issue
+    ADD CONSTRAINT issue_repo_id_fkey FOREIGN KEY (repo_id) REFERENCES public.repo(id) ON DELETE SET NULL;
+
+ALTER TABLE ONLY public.github_pull_request
+    ADD CONSTRAINT github_pull_request_repo_id_fkey FOREIGN KEY (repo_id) REFERENCES public.repo(id) ON DELETE SET NULL;
 
 -- Seed the singleton rollup-state row consumed by rollup_task_usage_hourly().
 -- The table CHECK constraint enforces id = 1.

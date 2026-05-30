@@ -137,6 +137,14 @@ type RepoData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// CrossRepoSiblingData describes a sibling issue in a different repo within
+// the same feature. Mirrors daemon.CrossRepoSiblingData via JSON field names.
+type CrossRepoSiblingData struct {
+	IssueIdentifier string `json:"issue_identifier"`
+	IssueTitle      string `json:"issue_title"`
+	RepoName        string `json:"repo_name"`
+}
+
 // FeatureResourceData is the wire shape for a feature resource included in a
 // claim response. The daemon reads this list and writes it into the agent's
 // working directory so skills/agents can discover feature-scoped context.
@@ -226,6 +234,15 @@ type AgentTaskResponse struct {
 	// (sibling issues of the same feature push to the same branch). The
 	// daemon emits the "## Shared branch" warning into the agent brief when set.
 	IsSharedBranch bool `json:"is_shared_branch,omitempty"`
+	// RepoName is the human-readable name of the repo this issue targets.
+	// Empty when the issue has no repo_id.
+	RepoName string `json:"repo_name,omitempty"`
+	// RepoRemoteURL is the remote URL of the repo this issue targets.
+	RepoRemoteURL string `json:"repo_remote_url,omitempty"`
+	// RepoLocalPath is the local filesystem path for the repo (from repo.local_path).
+	RepoLocalPath string `json:"repo_local_path,omitempty"`
+	// CrossRepoSiblings lists sibling issues in other repos within the same feature.
+	CrossRepoSiblings []CrossRepoSiblingData `json:"cross_repo_siblings,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in

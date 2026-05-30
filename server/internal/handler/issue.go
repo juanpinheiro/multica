@@ -40,6 +40,7 @@ type IssueResponse struct {
 	CreatorID     string                  `json:"creator_id"`
 	ParentIssueID *string                 `json:"parent_issue_id"`
 	FeatureID     *string                 `json:"feature_id"`
+	RepoID        *string                 `json:"repo_id"`
 	Position      float64                 `json:"position"`
 	StartDate     *string                 `json:"start_date"`
 	DueDate       *string                 `json:"due_date"`
@@ -77,6 +78,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatorID:     uuidToString(i.CreatorID),
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		FeatureID:     uuidToPtr(i.FeatureID),
+		RepoID:        uuidToPtr(i.RepoID),
 		Position:      i.Position,
 		StartDate:     timestampToPtr(i.StartDate),
 		DueDate:       timestampToPtr(i.DueDate),
@@ -168,6 +170,25 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
 	}
+}
+
+// resolveIssueRepoID validates an optional repo_id from the request body against
+// the active workspace. ok is false (and a 4xx already written) when the id is
+// malformed or the repo does not belong to the workspace. A nil raw pointer
+// leaves the issue unattached (NULL repo_id) and is always valid.
+func (h *Handler) resolveIssueRepoID(w http.ResponseWriter, r *http.Request, raw *string, wsUUID pgtype.UUID) (pgtype.UUID, bool) {
+	if raw == nil {
+		return pgtype.UUID{}, true
+	}
+	id, ok := parseUUIDOrBadRequest(w, *raw, "repo_id")
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	if _, err := h.Queries.GetRepoInWorkspace(r.Context(), db.GetRepoInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err != nil {
+		writeError(w, http.StatusBadRequest, "repo not found in this workspace")
+		return pgtype.UUID{}, false
+	}
+	return id, true
 }
 
 type IssueAssigneeGroupResponse struct {
@@ -1849,6 +1870,7 @@ type CreateIssueRequest struct {
 	AssigneeID    *string  `json:"assignee_id"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	FeatureID     *string  `json:"feature_id"`
+	RepoID        *string  `json:"repo_id"`
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -1926,6 +1948,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		projectID = id
+	}
+	repoID, ok := h.resolveIssueRepoID(w, r, req.RepoID, wsUUID)
+	if !ok {
+		return
 	}
 	if req.ParentIssueID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
@@ -2053,6 +2079,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			FeatureID:     projectID,
+			RepoID:        repoID,
 			OriginType:    originType,
 			OriginID:      originID,
 		})
@@ -2073,6 +2100,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			DueDate:       dueDate,
 			Number:        issueNumber,
 			FeatureID:     projectID,
+			RepoID:        repoID,
 		})
 	}
 	if err != nil {
@@ -2138,6 +2166,7 @@ type UpdateIssueRequest struct {
 	DueDate       *string  `json:"due_date"`
 	ParentIssueID *string  `json:"parent_issue_id"`
 	FeatureID     *string  `json:"feature_id"`
+	RepoID        *string  `json:"repo_id"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2180,6 +2209,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		DueDate:       prevIssue.DueDate,
 		ParentIssueID: prevIssue.ParentIssueID,
 		FeatureID:     prevIssue.FeatureID,
+		RepoID:        prevIssue.RepoID,
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -2289,6 +2319,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.FeatureID = featureUUID
 		} else {
 			params.FeatureID = pgtype.UUID{Valid: false}
+		}
+	}
+	if _, ok := rawFields["repo_id"]; ok {
+		if req.RepoID != nil {
+			repoUUID, ok := h.resolveIssueRepoID(w, r, req.RepoID, prevIssue.WorkspaceID)
+			if !ok {
+				return
+			}
+			params.RepoID = repoUUID
+		} else {
+			params.RepoID = pgtype.UUID{Valid: false}
 		}
 	}
 
@@ -2712,6 +2753,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			DueDate:       prevIssue.DueDate,
 			ParentIssueID: prevIssue.ParentIssueID,
 			FeatureID:     prevIssue.FeatureID,
+			RepoID:        prevIssue.RepoID,
 		}
 
 		if req.Updates.Title != nil {

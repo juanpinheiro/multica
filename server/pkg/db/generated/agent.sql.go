@@ -545,19 +545,12 @@ WHERE id = (
           JOIN workspace w2 ON i2.workspace_id = w2.id
           LEFT JOIN feature f2 ON i2.feature_id = f2.id
           WHERE atq.issue_id IS NOT NULL
-            AND t2.status = 'dispatched'
+            AND t2.status IN ('dispatched', 'running')
             AND t2.id != atq.id
-            AND COALESCE(
-                  NULLIF(f2.target_branch, ''),
-                  NULLIF(i2.metadata->>'target_branch', ''),
-                  'issue/' || w2.issue_prefix || '-' || i2.number
-                )
+            AND i2.repo_id = (SELECT ci.repo_id FROM issue ci WHERE ci.id = atq.issue_id)
+            AND feature_resolve_branch(i2.metadata, i2.feature_id, f2.branch_slug, w2.issue_prefix, i2.number)
               = (
-                  SELECT COALESCE(
-                      NULLIF(f.target_branch, ''),
-                      NULLIF(i.metadata->>'target_branch', ''),
-                      'issue/' || w.issue_prefix || '-' || i.number
-                  )
+                  SELECT feature_resolve_branch(i.metadata, i.feature_id, f.branch_slug, w.issue_prefix, i.number)
                   FROM issue i
                   JOIN workspace w ON i.workspace_id = w.id
                   LEFT JOIN feature f ON i.feature_id = f.id
@@ -586,14 +579,21 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // dependencies are non-gating. Chat / quick-create tasks have no issue_id
 // and are unaffected.
 //
-// Branch gate: when two queued tasks would push to the same git branch, only
-// one can be dispatched at a time so two agents don't fight over the same
-// branch. The resolved branch mirrors feature.Resolve (server/internal/feature/branch.go):
-// feature.target_branch wins, else issue.metadata->>'target_branch', else
-// derived 'issue/<identifier>'. The branch_parity_test guards against drift
-// between this SQL and the Go resolver. Empty strings are skipped via NULLIF
-// so a feature with target_branch=” falls through to the per-issue override.
-// Chat / quick-create tasks have no issue_id and are unaffected.
+// Branch gate: when two queued tasks would push to the same git branch OF THE
+// SAME REPO, only one runs at a time so two agents don't fight over the same
+// branch. A task holds its branch for its whole active life, so the gate blocks
+// against both 'dispatched' AND 'running' peers (mirroring the per-(issue,agent)
+// gate above) — checking only 'dispatched' would let a second slice start the
+// moment the first transitions to running. The resolved branch comes from
+// feature_resolve_branch(), the single SQL source of truth shared with the Go
+// resolver (server/internal/feature/branch.go) and the parity test, so the two
+// cannot drift. The branch name is independent of the repo, so a cross-repo
+// feature reuses the same name across repos; the repo_id match keys
+// serialization to (repo, branch), letting backend and frontend slices run in
+// parallel while two slices on one repo's feature branch stay serial. Issues
+// with repo_id IS NULL hold no branch and are exempt (the i2.repo_id = ...
+// comparison is never true against NULL). Chat / quick-create tasks have no
+// issue_id and are unaffected.
 func (q *Queries) ClaimAgentTask(ctx context.Context, agentID pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, claimAgentTask, agentID)
 	var i AgentTaskQueue

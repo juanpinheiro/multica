@@ -26,7 +26,7 @@ type FeatureResponse struct {
 	Priority     string  `json:"priority"`
 	LeadType     *string `json:"lead_type"`
 	LeadID       *string `json:"lead_id"`
-	TargetBranch *string `json:"target_branch"`
+	BranchSlug   *string `json:"branch_slug"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
 	IssueCount   int64   `json:"issue_count"`
@@ -49,7 +49,7 @@ func featureToResponse(p db.Feature) FeatureResponse {
 		Priority:     p.Priority,
 		LeadType:     textToPtr(p.LeadType),
 		LeadID:       uuidToPtr(p.LeadID),
-		TargetBranch: textToPtr(p.TargetBranch),
+		BranchSlug:   textToPtr(p.BranchSlug),
 		CreatedAt:    timestampToString(p.CreatedAt),
 		UpdatedAt:    timestampToString(p.UpdatedAt),
 	}
@@ -79,7 +79,7 @@ type CreateFeatureRequest struct {
 	Priority     string                                `json:"priority"`
 	LeadType     *string                               `json:"lead_type"`
 	LeadID       *string                               `json:"lead_id"`
-	TargetBranch *string                               `json:"target_branch"`
+	BranchSlug   *string                               `json:"branch_slug"`
 	Resources    []CreateFeatureResourceRequestPayload `json:"resources,omitempty"`
 }
 
@@ -101,7 +101,7 @@ type UpdateFeatureRequest struct {
 	Priority     *string `json:"priority"`
 	LeadType     *string `json:"lead_type"`
 	LeadID       *string `json:"lead_id"`
-	TargetBranch *string `json:"target_branch"`
+	BranchSlug   *string `json:"branch_slug"`
 }
 
 func (h *Handler) ListFeatures(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +252,7 @@ func (h *Handler) CreateFeature(w http.ResponseWriter, r *http.Request) {
 		LeadType:     leadType,
 		LeadID:       leadID,
 		Priority:     priority,
-		TargetBranch: ptrToText(req.TargetBranch),
+		BranchSlug:   ptrToText(req.BranchSlug),
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -384,7 +384,7 @@ func (h *Handler) UpdateFeature(w http.ResponseWriter, r *http.Request) {
 		Icon:         prevFeature.Icon,
 		LeadType:     prevFeature.LeadType,
 		LeadID:       prevFeature.LeadID,
-		TargetBranch: prevFeature.TargetBranch,
+		BranchSlug:   prevFeature.BranchSlug,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -427,11 +427,11 @@ func (h *Handler) UpdateFeature(w http.ResponseWriter, r *http.Request) {
 			params.LeadID = pgtype.UUID{Valid: false}
 		}
 	}
-	if _, ok := rawFields["target_branch"]; ok {
-		if req.TargetBranch != nil {
-			params.TargetBranch = pgtype.Text{String: *req.TargetBranch, Valid: true}
+	if _, ok := rawFields["branch_slug"]; ok {
+		if req.BranchSlug != nil {
+			params.BranchSlug = pgtype.Text{String: *req.BranchSlug, Valid: true}
 		} else {
-			params.TargetBranch = pgtype.Text{Valid: false}
+			params.BranchSlug = pgtype.Text{Valid: false}
 		}
 	}
 	feature, err := h.Queries.UpdateFeature(r.Context(), params)
@@ -596,7 +596,7 @@ func buildFeatureSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
-		p.created_at, p.updated_at, p.target_branch,
+		p.created_at, p.updated_at, p.branch_slug,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM feature p
@@ -682,7 +682,7 @@ func (h *Handler) SearchFeatures(w http.ResponseWriter, r *http.Request) {
 			&row.feature.LeadID,
 			&row.feature.CreatedAt,
 			&row.feature.UpdatedAt,
-			&row.feature.TargetBranch,
+			&row.feature.BranchSlug,
 			&row.totalCount,
 			&row.matchSource,
 		); err != nil {
@@ -759,11 +759,13 @@ func (h *Handler) SearchFeatures(w http.ResponseWriter, r *http.Request) {
 
 // IssueSummary is a compact issue representation used in feature issue groupings.
 type IssueSummary struct {
-	ID         string `json:"id"`
-	Identifier string `json:"identifier"`
-	Title      string `json:"title"`
-	Status     string `json:"status"`
-	Priority   string `json:"priority"`
+	ID         string  `json:"id"`
+	Identifier string  `json:"identifier"`
+	Title      string  `json:"title"`
+	Status     string  `json:"status"`
+	Priority   string  `json:"priority"`
+	RepoID     *string `json:"repo_id,omitempty"`
+	RepoName   *string `json:"repo_name,omitempty"`
 }
 
 // BlockedIssueSummary extends IssueSummary with identifiers of unsatisfied blockers.
@@ -774,10 +776,11 @@ type BlockedIssueSummary struct {
 
 // PRSummary is a compact pull-request representation used in feature issue groupings.
 type PRSummary struct {
-	Number  int32  `json:"number"`
-	HtmlURL string `json:"html_url"`
-	State   string `json:"state"`
-	Title   string `json:"title"`
+	Number  int32   `json:"number"`
+	HtmlURL string  `json:"html_url"`
+	State   string  `json:"state"`
+	Title   string  `json:"title"`
+	RepoID  *string `json:"repo_id,omitempty"`
 }
 
 // FeatureIssuesResponse groups a feature's child issues into ready and blocked sets,
@@ -838,6 +841,7 @@ func (h *Handler) GetFeatureIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	blockedByMap := h.loadBlockedByMap(r.Context(), issueIDs)
+	repoMap := h.loadIssueRepoMap(r.Context(), issueIDs)
 
 	var readyNow []IssueSummary
 	var blocked []BlockedIssueSummary
@@ -848,6 +852,11 @@ func (h *Handler) GetFeatureIssues(w http.ResponseWriter, r *http.Request) {
 			Title:      iss.Title,
 			Status:     iss.Status,
 			Priority:   iss.Priority,
+		}
+		if info, ok := repoMap[sum.ID]; ok {
+			id, name := info[0], info[1]
+			sum.RepoID = &id
+			sum.RepoName = &name
 		}
 		if blockers, isBlocked := blockedByMap[sum.ID]; isBlocked {
 			blocked = append(blocked, BlockedIssueSummary{IssueSummary: sum, BlockedBy: blockers})
@@ -875,7 +884,7 @@ func (h *Handler) loadFeaturePRs(ctx context.Context, issueIDs []string) []PRSum
 		return nil
 	}
 	rows, err := h.DB.Query(ctx, `
-		SELECT DISTINCT gpr.pr_number, gpr.html_url, gpr.state, gpr.title
+		SELECT DISTINCT gpr.pr_number, gpr.html_url, gpr.state, gpr.title, gpr.repo_id::text
 		FROM issue_pull_request ipr
 		JOIN github_pull_request gpr ON ipr.pull_request_id = gpr.id
 		WHERE ipr.issue_id = ANY($1::uuid[])
@@ -888,7 +897,9 @@ func (h *Handler) loadFeaturePRs(ctx context.Context, issueIDs []string) []PRSum
 	var result []PRSummary
 	for rows.Next() {
 		var s PRSummary
-		if err := rows.Scan(&s.Number, &s.HtmlURL, &s.State, &s.Title); err == nil {
+		var repoID *string
+		if err := rows.Scan(&s.Number, &s.HtmlURL, &s.State, &s.Title, &repoID); err == nil {
+			s.RepoID = repoID
 			result = append(result, s)
 		}
 	}
@@ -920,6 +931,32 @@ func (h *Handler) loadBlockedByMap(ctx context.Context, issueIDs []string) map[s
 		var issID, blockerIdentifier string
 		if err := rows.Scan(&issID, &blockerIdentifier); err == nil {
 			result[issID] = append(result[issID], blockerIdentifier)
+		}
+	}
+	return result
+}
+
+// loadIssueRepoMap returns a map from issue ID to {repoID, repoName} for issues that have a repo.
+func (h *Handler) loadIssueRepoMap(ctx context.Context, issueIDs []string) map[string][2]string {
+	if len(issueIDs) == 0 || h.DB == nil {
+		return nil
+	}
+	rows, err := h.DB.Query(ctx, `
+		SELECT i.id::text, r.id::text, r.name
+		FROM issue i
+		JOIN repo r ON r.id = i.repo_id
+		WHERE i.id = ANY($1::uuid[])
+		  AND i.repo_id IS NOT NULL
+	`, issueIDs)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	result := make(map[string][2]string)
+	for rows.Next() {
+		var issID, repoID, repoName string
+		if err := rows.Scan(&issID, &repoID, &repoName); err == nil {
+			result[issID] = [2]string{repoID, repoName}
 		}
 	}
 	return result

@@ -247,7 +247,13 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Repositories\n\n")
 		b.WriteString("The following code repositories are available in this workspace.\n")
 		if ctx.IsSharedBranch && ctx.TargetBranch != "" {
-			fmt.Fprintf(&b, "Use `multica repo checkout <url> --ref %s` to check out a repository and continue from the feature's shared branch.\n\n", ctx.TargetBranch)
+			// When a specific issue repo is known, emit a precise checkout command.
+			// Otherwise keep the generic <url> placeholder.
+			if ctx.RepoRemoteURL != "" {
+				fmt.Fprintf(&b, "Use `multica repo checkout %s --ref %s` to check out the issue's target repository and continue from the feature's shared branch.\n\n", ctx.RepoRemoteURL, ctx.TargetBranch)
+			} else {
+				fmt.Fprintf(&b, "Use `multica repo checkout <url> --ref %s` to check out a repository and continue from the feature's shared branch.\n\n", ctx.TargetBranch)
+			}
 		} else {
 			b.WriteString("Use `multica repo checkout <url>` to check out a repository into your working directory. Add `--ref <branch-or-sha>` when you need an exact branch, tag, or commit.\n\n")
 		}
@@ -308,6 +314,20 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("- When all acceptance criteria pass and your push lands, mark this issue **`done`** directly — NOT `in_review`. Dependent issues unblock on `done`; if you stop at `in_review`, the daemon will not dispatch the next sibling and the feature stalls indefinitely.\n")
 		b.WriteString("- The human reviews the consolidated PR after every sibling issue completes — there is nothing to review per-issue, so the `in_review` step is skipped on purpose.\n")
 		b.WriteString("- Use `in_review` (or `blocked`) only for genuine handoffs (you cannot finish without a decision). Posting a comment explaining what is blocking is mandatory in that case.\n\n")
+	}
+
+	// Cross-repo context — emitted when the feature spans multiple repos and
+	// sibling issues in other repos are known. Helps the agent understand its
+	// slice's place within the broader cross-repo feature without requiring it
+	// to enumerate issues manually. Text context only (v1); sibling checkout
+	// mounts are a follow-up.
+	if len(ctx.CrossRepoSiblings) > 0 {
+		b.WriteString("## Cross-repo context\n\n")
+		b.WriteString("This issue is part of a feature that spans multiple repositories. Sibling issues in other repos:\n\n")
+		for _, sib := range ctx.CrossRepoSiblings {
+			fmt.Fprintf(&b, "- **%s**: %s (repo: `%s`)\n", sib.IssueIdentifier, sib.IssueTitle, sib.RepoName)
+		}
+		b.WriteString("\nConsult these sibling issues to understand cross-repo contracts (e.g. API schemas) before starting work.\n\n")
 	}
 
 	// Issue Metadata semantics — emitted only for tasks that operate on a real

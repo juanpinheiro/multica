@@ -1,7 +1,9 @@
 package mcp_test
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -81,6 +83,73 @@ func TestMCPCreateIssueIncludesOptionalFields(t *testing.T) {
 	}
 	if cb.lastBody["assignee_type"] != "agent" {
 		t.Errorf("body.assignee_type = %v, want agent", cb.lastBody["assignee_type"])
+	}
+}
+
+func TestMCPCreateIssueWithRepo(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/repos":
+			json.NewEncoder(w).Encode([]any{
+				map[string]any{"id": "repo-uuid", "name": "backend"},
+			})
+		case "/api/issues":
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1"})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-test", "test-token")
+	s := multicamcp.New(client, "test")
+	sess := newSession(t, s)
+	initialize(t, sess)
+
+	resp := callTool(t, sess, "create_issue", map[string]any{
+		"feature_id": "feat-1",
+		"title":      "Backend work",
+		"repo":       "backend",
+	})
+	text, isError := toolResult(t, resp)
+	if isError {
+		t.Fatalf("expected success, got error: %s", text)
+	}
+}
+
+func TestMCPCreateIssueUnknownRepo(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/repos":
+			json.NewEncoder(w).Encode([]any{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-test", "test-token")
+	s := multicamcp.New(client, "test")
+	sess := newSession(t, s)
+	initialize(t, sess)
+
+	resp := callTool(t, sess, "create_issue", map[string]any{
+		"feature_id": "feat-1",
+		"title":      "Issue",
+		"repo":       "nonexistent",
+	})
+	_, isError := toolResult(t, resp)
+	if !isError {
+		t.Errorf("expected error for unknown repo, got success")
 	}
 }
 

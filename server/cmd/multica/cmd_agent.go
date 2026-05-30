@@ -239,6 +239,18 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	if taskID := os.Getenv("MULTICA_TASK_ID"); taskID != "" {
 		client.TaskID = taskID
 	}
+
+	// When no explicit workspace was given (and we're not in an agent task,
+	// where the daemon is authoritative), resolve it from where the user is:
+	// the .multica manifest above the cwd, the cwd repo's git remote, or a
+	// sensible fallback. The manifest must win over a remembered config
+	// default, so we gate on the explicit flag/env only — not on the value
+	// resolveWorkspaceID folded in from config (that is the last-used
+	// fallback, applied inside the resolver). See applyResolvedWorkspace.
+	explicit := cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", "")
+	if explicit == "" && !inAgentExecutionContext() {
+		applyResolvedWorkspace(cmd, client)
+	}
 	return client, nil
 }
 
