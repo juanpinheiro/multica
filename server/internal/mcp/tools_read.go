@@ -17,6 +17,7 @@ func registerReadTools(s *Server) {
 	s.mcp.AddTool(listIssuesTool(), s.handleListIssues)
 	s.mcp.AddTool(getIssueTool(), s.handleGetIssue)
 	s.mcp.AddTool(listAgentsTool(), s.handleListAgents)
+	s.mcp.AddTool(listReposTool(), s.handleListRepos)
 }
 
 // toolError wraps an API error into a tool error result, surfacing the HTTP
@@ -78,6 +79,32 @@ func getFeatureTool() mcp.Tool {
 	)
 }
 
+// issueAPIEntry mirrors the server's IssueSummary + BlockedIssueSummary wire format.
+type issueAPIEntry struct {
+	ID         string   `json:"id"`
+	Identifier string   `json:"identifier"`
+	Title      string   `json:"title"`
+	Status     string   `json:"status"`
+	Priority   string   `json:"priority"`
+	RepoID     *string  `json:"repo_id"`
+	RepoName   *string  `json:"repo_name"`
+	BlockedBy  []string `json:"blocked_by"`
+}
+
+type prAPIEntry struct {
+	Number  int32   `json:"number"`
+	HtmlURL string  `json:"html_url"`
+	State   string  `json:"state"`
+	Title   string  `json:"title"`
+	RepoID  *string `json:"repo_id"`
+}
+
+type featureIssuesAPIResponse struct {
+	ReadyNow     []issueAPIEntry `json:"ready_now"`
+	Blocked      []issueAPIEntry `json:"blocked"`
+	PullRequests []prAPIEntry    `json:"pull_requests"`
+}
+
 func (s *Server) handleGetFeature(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	featureID, err := req.RequireString("feature_id")
 	if err != nil {
@@ -89,12 +116,79 @@ func (s *Server) handleGetFeature(ctx context.Context, req mcp.CallToolRequest) 
 		return toolError("get_feature failed", err), nil
 	}
 
-	var issues any
-	if err := s.client.GetJSON(ctx, "/api/features/"+featureID+"/issues", &issues); err != nil {
+	var issuesResp featureIssuesAPIResponse
+	if err := s.client.GetJSON(ctx, "/api/features/"+featureID+"/issues", &issuesResp); err != nil {
 		return toolError("get_feature issues failed", err), nil
 	}
 
-	return jsonResult(map[string]any{"feature": feature, "issues": issues})
+	return jsonResult(map[string]any{
+		"feature":               feature,
+		"issues_by_repo":        groupIssuesByRepo(issuesResp),
+		"pull_requests_by_repo": groupPRsByRepo(issuesResp.PullRequests),
+	})
+}
+
+func repoKey(name *string) string {
+	if name == nil || *name == "" {
+		return "unassigned"
+	}
+	return *name
+}
+
+func groupIssuesByRepo(resp featureIssuesAPIResponse) map[string]any {
+	type repoGroup struct {
+		ReadyNow []issueAPIEntry `json:"ready_now"`
+		Blocked  []issueAPIEntry `json:"blocked"`
+	}
+	groups := map[string]*repoGroup{}
+	ensure := func(key string) *repoGroup {
+		if groups[key] == nil {
+			groups[key] = &repoGroup{ReadyNow: []issueAPIEntry{}, Blocked: []issueAPIEntry{}}
+		}
+		return groups[key]
+	}
+	for _, iss := range resp.ReadyNow {
+		g := ensure(repoKey(iss.RepoName))
+		g.ReadyNow = append(g.ReadyNow, iss)
+	}
+	for _, iss := range resp.Blocked {
+		g := ensure(repoKey(iss.RepoName))
+		g.Blocked = append(g.Blocked, iss)
+	}
+	out := make(map[string]any, len(groups))
+	for k, g := range groups {
+		out[k] = g
+	}
+	return out
+}
+
+func groupPRsByRepo(prs []prAPIEntry) map[string][]prAPIEntry {
+	out := map[string][]prAPIEntry{}
+	for _, pr := range prs {
+		key := "unassigned"
+		if pr.RepoID != nil && *pr.RepoID != "" {
+			key = *pr.RepoID
+		}
+		out[key] = append(out[key], pr)
+	}
+	return out
+}
+
+// ── list_repos ────────────────────────────────────────────────────────────────
+
+func listReposTool() mcp.Tool {
+	return mcp.NewTool("list_repos",
+		mcp.WithDescription("List repositories in the workspace. Use this to find valid repo names and IDs for create_issue."),
+		mcp.WithReadOnlyHintAnnotation(true),
+	)
+}
+
+func (s *Server) handleListRepos(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var out any
+	if err := s.client.GetJSON(ctx, "/api/repos", &out); err != nil {
+		return toolError("list_repos failed", err), nil
+	}
+	return jsonResult(out)
 }
 
 // ── list_issues ───────────────────────────────────────────────────────────────

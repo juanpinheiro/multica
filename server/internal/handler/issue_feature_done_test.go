@@ -19,18 +19,18 @@ type featureDoneFixture struct {
 }
 
 // newFeatureDoneFixture creates a shared-branch feature with two issues.
-// Both issues start in_progress. targetBranch may be empty to test the
-// "no target_branch → no notification" path.
-func newFeatureDoneFixture(t *testing.T, targetBranch string) featureDoneFixture {
+// Both issues start in_progress. branchSlug may be empty to test the
+// "no branch_slug → no notification" path.
+func newFeatureDoneFixture(t *testing.T, branchSlug string) featureDoneFixture {
 	t.Helper()
 	ctx := context.Background()
 
 	var featureID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO feature (workspace_id, title, status, target_branch)
+		INSERT INTO feature (workspace_id, title, status, branch_slug)
 		VALUES ($1, $2, 'in_progress', NULLIF($3, ''))
 		RETURNING id::text
-	`, testWorkspaceID, fmt.Sprintf("feat-done-%d", time.Now().UnixNano()), targetBranch).Scan(&featureID); err != nil {
+	`, testWorkspaceID, fmt.Sprintf("feat-done-%d", time.Now().UnixNano()), branchSlug).Scan(&featureID); err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
 	t.Cleanup(func() {
@@ -121,15 +121,15 @@ func TestNotifyFeatureReadyForReview(t *testing.T) {
 		}
 	})
 
-	t.Run("feature without target_branch suppresses notification", func(t *testing.T) {
-		// Empty target_branch → NULL in DB → not a shared-branch feature.
+	t.Run("feature without branch_slug suppresses notification", func(t *testing.T) {
+		// Empty branch_slug → NULL in DB → not a shared-branch feature.
 		fix := newFeatureDoneFixture(t, "")
 
 		updateIssueStatus(t, fix.issueAID, "done")
 		updateIssueStatus(t, fix.issueBID, "done")
 
 		if n := countFeatureReadyInboxItems(t, fix.featureID); n != 0 {
-			t.Errorf("want 0 inbox items (no target_branch), got %d", n)
+			t.Errorf("want 0 inbox items (no branch_slug), got %d", n)
 		}
 	})
 

@@ -10,7 +10,16 @@ const apiRepoUrl = "https://github.com/multica-ai/api";
 const webRepoUrl = "https://github.com/multica-ai/web";
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] }),
+  useQuery: (opts: { queryKey?: unknown[] }) =>
+    opts?.queryKey?.[0] === "repos"
+      ? {
+          data: [
+            { id: "repo-1", remote_url: longRepoUrl },
+            { id: "repo-2", remote_url: apiRepoUrl },
+            { id: "repo-3", remote_url: webRepoUrl },
+          ],
+        }
+      : { data: [] },
 }));
 
 vi.mock("@multica/core/features/mutations", () => ({
@@ -43,7 +52,6 @@ vi.mock("@multica/core/paths", () => ({
     id: "workspace-1",
     name: "Test Workspace",
     slug: "test-workspace",
-    repos: [{ url: longRepoUrl }, { url: apiRepoUrl }, { url: webRepoUrl }],
   }),
   useWorkspacePaths: () => ({
     projectDetail: (id: string) => `/test-workspace/features/${id}`,
@@ -53,6 +61,7 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
   agentListOptions: () => ({ queryKey: ["agents"], queryFn: vi.fn() }),
+  repoListOptions: () => ({ queryKey: ["repos"], queryFn: vi.fn() }),
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({

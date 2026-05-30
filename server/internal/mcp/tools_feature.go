@@ -29,8 +29,8 @@ func createFeatureTool() mcp.Tool {
 		mcp.WithString("priority",
 			mcp.Description("Priority: urgent, high, medium, low, or none."),
 		),
-		mcp.WithString("target_branch",
-			mcp.Description("Git branch all child issues will converge on. Omit for per-issue branches."),
+		mcp.WithString("branch_slug",
+			mcp.Description("Slug for the feature branch (e.g. 'auth-v2' → branch 'feature/auth-v2'). Omit to derive from the feature identifier."),
 		),
 		mcp.WithString("lead_id",
 			mcp.Description("UUID of the agent or member assigned as feature lead."),
@@ -56,8 +56,8 @@ func (s *Server) handleCreateFeature(ctx context.Context, req mcp.CallToolReques
 	if v := req.GetString("priority", ""); v != "" {
 		body["priority"] = v
 	}
-	if v := req.GetString("target_branch", ""); v != "" {
-		body["target_branch"] = v
+	if v := req.GetString("branch_slug", ""); v != "" {
+		body["branch_slug"] = v
 	}
 	if v := req.GetString("lead_id", ""); v != "" {
 		body["lead_id"] = v
@@ -74,7 +74,7 @@ func (s *Server) handleCreateFeature(ctx context.Context, req mcp.CallToolReques
 
 func updateFeatureTool() mcp.Tool {
 	return mcp.NewTool("update_feature",
-		mcp.WithDescription("Update one or more fields of a feature. Only provided fields are changed. Pass target_branch as empty string to clear it."),
+		mcp.WithDescription("Update one or more fields of a feature. Only provided fields are changed. Pass branch_slug as empty string to clear it."),
 		mcp.WithString("feature_id",
 			mcp.Description("UUID of the feature to update."),
 			mcp.Required(),
@@ -88,8 +88,8 @@ func updateFeatureTool() mcp.Tool {
 		mcp.WithString("priority",
 			mcp.Description("New priority: urgent, high, medium, low, or none."),
 		),
-		mcp.WithString("target_branch",
-			mcp.Description("New target branch. Pass empty string to clear."),
+		mcp.WithString("branch_slug",
+			mcp.Description("New branch slug. Pass empty string to clear."),
 		),
 		mcp.WithString("lead_id",
 			mcp.Description("UUID of the new lead agent or member."),
@@ -112,9 +112,9 @@ func (s *Server) handleUpdateFeature(ctx context.Context, req mcp.CallToolReques
 			}
 		}
 	}
-	// target_branch is included when explicitly provided, even as empty string (clears the field).
-	if _, ok := args["target_branch"]; ok {
-		body["target_branch"] = req.GetString("target_branch", "")
+	// branch_slug is included when explicitly provided, even as empty string (clears the field).
+	if _, ok := args["branch_slug"]; ok {
+		body["branch_slug"] = req.GetString("branch_slug", "")
 	}
 
 	var out any

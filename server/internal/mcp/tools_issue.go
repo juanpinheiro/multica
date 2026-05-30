@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -40,6 +41,9 @@ func createIssueTool() mcp.Tool {
 		mcp.WithString("assignee_type",
 			mcp.Description("Assignee type: agent or member."),
 		),
+		mcp.WithString("repo",
+			mcp.Description("Repository name or UUID to attach this issue to. Omit for a coordination issue with no code target."),
+		),
 	)
 }
 
@@ -68,6 +72,13 @@ func (s *Server) handleCreateIssue(ctx context.Context, req mcp.CallToolRequest)
 	}
 	if v := req.GetString("assignee_type", ""); v != "" {
 		body["assignee_type"] = v
+	}
+	if repo := req.GetString("repo", ""); repo != "" {
+		repoID, err := s.resolveRepoID(ctx, repo)
+		if err != nil {
+			return toolError("create_issue: unknown repo", err), nil
+		}
+		body["repo_id"] = repoID
 	}
 
 	var out any
@@ -272,4 +283,22 @@ func (s *Server) handleLinkIssueDependency(ctx context.Context, req mcp.CallTool
 		return toolError("link_issue_dependency failed", err), nil
 	}
 	return jsonResult(out)
+}
+
+// resolveRepoID looks up a repo by name or UUID within the active workspace.
+// It calls GET /api/repos and matches by id or name. Returns the UUID string.
+func (s *Server) resolveRepoID(ctx context.Context, nameOrID string) (string, error) {
+	var repos []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := s.client.GetJSON(ctx, "/api/repos", &repos); err != nil {
+		return "", err
+	}
+	for _, r := range repos {
+		if r.ID == nameOrID || r.Name == nameOrID {
+			return r.ID, nil
+		}
+	}
+	return "", fmt.Errorf("repo %q not found in workspace", nameOrID)
 }

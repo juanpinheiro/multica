@@ -37,7 +37,6 @@ type WorkspaceResponse struct {
 	Description *string `json:"description"`
 	Context     *string `json:"context"`
 	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
 	IssuePrefix string  `json:"issue_prefix"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
@@ -51,13 +50,6 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
-	var repos any
-	if w.Repos != nil {
-		json.Unmarshal(w.Repos, &repos)
-	}
-	if repos == nil {
-		repos = []any{}
-	}
 	return WorkspaceResponse{
 		ID:          uuidToString(w.ID),
 		Name:        w.Name,
@@ -65,7 +57,6 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		Description: textToPtr(w.Description),
 		Context:     textToPtr(w.Context),
 		Settings:    settings,
-		Repos:       repos,
 		IssuePrefix: w.IssuePrefix,
 		CreatedAt:   timestampToString(w.CreatedAt),
 		UpdatedAt:   timestampToString(w.UpdatedAt),
@@ -208,7 +199,6 @@ type UpdateWorkspaceRequest struct {
 	Description *string `json:"description"`
 	Context     *string `json:"context"`
 	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
 	IssuePrefix *string `json:"issue_prefix"`
 }
 
@@ -245,10 +235,6 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Settings != nil {
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
-	}
-	if req.Repos != nil {
-		reposJSON, _ := json.Marshal(req.Repos)
-		params.Repos = reposJSON
 	}
 	if req.IssuePrefix != nil {
 		prefix := strings.ToUpper(strings.TrimSpace(*req.IssuePrefix))

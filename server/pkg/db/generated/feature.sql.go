@@ -47,22 +47,22 @@ func (q *Queries) CountNonDoneFeatureSiblings(ctx context.Context, arg CountNonD
 const createFeature = `-- name: CreateFeature :one
 INSERT INTO feature (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, target_branch
+    lead_type, lead_id, priority, branch_slug
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, target_branch
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug
 `
 
 type CreateFeatureParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	Title        string      `json:"title"`
-	Description  pgtype.Text `json:"description"`
-	Icon         pgtype.Text `json:"icon"`
-	Status       string      `json:"status"`
-	LeadType     pgtype.Text `json:"lead_type"`
-	LeadID       pgtype.UUID `json:"lead_id"`
-	Priority     string      `json:"priority"`
-	TargetBranch pgtype.Text `json:"target_branch"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Title       string      `json:"title"`
+	Description pgtype.Text `json:"description"`
+	Icon        pgtype.Text `json:"icon"`
+	Status      string      `json:"status"`
+	LeadType    pgtype.Text `json:"lead_type"`
+	LeadID      pgtype.UUID `json:"lead_id"`
+	Priority    string      `json:"priority"`
+	BranchSlug  pgtype.Text `json:"branch_slug"`
 }
 
 func (q *Queries) CreateFeature(ctx context.Context, arg CreateFeatureParams) (Feature, error) {
@@ -75,7 +75,7 @@ func (q *Queries) CreateFeature(ctx context.Context, arg CreateFeatureParams) (F
 		arg.LeadType,
 		arg.LeadID,
 		arg.Priority,
-		arg.TargetBranch,
+		arg.BranchSlug,
 	)
 	var i Feature
 	err := row.Scan(
@@ -90,7 +90,7 @@ func (q *Queries) CreateFeature(ctx context.Context, arg CreateFeatureParams) (F
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
-		&i.TargetBranch,
+		&i.BranchSlug,
 	)
 	return i, err
 }
@@ -111,7 +111,7 @@ func (q *Queries) DeleteFeature(ctx context.Context, arg DeleteFeatureParams) er
 }
 
 const getFeature = `-- name: GetFeature :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, target_branch FROM feature
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug FROM feature
 WHERE id = $1
 `
 
@@ -130,13 +130,13 @@ func (q *Queries) GetFeature(ctx context.Context, id pgtype.UUID) (Feature, erro
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
-		&i.TargetBranch,
+		&i.BranchSlug,
 	)
 	return i, err
 }
 
 const getFeatureInWorkspace = `-- name: GetFeatureInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, target_branch FROM feature
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug FROM feature
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -160,7 +160,7 @@ func (q *Queries) GetFeatureInWorkspace(ctx context.Context, arg GetFeatureInWor
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
-		&i.TargetBranch,
+		&i.BranchSlug,
 	)
 	return i, err
 }
@@ -231,8 +231,54 @@ func (q *Queries) GetFeatureOpenPR(ctx context.Context, featureID pgtype.UUID) (
 	return i, err
 }
 
+const listFeatureIssueSummaries = `-- name: ListFeatureIssueSummaries :many
+SELECT i.id, i.title, i.number, i.repo_id,
+       COALESCE(r.name, '') AS repo_name
+FROM issue i
+LEFT JOIN repo r ON r.id = i.repo_id AND r.workspace_id = i.workspace_id
+WHERE i.feature_id = $1
+ORDER BY i.number ASC
+`
+
+type ListFeatureIssueSummariesRow struct {
+	ID       pgtype.UUID `json:"id"`
+	Title    string      `json:"title"`
+	Number   int32       `json:"number"`
+	RepoID   pgtype.UUID `json:"repo_id"`
+	RepoName string      `json:"repo_name"`
+}
+
+// Returns minimal issue data for cross-repo brief injection.
+// Used by the daemon claim handler to build the cross-repo context section
+// when a feature spans multiple repos.
+func (q *Queries) ListFeatureIssueSummaries(ctx context.Context, featureID pgtype.UUID) ([]ListFeatureIssueSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listFeatureIssueSummaries, featureID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFeatureIssueSummariesRow{}
+	for rows.Next() {
+		var i ListFeatureIssueSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Number,
+			&i.RepoID,
+			&i.RepoName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFeatures = `-- name: ListFeatures :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, target_branch FROM feature
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug FROM feature
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -266,7 +312,7 @@ func (q *Queries) ListFeatures(ctx context.Context, arg ListFeaturesParams) ([]F
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Priority,
-			&i.TargetBranch,
+			&i.BranchSlug,
 		); err != nil {
 			return nil, err
 		}
@@ -287,22 +333,22 @@ UPDATE feature SET
     priority = COALESCE($6, priority),
     lead_type = $7,
     lead_id = $8,
-    target_branch = $9,
+    branch_slug = $9,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, target_branch
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug
 `
 
 type UpdateFeatureParams struct {
-	ID           pgtype.UUID `json:"id"`
-	Title        pgtype.Text `json:"title"`
-	Description  pgtype.Text `json:"description"`
-	Icon         pgtype.Text `json:"icon"`
-	Status       pgtype.Text `json:"status"`
-	Priority     pgtype.Text `json:"priority"`
-	LeadType     pgtype.Text `json:"lead_type"`
-	LeadID       pgtype.UUID `json:"lead_id"`
-	TargetBranch pgtype.Text `json:"target_branch"`
+	ID          pgtype.UUID `json:"id"`
+	Title       pgtype.Text `json:"title"`
+	Description pgtype.Text `json:"description"`
+	Icon        pgtype.Text `json:"icon"`
+	Status      pgtype.Text `json:"status"`
+	Priority    pgtype.Text `json:"priority"`
+	LeadType    pgtype.Text `json:"lead_type"`
+	LeadID      pgtype.UUID `json:"lead_id"`
+	BranchSlug  pgtype.Text `json:"branch_slug"`
 }
 
 func (q *Queries) UpdateFeature(ctx context.Context, arg UpdateFeatureParams) (Feature, error) {
@@ -315,7 +361,7 @@ func (q *Queries) UpdateFeature(ctx context.Context, arg UpdateFeatureParams) (F
 		arg.Priority,
 		arg.LeadType,
 		arg.LeadID,
-		arg.TargetBranch,
+		arg.BranchSlug,
 	)
 	var i Feature
 	err := row.Scan(
@@ -330,7 +376,7 @@ func (q *Queries) UpdateFeature(ctx context.Context, arg UpdateFeatureParams) (F
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Priority,
-		&i.TargetBranch,
+		&i.BranchSlug,
 	)
 	return i, err
 }

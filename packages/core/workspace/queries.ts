@@ -5,6 +5,7 @@ import type { Agent, Squad, Workspace } from "../types";
 export const workspaceKeys = {
   all: (wsId: string) => ["workspaces", wsId] as const,
   list: () => ["workspaces", "list"] as const,
+  repos: (wsId: string) => ["workspaces", wsId, "repos"] as const,
   members: (wsId: string) => ["workspaces", wsId, "members"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
   squads: (wsId: string) => ["workspaces", wsId, "squads"] as const,
@@ -29,6 +30,14 @@ export function workspaceBySlugOptions(slug: string) {
   return queryOptions({
     ...workspaceListOptions(),
     select: (list: Workspace[]) => list.find((w) => w.slug === slug) ?? null,
+  });
+}
+
+export function repoListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.repos(wsId),
+    queryFn: () => api.listRepos(),
+    enabled: !!wsId,
   });
 }
 

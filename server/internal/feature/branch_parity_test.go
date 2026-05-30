@@ -39,13 +39,19 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// sqlResolve evaluates the SQL branch-resolution expression used in the claim
-// query against the same inputs as Go's Resolve. NULLIF strips empty strings
-// from metadata so both sides skip them consistently. The query accepts:
-//   - $1 :: text   — feature.target_branch (nullable)
-//   - $2 :: jsonb  — issue.metadata (nullable JSONB)
-//   - $3 :: text   — issue identifier (e.g. "MUL-487")
-func sqlResolve(ctx context.Context, featureTargetBranch *string, metadata map[string]any, identifier string) (string, error) {
+// sqlResolve calls the feature_resolve_branch SQL function — the SAME function
+// the claim query (server/pkg/db/queries/agent.sql) uses to gate the branch.
+// Calling the function directly (rather than a hand-copied mirror of its body)
+// is what makes this a true parity test: any change to the function is seen
+// here, and any change to Go's Resolve that diverges from it fails the test.
+//
+// Parameters mirror the function signature:
+//   - $1 :: jsonb — issue.metadata (nullable)
+//   - $2 :: uuid  — feature id, NULL when no feature (the feature-branch fallback)
+//   - $3 :: text  — feature.branch_slug (nullable)
+//   - $4 :: text  — workspace.issue_prefix (e.g. "MUL")
+//   - $5 :: int   — issue.number
+func sqlResolve(ctx context.Context, metadata map[string]any, featureID *string, branchSlug *string, issuePrefix string, issueNumber int) (string, error) {
 	var metaJSON []byte
 	if metadata != nil {
 		var err error
@@ -55,8 +61,8 @@ func sqlResolve(ctx context.Context, featureTargetBranch *string, metadata map[s
 		}
 	}
 
-	const q = `SELECT COALESCE(NULLIF($1::text,''), NULLIF(($2::jsonb)->>'target_branch',''), 'issue/' || $3::text)`
-	row := parityPool.QueryRow(ctx, q, featureTargetBranch, metaJSON, identifier)
+	const q = `SELECT feature_resolve_branch($1::jsonb, $2::uuid, $3::text, $4::text, $5::int)`
+	row := parityPool.QueryRow(ctx, q, metaJSON, featureID, branchSlug, issuePrefix, issueNumber)
 
 	var result string
 	if err := row.Scan(&result); err != nil {
@@ -72,62 +78,87 @@ func TestBranchResolverParityWithSQL(t *testing.T) {
 
 	ctx := context.Background()
 
+	// A fixed feature UUID. The Go resolver's feature fallback uses
+	// Feature.Identifier (the daemon sets it to the feature UUID), and the SQL
+	// function's fallback uses feature_id::text — so the Go Feature.Identifier
+	// must equal the UUID passed as featureID for the two to agree.
+	const featureUUID = "11111111-1111-1111-1111-111111111111"
+
 	cases := []struct {
-		name       string
-		issue      feature.IssueForBranch
-		f          *feature.FeatureForBranch
+		name         string
+		metadata     map[string]any
+		featPresent  bool
+		branchSlug   *string
+		issuePrefix  string
+		issueNumber  int
 	}{
 		{
-			name:  "feature nil → derived branch",
-			issue: feature.IssueForBranch{Identifier: "MUL-487", Metadata: nil},
-			f:     nil,
+			name:        "feature nil → derived issue/<prefix>-<number>",
+			metadata:    nil,
+			featPresent: false,
+			issuePrefix: "MUL",
+			issueNumber: 487,
 		},
 		{
-			name:  "feature TargetBranch nil, no metadata → derived branch",
-			issue: feature.IssueForBranch{Identifier: "MUL-100", Metadata: map[string]any{}},
-			f:     &feature.FeatureForBranch{TargetBranch: nil},
+			name:        "feature present, branch_slug nil → feature/<feature uuid>",
+			metadata:    nil,
+			featPresent: true,
+			branchSlug:  nil,
+			issuePrefix: "MUL",
+			issueNumber: 100,
 		},
 		{
-			name:  "feature TargetBranch set → shared branch",
-			issue: feature.IssueForBranch{Identifier: "MUL-300", Metadata: nil},
-			f:     &feature.FeatureForBranch{TargetBranch: ptr("feature/auth-v2")},
+			name:        "feature branch_slug set → feature/<slug>",
+			metadata:    nil,
+			featPresent: true,
+			branchSlug:  ptr("auth-v2"),
+			issuePrefix: "MUL",
+			issueNumber: 300,
 		},
 		{
-			name: "issue Metadata target_branch set → per-issue override",
-			issue: feature.IssueForBranch{
-				Identifier: "MUL-400",
-				Metadata:   map[string]any{"target_branch": "issue/my-override"},
-			},
-			f: &feature.FeatureForBranch{TargetBranch: nil},
+			name:        "metadata target_branch wins over feature branch_slug",
+			metadata:    map[string]any{"target_branch": "issue/per-issue"},
+			featPresent: true,
+			branchSlug:  ptr("shared"),
+			issuePrefix: "MUL",
+			issueNumber: 500,
 		},
 		{
-			name: "both set → feature wins",
-			issue: feature.IssueForBranch{
-				Identifier: "MUL-500",
-				Metadata:   map[string]any{"target_branch": "issue/per-issue"},
-			},
-			f: &feature.FeatureForBranch{TargetBranch: ptr("feature/shared")},
+			name:        "metadata target_branch wins over feature with no branch_slug",
+			metadata:    map[string]any{"target_branch": "issue/my-override"},
+			featPresent: true,
+			branchSlug:  nil,
+			issuePrefix: "MUL",
+			issueNumber: 400,
 		},
 		{
-			name: "Metadata target_branch empty string → derived branch",
-			issue: feature.IssueForBranch{
-				Identifier: "MUL-600",
-				Metadata:   map[string]any{"target_branch": ""},
-			},
-			f: &feature.FeatureForBranch{TargetBranch: nil},
+			name:        "metadata target_branch empty string → feature branch",
+			metadata:    map[string]any{"target_branch": ""},
+			featPresent: true,
+			branchSlug:  nil,
+			issuePrefix: "MUL",
+			issueNumber: 600,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			goBranch, _ := feature.Resolve(tc.issue, tc.f)
-
-			var featureTargetBranch *string
-			if tc.f != nil {
-				featureTargetBranch = tc.f.TargetBranch
+			issue := feature.Issue{
+				Identifier: tc.issuePrefix + "-" + fmt.Sprint(tc.issueNumber),
+				Metadata:   tc.metadata,
 			}
 
-			sqlBranch, err := sqlResolve(ctx, featureTargetBranch, tc.issue.Metadata, tc.issue.Identifier)
+			var f *feature.Feature
+			var featureID *string
+			if tc.featPresent {
+				f = &feature.Feature{Identifier: featureUUID, BranchSlug: tc.branchSlug}
+				id := featureUUID
+				featureID = &id
+			}
+
+			goBranch, _ := feature.Resolve(issue, f, nil)
+
+			sqlBranch, err := sqlResolve(ctx, tc.metadata, featureID, tc.branchSlug, tc.issuePrefix, tc.issueNumber)
 			if err != nil {
 				t.Fatalf("sqlResolve: %v", err)
 			}

@@ -93,6 +93,28 @@ type Task struct {
 	// warning to the agent brief so agents don't force-push or rewrite history
 	// over each other's work.
 	IsSharedBranch bool `json:"is_shared_branch,omitempty"`
+	// RepoName is the human-readable name of the repo this issue targets.
+	// Empty when the issue has no repo_id.
+	RepoName string `json:"repo_name,omitempty"`
+	// RepoRemoteURL is the remote URL of the repo this issue targets.
+	// Used to direct agents to the correct repository for checkout.
+	// Empty when the issue has no repo_id.
+	RepoRemoteURL string `json:"repo_remote_url,omitempty"`
+	// RepoLocalPath is the local filesystem path for the repo (from repo.local_path).
+	// May be relative to the manifest root or absolute. Empty when not configured.
+	RepoLocalPath string `json:"repo_local_path,omitempty"`
+	// CrossRepoSiblings lists sibling issues in the same feature that target
+	// different repos. Only populated when the feature spans multiple repos.
+	// Used by the daemon to inject cross-repo context into the agent brief.
+	CrossRepoSiblings []CrossRepoSiblingData `json:"cross_repo_siblings,omitempty"`
+}
+
+// CrossRepoSiblingData describes a sibling issue in a different repo within
+// the same feature. Used for cross-repo context injection in the agent brief.
+type CrossRepoSiblingData struct {
+	IssueIdentifier string `json:"issue_identifier"`
+	IssueTitle      string `json:"issue_title"`
+	RepoName        string `json:"repo_name"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

@@ -512,3 +512,90 @@ func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 		})
 	}
 }
+
+// TestCrossRepoContextSectionPresent verifies that the "## Cross-repo context"
+// section appears when the task carries cross-repo sibling data, and lists each
+// sibling's identifier, title, and repo name.
+func TestCrossRepoContextSectionPresent(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+		CrossRepoSiblings: []CrossRepoSiblingContext{
+			{IssueIdentifier: "MUL-42", IssueTitle: "Add auth endpoints", RepoName: "backend"},
+			{IssueIdentifier: "MUL-44", IssueTitle: "Add QA tests", RepoName: "qa"},
+		},
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{
+		"## Cross-repo context",
+		"MUL-42",
+		"Add auth endpoints",
+		"backend",
+		"MUL-44",
+		"Add QA tests",
+		"qa",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cross-repo context section missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+}
+
+// TestCrossRepoContextSectionAbsentWithoutSiblings verifies that no cross-repo
+// section is emitted when there are no cross-repo siblings.
+func TestCrossRepoContextSectionAbsentWithoutSiblings(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{
+			name: "no siblings",
+			ctx:  TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"},
+		},
+		{
+			name: "empty siblings slice",
+			ctx: TaskContextForEnv{
+				IssueID:           "22222222-3333-4444-5555-666666666666",
+				CrossRepoSiblings: []CrossRepoSiblingContext{},
+			},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			if strings.Contains(out, "## Cross-repo context") {
+				t.Errorf("[%s] cross-repo context section must not appear without siblings\n--- output ---\n%s", tc.name, out)
+			}
+		})
+	}
+}
+
+// TestCrossRepoCheckoutUsesSpecificURLWhenAvailable verifies that when both
+// RepoRemoteURL and IsSharedBranch are set, the repos checkout instruction
+// uses the specific URL from RepoRemoteURL instead of the generic <url>
+// placeholder.
+func TestCrossRepoCheckoutUsesSpecificURLWhenAvailable(t *testing.T) {
+	t.Parallel()
+	const (
+		remoteURL = "github.com/voce/backend"
+		branch    = "feature/auth-v2"
+	)
+	ctx := TaskContextForEnv{
+		IssueID:        "11111111-2222-3333-4444-555555555555",
+		TargetBranch:   branch,
+		IsSharedBranch: true,
+		RepoRemoteURL:  remoteURL,
+		Repos: []RepoContextForEnv{
+			{URL: remoteURL, Description: "backend"},
+		},
+	}
+	out := buildMetaSkillContent("claude", ctx)
+	want := "multica repo checkout " + remoteURL + " --ref " + branch
+	if !strings.Contains(out, want) {
+		t.Errorf("repos section must emit specific checkout command %q\n--- output ---\n%s", want, out)
+	}
+}

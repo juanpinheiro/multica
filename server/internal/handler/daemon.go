@@ -193,20 +193,24 @@ func workspaceReposVersion(repos []RepoData) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func parseWorkspaceRepos(raw []byte) []RepoData {
-	if len(raw) == 0 {
+// workspaceRepoData loads the workspace's first-class repos and maps them to
+// the daemon wire shape. The daemon keys its allowlist and repo cache on URL;
+// the repo name rides along as the human-facing description.
+func (h *Handler) workspaceRepoData(ctx context.Context, workspaceID pgtype.UUID) []RepoData {
+	rows, err := h.Queries.ListReposInWorkspace(ctx, workspaceID)
+	if err != nil {
 		return []RepoData{}
 	}
-
-	var repos []RepoData
-	if err := json.Unmarshal(raw, &repos); err != nil {
-		return []RepoData{}
+	repos := make([]RepoData, 0, len(rows))
+	for _, row := range rows {
+		repos = append(repos, RepoData{URL: row.RemoteUrl, Description: row.Name})
 	}
 	return normalizeWorkspaceRepos(repos)
 }
 
-func workspaceReposResponse(workspaceID string, raw []byte, settingsRaw []byte) daemonWorkspaceReposResponse {
-	repos := parseWorkspaceRepos(raw)
+// workspaceReposResponse builds the daemon repos payload from the already
+// normalized repos produced by workspaceRepoData.
+func workspaceReposResponse(workspaceID string, repos []RepoData, settingsRaw []byte) daemonWorkspaceReposResponse {
 	resp := daemonWorkspaceReposResponse{
 		WorkspaceID:  workspaceID,
 		Repos:        repos,
@@ -355,7 +359,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"runtimes": resp,
 	})
 
-	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
+	repoResp := workspaceReposResponse(req.WorkspaceID, h.workspaceRepoData(r.Context(), wsUUID), ws.Settings)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"runtimes":      resp,
@@ -453,13 +457,14 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
+	wsUUID := parseUUID(workspaceID)
+	ws, err := h.Queries.GetWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
+	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, h.workspaceRepoData(r.Context(), wsUUID), ws.Settings))
 }
 
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
@@ -1130,15 +1135,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 
 			var projectRepos []RepoData
-			var featureForBranch *feature.FeatureForBranch
+			var featureForBranch *feature.Feature
 			if issue.FeatureID.Valid {
 				resp.FeatureID = uuidToString(issue.FeatureID)
 				if proj, err := h.Queries.GetFeature(r.Context(), issue.FeatureID); err == nil {
 					resp.FeatureTitle = proj.Title
-					featureForBranch = &feature.FeatureForBranch{}
-					if proj.TargetBranch.Valid {
-						tb := proj.TargetBranch.String
-						featureForBranch.TargetBranch = &tb
+					featureForBranch = &feature.Feature{Identifier: uuidToString(proj.ID)}
+					if proj.BranchSlug.Valid {
+						slug := proj.BranchSlug.String
+						featureForBranch.BranchSlug = &slug
 					}
 				}
 				if rows := h.listFeatureResourcesForFeature(r.Context(), issue.FeatureID); len(rows) > 0 {
@@ -1176,11 +1181,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 			if len(projectRepos) > 0 {
 				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
+			} else if repos := h.workspaceRepoData(r.Context(), issue.WorkspaceID); len(repos) > 0 {
+				resp.Repos = repos
 			}
 
 			// Resolve the git branch this task should target. feature.Resolve
@@ -1189,12 +1191,56 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// caught by server/internal/feature/branch_parity_test.go.
 			issuePrefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 			resp.TargetBranch, resp.IsSharedBranch = feature.Resolve(
-				feature.IssueForBranch{
+				feature.Issue{
 					Identifier: issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
 					Metadata:   parseIssueMetadata(issue.Metadata),
 				},
 				featureForBranch,
+				nil,
 			)
+
+			// Resolve the issue's target repo and populate cross-repo context.
+			if issue.RepoID.Valid {
+				if repo, err := h.Queries.GetRepoInWorkspace(r.Context(), db.GetRepoInWorkspaceParams{
+					ID:          issue.RepoID,
+					WorkspaceID: issue.WorkspaceID,
+				}); err == nil {
+					resp.RepoName = repo.Name
+					resp.RepoRemoteURL = repo.RemoteUrl
+					if repo.LocalPath.Valid {
+						resp.RepoLocalPath = repo.LocalPath.String
+					}
+				} else {
+					slog.Debug("task claim: failed to load issue repo",
+						"issue_id", uuidToString(issue.ID),
+						"repo_id", uuidToString(issue.RepoID),
+						"error", err,
+					)
+				}
+			}
+
+			// Cross-repo context: when the feature spans multiple repos, surface
+			// sibling issues in other repos so the agent understands its slice's
+			// place in the overall feature. Only populated when the current issue
+			// targets a known repo; otherwise there's no "current repo" to exclude.
+			if issue.FeatureID.Valid && resp.RepoName != "" {
+				if summaries, err := h.Queries.ListFeatureIssueSummaries(r.Context(), issue.FeatureID); err == nil {
+					var siblings []CrossRepoSiblingData
+					for _, s := range summaries {
+						if s.ID == issue.ID || s.RepoName == "" || s.RepoName == resp.RepoName {
+							continue
+						}
+						siblings = append(siblings, CrossRepoSiblingData{
+							IssueIdentifier: issuePrefix + "-" + strconv.Itoa(int(s.Number)),
+							IssueTitle:      s.Title,
+							RepoName:        s.RepoName,
+						})
+					}
+					if len(siblings) > 0 {
+						resp.CrossRepoSiblings = siblings
+					}
+				}
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1258,11 +1304,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
-			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
+			if repos := h.workspaceRepoData(r.Context(), cs.WorkspaceID); len(repos) > 0 {
+				resp.Repos = repos
 			}
 			if !task.ForceFreshSession {
 				// Resume chat sessions only when the stored pointer was produced
@@ -1337,11 +1380,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
 				}
 				if len(resp.Repos) == 0 {
-					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-						var repos []RepoData
-						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-							resp.Repos = repos
-						}
+					if repos := h.workspaceRepoData(r.Context(), ap.WorkspaceID); len(repos) > 0 {
+						resp.Repos = repos
 					}
 				}
 			}
@@ -1405,11 +1445,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 			if len(projectRepos) > 0 {
 				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
+			} else if repos := h.workspaceRepoData(r.Context(), parseUUID(qc.WorkspaceID)); len(repos) > 0 {
+				resp.Repos = repos
 			}
 
 			// Squad-leader briefing injection for quick-create tasks. When

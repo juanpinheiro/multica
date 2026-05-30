@@ -88,15 +88,17 @@ func (s *popRecordingLocalSkillImportStore) PopPending(ctx context.Context, runt
 
 func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 	t.Helper()
-	data, err := json.Marshal(repos)
-	if err != nil {
-		t.Fatalf("marshal repos: %v", err)
-	}
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, data, testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
+	// Repos are first-class rows now; name drives ListReposInWorkspace ordering,
+	// so seed sequential names to preserve the caller's insertion order.
+	for i, repo := range repos {
+		if _, err := testPool.Exec(context.Background(),
+			`INSERT INTO repo (workspace_id, name, remote_url) VALUES ($1, $2, $3)`,
+			testWorkspaceID, fmt.Sprintf("repo-%d", i), repo["url"]); err != nil {
+			t.Fatalf("insert repo: %v", err)
+		}
 	}
 	t.Cleanup(func() {
-		if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID); err != nil {
+		if _, err := testPool.Exec(context.Background(), `DELETE FROM repo WHERE workspace_id = $1`, testWorkspaceID); err != nil {
 			t.Fatalf("reset workspace repos: %v", err)
 		}
 	})
@@ -1223,16 +1225,23 @@ func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T)
 
 	version1 := getReposVersion()
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/web.git","description":"frontend"},{"url":"git@example.com:team/api.git","description":"backend"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
+	// Same URL set, but renamed (the name is the daemon "description") and thus
+	// reordered by ListReposInWorkspace's ORDER BY name — the version is keyed on
+	// the sorted URL set, so it must not change.
+	if _, err := testPool.Exec(context.Background(), `UPDATE repo SET name = 'z-' || name WHERE workspace_id = $1`, testWorkspaceID); err != nil {
+		t.Fatalf("rename workspace repos: %v", err)
 	}
 	version2 := getReposVersion()
 	if version1 != version2 {
 		t.Fatalf("expected repos_version to ignore order/description changes, got %s vs %s", version1, version2)
 	}
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/api.git","description":"backend"},{"url":"git@example.com:team/mobile.git","description":"mobile"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
+	// Change the URL set (web → mobile): the version must change.
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM repo WHERE workspace_id = $1 AND remote_url = $2`, testWorkspaceID, "git@example.com:team/web.git"); err != nil {
+		t.Fatalf("delete web repo: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `INSERT INTO repo (workspace_id, name, remote_url) VALUES ($1, $2, $3)`, testWorkspaceID, "mobile", "git@example.com:team/mobile.git"); err != nil {
+		t.Fatalf("insert mobile repo: %v", err)
 	}
 	version3 := getReposVersion()
 	if strings.EqualFold(version2, version3) {

@@ -10,7 +10,7 @@ import {
   useDeleteFeatureResource,
 } from "@multica/core/features";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { repoListOptions } from "@multica/core/workspace/queries";
 import type {
   GithubRepoResourceRef,
   FeatureResource,
@@ -36,7 +36,7 @@ import { useT } from "../../i18n";
 export function FeatureResourcesSection({ featureId }: { featureId: string }) {
   const { t } = useT("features");
   const wsId = useWorkspaceId();
-  const workspace = useCurrentWorkspace();
+  const { data: repos = [] } = useQuery(repoListOptions(wsId));
   const [open, setOpen] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
@@ -54,8 +54,9 @@ export function FeatureResourcesSection({ featureId }: { featureId: string }) {
   );
 
   const repoQuery = repoSearch.trim().toLowerCase();
-  const filteredRepos =
-    workspace?.repos?.filter((repo) => repo.url.toLowerCase().includes(repoQuery)) ?? [];
+  const filteredRepos = repos.filter((repo) =>
+    repo.remote_url.toLowerCase().includes(repoQuery),
+  );
 
   const handleAttach = async (url: string) => {
     try {
@@ -135,7 +136,7 @@ export function FeatureResourcesSection({ featureId }: { featureId: string }) {
               <div className="text-xs font-medium text-muted-foreground">
                 {t(($) => $.resources.popover_title)}
               </div>
-              {workspace?.repos && workspace.repos.length > 0 && (
+              {repos.length > 0 && (
                 <>
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -155,19 +156,19 @@ export function FeatureResourcesSection({ featureId }: { featureId: string }) {
                       </p>
                     )}
                     {filteredRepos.map((repo) => {
-                      const isAttached = attachedUrls.has(repo.url);
+                      const isAttached = attachedUrls.has(repo.remote_url);
                       const isDisabled = isAttached || createResource.isPending;
                       return (
                         // Use aria-disabled instead of the native `disabled` attribute so
                         // hover events still reach the tooltip trigger on attached rows
                         // (browsers suppress pointer events on disabled form controls).
                         <button
-                          key={repo.url}
+                          key={repo.id}
                           type="button"
                           aria-disabled={isDisabled}
                           onClick={async () => {
                             if (isDisabled) return;
-                            await handleAttach(repo.url);
+                            await handleAttach(repo.remote_url);
                             setAddOpen(false);
                           }}
                           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
@@ -176,10 +177,10 @@ export function FeatureResourcesSection({ featureId }: { featureId: string }) {
                           <Tooltip>
                             <TooltipTrigger
                               render={
-                                <span className="truncate flex-1">{repo.url}</span>
+                                <span className="truncate flex-1">{repo.remote_url}</span>
                               }
                             />
-                            <TooltipContent side="top">{repo.url}</TooltipContent>
+                            <TooltipContent side="top">{repo.remote_url}</TooltipContent>
                           </Tooltip>
                           {isAttached && (
                             <span className="text-[10px] text-muted-foreground">

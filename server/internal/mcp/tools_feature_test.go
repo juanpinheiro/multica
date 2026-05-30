@@ -95,17 +95,17 @@ func TestMCPCreateFeatureIncludesOptionalFields(t *testing.T) {
 	sess := newFeatureSession(t, cb)
 
 	callTool(t, sess, "create_feature", map[string]any{
-		"title":         "My Feature",
-		"description":   "desc",
-		"priority":      "high",
-		"target_branch": "feature/auth-v2",
-		"lead_id":       "agent-uuid",
+		"title":       "My Feature",
+		"description": "desc",
+		"priority":    "high",
+		"branch_slug": "auth-v2",
+		"lead_id":     "agent-uuid",
 	})
 	if cb.lastBody["priority"] != "high" {
 		t.Errorf("priority = %v, want high", cb.lastBody["priority"])
 	}
-	if cb.lastBody["target_branch"] != "feature/auth-v2" {
-		t.Errorf("target_branch = %v, want feature/auth-v2", cb.lastBody["target_branch"])
+	if cb.lastBody["branch_slug"] != "auth-v2" {
+		t.Errorf("branch_slug = %v, want auth-v2", cb.lastBody["branch_slug"])
 	}
 	if cb.lastBody["lead_id"] != "agent-uuid" {
 		t.Errorf("lead_id = %v, want agent-uuid", cb.lastBody["lead_id"])
@@ -185,17 +185,17 @@ func TestMCPUpdateFeatureOmitsUnprovidedFields(t *testing.T) {
 	}
 }
 
-func TestMCPUpdateFeatureClearsTargetBranch(t *testing.T) {
+func TestMCPUpdateFeatureClearsBranchSlug(t *testing.T) {
 	t.Parallel()
 	cb := newCapturingBackend(t, http.StatusOK, map[string]any{"id": "feat-1"})
 	sess := newFeatureSession(t, cb)
 
 	callTool(t, sess, "update_feature", map[string]any{
-		"feature_id":    "feat-1",
-		"target_branch": "",
+		"feature_id":  "feat-1",
+		"branch_slug": "",
 	})
-	if v, ok := cb.lastBody["target_branch"]; !ok || v != "" {
-		t.Errorf("expected target_branch='' in body for clearing; got ok=%v value=%v", ok, v)
+	if v, ok := cb.lastBody["branch_slug"]; !ok || v != "" {
+		t.Errorf("expected branch_slug='' in body for clearing; got ok=%v value=%v", ok, v)
 	}
 }
 

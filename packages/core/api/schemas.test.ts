@@ -4,7 +4,9 @@ import {
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_FEATURE_ISSUES_RESPONSE,
   EMPTY_USER,
+  FeatureIssuesResponseSchema,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -268,5 +270,45 @@ describe("dashboard + runtime usage schema drift", () => {
       { date: "2026-05-19", region: "us-east" },
     ]);
     expect((parsed[0] as Record<string, unknown>).region).toBe("us-east");
+  });
+});
+
+describe("FeatureIssuesResponseSchema", () => {
+  it("defaults missing arrays to [] when fields are absent", () => {
+    const result = parseWithFallback({}, FeatureIssuesResponseSchema, EMPTY_FEATURE_ISSUES_RESPONSE, { endpoint: "test" });
+    expect(result.ready_now).toEqual([]);
+    expect(result.blocked).toEqual([]);
+    expect(result.pull_requests).toEqual([]);
+  });
+
+  it("falls back on null input", () => {
+    const result = parseWithFallback(null, FeatureIssuesResponseSchema, EMPTY_FEATURE_ISSUES_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_FEATURE_ISSUES_RESPONSE);
+  });
+
+  it("parses a well-formed response with repo fields", () => {
+    const input = {
+      ready_now: [
+        { id: "i1", identifier: "MUL-1", title: "Task", status: "todo", priority: "high", repo_id: "r1", repo_name: "backend" },
+      ],
+      blocked: [],
+      pull_requests: [
+        { number: 1, html_url: "https://github.com/owner/repo/pull/1", state: "open", title: "PR", repo_id: "r1" },
+      ],
+    };
+    const result = parseWithFallback(input, FeatureIssuesResponseSchema, EMPTY_FEATURE_ISSUES_RESPONSE, { endpoint: "test" });
+    expect(result.ready_now).toHaveLength(1);
+    expect(result.ready_now[0]?.repo_name).toBe("backend");
+    expect(result.pull_requests[0]?.repo_id).toBe("r1");
+  });
+
+  it("defaults blocked_by to [] when absent from a blocked issue", () => {
+    const input = {
+      ready_now: [],
+      blocked: [{ id: "i2", identifier: "MUL-2", title: "Blocked", status: "backlog", priority: "medium" }],
+      pull_requests: [],
+    };
+    const result = parseWithFallback(input, FeatureIssuesResponseSchema, EMPTY_FEATURE_ISSUES_RESPONSE, { endpoint: "test" });
+    expect(result.blocked[0]?.blocked_by).toEqual([]);
   });
 });
