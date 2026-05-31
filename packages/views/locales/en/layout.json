@@ -1,14 +1,11 @@
 {
   "nav": {
     "inbox": "Inbox",
-    "my_issues": "My Issues",
     "issues": "Issues",
     "features": "Features",
     "autopilots": "Autopilot",
     "agents": "Agents",
-    "squads": "Squads",
     "usage": "Usage",
-    "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Settings"
   },
@@ -24,12 +21,7 @@
   "sidebar": {
     "unpin_tooltip": "Unpin",
     "workspaces_label": "Workspaces",
-    "create_workspace": "Create workspace",
-    "new_issue": "New Issue",
-    "new_issue_shortcut": "C",
     "pinned_label": "Pinned",
-    "workspace_group": "Workspace",
-    "configure_group": "Configure",
     "unread_overflow": "99+"
   }
 }

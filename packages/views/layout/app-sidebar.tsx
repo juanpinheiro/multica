@@ -19,28 +19,20 @@ import {
   Inbox,
   ListTodo,
   Bot,
-  Monitor,
   ChevronDown,
   ChevronRight,
   Settings,
-  Plus,
   Check,
   BookOpenText,
-  SquarePen,
-  CircleUser,
   FolderKanban,
   BarChart3,
   X,
   Zap,
-  Users,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { StatusIcon } from "../issues/components/status-icon";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
 import {
   Sidebar,
   SidebarContent,
@@ -60,7 +52,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
@@ -70,8 +61,6 @@ import { useQuery } from "@tanstack/react-query";
 
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
 import { api, ApiError } from "@multica/core/api";
-import { useModalStore } from "@multica/core/modals";
-import { useMyRuntimesNeedUpdate } from "@multica/core/runtimes/hooks";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
@@ -98,59 +87,76 @@ const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 
 // Nav items reference WorkspacePaths method names so they can be resolved
-// against the current workspace slug at render time (see AppSidebar body).
-// Only parameterless paths are valid nav destinations.
-type NavKey =
-  | "inbox"
-  | "myIssues"
-  | "issues"
-  | "features"
-  | "autopilots"
-  | "agents"
-  | "squads"
-  | "usage"
-  | "runtimes"
-  | "skills"
-  | "settings";
+// against the current workspace slug at render time (see NavItem). Labels
+// resolve at render via useT("layout"). Only parameterless paths are valid
+// nav destinations.
+type NavKey = "inbox" | "issues" | "features" | "autopilots" | "agents" | "usage" | "skills" | "settings";
+type NavLabelKey = NavKey;
 
-// Static schema (key + icon) — labels resolved at render via useT("layout").
-type NavLabelKey =
-  | "inbox"
-  | "my_issues"
-  | "issues"
-  | "features"
-  | "autopilots"
-  | "agents"
-  | "squads"
-  | "usage"
-  | "runtimes"
-  | "skills"
-  | "settings";
+interface NavEntry {
+  key: NavKey;
+  labelKey: NavLabelKey;
+  icon: typeof Inbox;
+}
 
-const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "inbox", labelKey: "inbox", icon: Inbox },
-  { key: "myIssues", labelKey: "my_issues", icon: CircleUser },
-];
-
-const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
+// Execution and planning lead the rail; supporting surfaces follow below a gap.
+const primaryNav: NavEntry[] = [
   { key: "issues", labelKey: "issues", icon: ListTodo },
+  { key: "inbox", labelKey: "inbox", icon: Inbox },
   { key: "features", labelKey: "features", icon: FolderKanban },
-  { key: "autopilots", labelKey: "autopilots", icon: Zap },
-  { key: "agents", labelKey: "agents", icon: Bot },
-  { key: "squads", labelKey: "squads", icon: Users },
-  { key: "usage", labelKey: "usage", icon: BarChart3 },
 ];
 
-const configureNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
-  { key: "runtimes", labelKey: "runtimes", icon: Monitor },
+const secondaryNav: NavEntry[] = [
+  { key: "agents", labelKey: "agents", icon: Bot },
+  { key: "autopilots", labelKey: "autopilots", icon: Zap },
   { key: "skills", labelKey: "skills", icon: BookOpenText },
+  { key: "usage", labelKey: "usage", icon: BarChart3 },
   { key: "settings", labelKey: "settings", icon: Settings },
 ];
 
-function DraftDot() {
-  const hasDraft = useIssueDraftStore((s) => !!(s.draft.title || s.draft.description));
-  if (!hasDraft) return null;
-  return <span className="absolute top-0 right-0 size-1.5 rounded-full bg-brand" />;
+// The Multica brand mark (the favicon glyph), inlined so it adapts to the
+// active theme via semantic tokens rather than a fixed-color asset.
+function MulticaMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 100 100" role="img" aria-label="Multica" className={className}>
+      <rect width="100" height="100" rx="20" className="fill-foreground" />
+      <polygon
+        className="fill-background"
+        points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
+      />
+    </svg>
+  );
+}
+
+function BrandMark() {
+  return (
+    <div className="flex items-center px-2 py-1">
+      <MulticaMark className="size-6 shrink-0" />
+    </div>
+  );
+}
+
+// One rail entry. Self-contained: resolves its own href, active state, and
+// label so both nav groups render identically.
+function NavItem({ item, badge }: { item: NavEntry; badge?: React.ReactNode }) {
+  const { t } = useT("layout");
+  const { pathname } = useNavigation();
+  const p = useWorkspacePaths();
+  const href = p[item.key]();
+  const isActive = isNavActive(pathname, href);
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        isActive={isActive}
+        render={<AppLink href={href} />}
+        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+      >
+        <item.icon />
+        <span>{t(($) => $.nav[item.labelKey])}</span>
+        {badge}
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
 }
 
 /**
@@ -340,7 +346,6 @@ interface AppSidebarProps {
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
   const { t } = useT("layout");
   const { pathname } = useNavigation();
-  const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const workspace = useCurrentWorkspace();
   const p = useWorkspacePaths();
@@ -356,7 +361,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     () => deduplicateInboxItems(inboxItems).filter((i) => !i.read).length,
     [inboxItems],
   );
-  const hasRuntimeUpdates = useMyRuntimesNeedUpdate(wsId);
   const { data: pinnedItems = EMPTY_PINS } = useQuery({
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
@@ -397,39 +401,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     [localPinned, reorderPins],
   );
 
-  // Global "C" shortcut: opens whichever create mode the user landed on last
-  // (agent vs manual), persisted in useCreateModeStore. The mode switch lives
-  // inside both modal footers so users can flip without remembering which
-  // shortcut goes where — `c` always means "open the create flow I prefer".
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "c" && e.key !== "C") return;
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      const isEditable =
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        (e.target as HTMLElement)?.isContentEditable;
-      if (isEditable) return;
-      if (useModalStore.getState().modal) return;
-      e.preventDefault();
-      // Auto-fill project when on a project detail page. The manual form
-      // consumes `feature_id`; quick-create also honours it as a seed for
-      // its project picker, so passing it through is safe for both modes.
-      const featureMatch = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/);
-      const data = featureMatch ? { feature_id: featureMatch[1] } : undefined;
-      openCreateIssueWithPreference(data);
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [pathname]);
-
   return (
       <Sidebar variant="inset">
         {topSlot}
-        {/* Workspace Switcher */}
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
+          {/* Brand mark leads the rail; project identity follows in the switcher */}
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <BrandMark />
+            </SidebarMenuItem>
+          </SidebarMenu>
+          {/* Recent projects — navigation between known workspaces only */}
           <SidebarMenu>
             <SidebarMenuItem>
               <DropdownMenu>
@@ -450,23 +432,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   side="bottom"
                   sideOffset={4}
                 >
-                  <div className="flex items-center gap-2.5 px-2 py-1.5">
-                    <ActorAvatar
-                      name={user?.name ?? ""}
-                      initials={(user?.name ?? "U").charAt(0).toUpperCase()}
-                      avatarUrl={user?.avatar_url}
-                      size={32}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium leading-tight">
-                        {user?.name}
-                      </p>
-                      <p className="truncate text-xs text-muted-foreground leading-tight">
-                        {user?.email}
-                      </p>
-                    </div>
-                  </div>
-                  <DropdownMenuSeparator />
                   <DropdownMenuGroup>
                     <DropdownMenuLabel className="text-xs text-muted-foreground">
                       {t(($) => $.sidebar.workspaces_label)}
@@ -485,39 +450,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         )}
                       </DropdownMenuItem>
                     ))}
-                    <DropdownMenuItem
-                      onClick={() =>
-                        useModalStore.getState().open("create-workspace")
-                      }
-                    >
-                      <Plus className="h-3.5 w-3.5" />
-                      {t(($) => $.sidebar.create_workspace)}
-                    </DropdownMenuItem>
                   </DropdownMenuGroup>
                 </DropdownMenuContent>
               </DropdownMenu>
             </SidebarMenuItem>
           </SidebarMenu>
-          <SidebarMenu>
-            {searchSlot && (
-              <SidebarMenuItem>
-                {searchSlot}
-              </SidebarMenuItem>
-            )}
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                className="text-muted-foreground"
-                onClick={() => openCreateIssueWithPreference()}
-              >
-                <span className="relative">
-                  <SquarePen />
-                  <DraftDot />
-                </span>
-                <span>{t(($) => $.sidebar.new_issue)}</span>
-                <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-0.5 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground">{t(($) => $.sidebar.new_issue_shortcut)}</kbd>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+          {searchSlot && (
+            <SidebarMenu>
+              <SidebarMenuItem>{searchSlot}</SidebarMenuItem>
+            </SidebarMenu>
+          )}
         </SidebarHeader>
 
         {/* Navigation */}
@@ -525,27 +467,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {personalNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "inbox" && unreadCount > 0 && (
-                          <span className="ml-auto text-xs">
-                            {unreadCount > 99 ? "99+" : unreadCount}
-                          </span>
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                {primaryNav.map((item) => (
+                  <NavItem
+                    key={item.key}
+                    item={item}
+                    badge={
+                      item.key === "inbox" && unreadCount > 0 ? (
+                        <span className="ml-auto text-xs">{unreadCount > 99 ? "99+" : unreadCount}</span>
+                      ) : undefined
+                    }
+                  />
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -586,52 +518,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
           )}
 
           <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.workspace_group)}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
-                {workspaceNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          <SidebarGroup>
-            <SidebarGroupLabel>{t(($) => $.sidebar.configure_group)}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {configureNav.map((item) => {
-                  const href = p[item.key]();
-                  const isActive = isNavActive(pathname, href);
-                  return (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        render={<AppLink href={href} />}
-                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
-                      >
-                        <item.icon />
-                        <span>{t(($) => $.nav[item.labelKey])}</span>
-                        {item.key === "runtimes" && hasRuntimeUpdates && (
-                          <span className="ml-auto size-1.5 rounded-full bg-destructive" />
-                        )}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                {secondaryNav.map((item) => (
+                  <NavItem key={item.key} item={item} />
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
