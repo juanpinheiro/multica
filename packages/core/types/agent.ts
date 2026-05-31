@@ -117,6 +117,13 @@ export interface AgentTask {
    * Older backends that pre-date in-place mode omit this field.
    */
   wait_reason?: string | null;
+  /**
+   * Timestamp of the agent's last observed activity — stamped by the daemon
+   * each time it reports a task:message. Drives the live card's heartbeat /
+   * "quiet" detection. Null until the agent emits its first message; older
+   * backends omit the field.
+   */
+  last_activity_at?: string | null;
 }
 
 export interface Agent {
