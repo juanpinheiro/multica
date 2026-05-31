@@ -33,6 +33,7 @@ const (
 	EventTaskQueued    = "task:queued"    // ∅ → queued (enqueue / retry create)
 	EventTaskDispatch  = "task:dispatch"  // queued → dispatched (daemon claim)
 	EventTaskRunning   = "task:running"   // dispatched → running (daemon started)
+	EventTaskWaiting   = "task:waiting"   // dispatched → waiting_local_directory (in-place umbrella held)
 	EventTaskProgress  = "task:progress"
 	EventTaskCompleted = "task:completed" // running → completed
 	EventTaskFailed    = "task:failed"    // running → failed

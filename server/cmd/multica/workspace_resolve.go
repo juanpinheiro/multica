@@ -90,18 +90,23 @@ func (a *serverAdapter) ListWorkspaces(ctx context.Context) ([]resolve.Workspace
 	}
 	out := make([]resolve.Workspace, len(raw))
 	for i, ws := range raw {
-		out[i] = resolve.Workspace{ID: ws.ID, Slug: ws.Slug}
+		out[i] = resolve.Workspace{ID: ws.ID, Slug: ws.Slug, Mode: ws.Mode}
 	}
 	return out, nil
 }
 
-func (a *serverAdapter) CreateWorkspace(ctx context.Context, slug, name string) (resolve.Workspace, error) {
-	body := map[string]string{"name": name, "slug": slug}
+func (a *serverAdapter) CreateWorkspace(ctx context.Context, slug, name, mode string) (resolve.Workspace, error) {
+	body := map[string]string{"name": name, "slug": slug, "mode": mode}
 	var ws workspaceSummary
 	if err := a.client("").PostJSON(ctx, "/api/workspaces", body, &ws); err != nil {
 		return resolve.Workspace{}, err
 	}
-	return resolve.Workspace{ID: ws.ID, Slug: ws.Slug}, nil
+	return resolve.Workspace{ID: ws.ID, Slug: ws.Slug, Mode: ws.Mode}, nil
+}
+
+func (a *serverAdapter) UpdateWorkspaceMode(ctx context.Context, workspaceID, mode string) error {
+	body := map[string]string{"mode": mode}
+	return a.client(workspaceID).PatchJSON(ctx, "/api/workspaces/"+workspaceID, body, nil)
 }
 
 func (a *serverAdapter) ListRepoNames(ctx context.Context, workspaceID string) ([]string, error) {

@@ -117,6 +117,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
   return (
     <div>
       <button
+        type="button"
         className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
           open ? "" : "text-muted-foreground hover:text-foreground"
         }`}
@@ -201,6 +202,7 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
   completed: "text-success",
   failed: "text-destructive",
   cancelled: "text-muted-foreground",
+  waiting_local_directory: "text-muted-foreground",
 };
 
 // Time anchor depends on status. Active rows want "Started 2m ago" /
@@ -249,6 +251,7 @@ function useStatusLabel(status: AgentTask["status"]): string {
     case "completed": return t(($) => $.execution_log.status_completed);
     case "failed": return t(($) => $.execution_log.status_failed);
     case "cancelled": return t(($) => $.execution_log.status_cancelled);
+    case "waiting_local_directory": return t(($) => $.execution_log.status_waiting_local_directory);
   }
 }
 

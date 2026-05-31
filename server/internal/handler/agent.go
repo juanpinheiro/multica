@@ -179,6 +179,7 @@ type AgentTaskResponse struct {
 	Result                  any                   `json:"result"`
 	Error                   *string               `json:"error"`
 	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	WaitReason              string                `json:"wait_reason,omitempty"`    // why an in-place task is parked in waiting_local_directory
 	Attempt                 int32                 `json:"attempt"`
 	MaxAttempts             int32                 `json:"max_attempts"`
 	ParentTaskID            *string               `json:"parent_task_id,omitempty"`
@@ -205,9 +206,10 @@ type AgentTaskResponse struct {
 	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
 	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	SquadID                 string                `json:"squad_id,omitempty"`                  // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad
+	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`          // user's natural-language input for quick-create tasks
+	QuickCreateParentIssueID string                `json:"quick_create_parent_issue_id,omitempty"` // parent issue ID when creating a sub-issue via quick-create
+	SquadID                  string                `json:"squad_id,omitempty"`                     // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName                string                `json:"squad_name,omitempty"`                   // display name for the picker squad
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -243,6 +245,10 @@ type AgentTaskResponse struct {
 	RepoLocalPath string `json:"repo_local_path,omitempty"`
 	// CrossRepoSiblings lists sibling issues in other repos within the same feature.
 	CrossRepoSiblings []CrossRepoSiblingData `json:"cross_repo_siblings,omitempty"`
+	// Mode is the workspace's execution mode ("worktree" or "in_place"),
+	// projected from workspace.mode. The daemon runs in-place workspaces in
+	// their real umbrella directory; empty/unknown is treated as worktree.
+	Mode string `json:"mode,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
@@ -280,6 +286,10 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
 	}
+	waitReason := ""
+	if t.WaitReason.Valid {
+		waitReason = t.WaitReason.String
+	}
 	workDir := ""
 	if t.WorkDir.Valid {
 		workDir = t.WorkDir.String
@@ -297,6 +307,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		Result:           result,
 		Error:            textToPtr(t.Error),
 		FailureReason:    failureReason,
+		WaitReason:       waitReason,
 		Attempt:          t.Attempt,
 		MaxAttempts:      t.MaxAttempts,
 		ParentTaskID:     uuidToPtr(t.ParentTaskID),

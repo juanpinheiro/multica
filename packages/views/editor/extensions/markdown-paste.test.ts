@@ -178,6 +178,39 @@ describe("markdownPaste — code block context", () => {
     expectLiteralPaste(editor, text);
   });
 
+  it("preserves raw html-like text as literal paste, not Markdown", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+    const parseSpy = vi.spyOn(editor.markdown!, "parse");
+
+    const handled = paste(editor, "<div>hello world</div>");
+
+    expect(handled).toBe(true);
+    // Literal path — the Markdown parser must NOT be called
+    expect(parseSpy).not.toHaveBeenCalled();
+    // Content preserved verbatim, not eaten by the Markdown parser
+    expect(editor.getText()).toBe("<div>hello world</div>");
+  });
+
+  it("does not treat '<3' style text as html — routes it to Markdown", () => {
+    editor = makeEditor({
+      type: "doc",
+      content: [{ type: "paragraph" }],
+    });
+
+    editor.commands.setTextSelection(1);
+    const parseSpy = vi.spyOn(editor.markdown!, "parse");
+
+    paste(editor, "<3 pizza");
+
+    // Digits after '<' are NOT an HTML tag — must go through the Markdown parser
+    expect(parseSpy).toHaveBeenCalled();
+  });
+
   it("does not parse oversized bracketed plain text as JSON", () => {
     editor = makeEditor({
       type: "doc",

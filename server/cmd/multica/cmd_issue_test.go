@@ -1780,6 +1780,168 @@ func TestRunIssueCommentList_RecentStillLabelsCursorAsThread(t *testing.T) {
 	}
 }
 
+type stdoutCapture struct {
+	t       *testing.T
+	orig    *os.File
+	r, w    *os.File
+	out     strings.Builder
+	doneCh  chan struct{}
+	stopped bool
+}
+
+func captureStdout(t *testing.T) *stdoutCapture {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	c := &stdoutCapture{t: t, orig: os.Stdout, r: r, w: w, doneCh: make(chan struct{})}
+	os.Stdout = w
+	go func() {
+		buf, _ := io.ReadAll(r)
+		c.out.Write(buf)
+		close(c.doneCh)
+	}()
+	return c
+}
+
+func (c *stdoutCapture) restore() {
+	if c.stopped {
+		return
+	}
+	c.stopped = true
+	os.Stdout = c.orig
+	_ = c.w.Close()
+	<-c.doneCh
+	_ = c.r.Close()
+}
+
+func (c *stdoutCapture) read() string {
+	c.restore()
+	return c.out.String()
+}
+
+// issueCommentListServer returns a test HTTP server that resolves the issue
+// ref and responds to /comments with the given comments slice.
+func issueCommentListServer(t *testing.T, comments []map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/") && !strings.Contains(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1"})
+			return
+		}
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/comments") {
+			json.NewEncoder(w).Encode(comments)
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+}
+
+// TestRunIssueCommentList_NoPreamble verifies that the "Showing N comments."
+// stderr preamble is no longer printed. The preamble polluted piped/scripted
+// output and was removed so the CLI (and the MCP server wrapping it) produce
+// clean output.
+func TestRunIssueCommentList_NoPreamble(t *testing.T) {
+	comments := []map[string]any{
+		{"id": "c1", "created_at": "2026-01-01T00:00:00Z", "content": "root"},
+	}
+	srv := issueCommentListServer(t, comments)
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	if out := stderr.read(); strings.Contains(out, "Showing") {
+		t.Errorf("preamble must not appear in stderr, got: %q", out)
+	}
+}
+
+// TestRunIssueCommentList_DefaultFiltersRootsOnly verifies that with no
+// special flags the CLI returns only thread-root comments (parent_id absent or
+// empty), not replies. This produces clean output for the MCP server and
+// gives agents an overview of all threads without pulling full conversations.
+func TestRunIssueCommentList_DefaultFiltersRootsOnly(t *testing.T) {
+	comments := []map[string]any{
+		{"id": "c1", "created_at": "2026-01-01T00:00:00Z", "content": "root 1"},
+		{"id": "c2", "parent_id": "c1", "created_at": "2026-01-01T00:01:00Z", "content": "reply"},
+		{"id": "c3", "created_at": "2026-01-01T00:02:00Z", "content": "root 2"},
+	}
+	srv := issueCommentListServer(t, comments)
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stdout := captureStdout(t)
+	defer stdout.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		stdout.restore()
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(stdout.read()), &got); err != nil {
+		t.Fatalf("parse stdout: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 roots, got %d: %v", len(got), got)
+	}
+	for _, c := range got {
+		if pid, _ := c["parent_id"].(string); pid != "" {
+			t.Errorf("reply leaked into default output: id=%v parent_id=%v", c["id"], pid)
+		}
+	}
+}
+
+// TestRunIssueCommentList_ThreadModeIncludesReplies verifies that --thread
+// bypasses the roots-only filter so the full thread (root + replies) is shown.
+func TestRunIssueCommentList_ThreadModeIncludesReplies(t *testing.T) {
+	comments := []map[string]any{
+		{"id": "c1", "created_at": "2026-01-01T00:00:00Z", "content": "root"},
+		{"id": "c2", "parent_id": "c1", "created_at": "2026-01-01T00:01:00Z", "content": "reply"},
+	}
+	srv := issueCommentListServer(t, comments)
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	stdout := captureStdout(t)
+	defer stdout.restore()
+
+	cmd := newIssueCommentListTestCmd()
+	if err := cmd.Flags().Set("thread", "c1"); err != nil {
+		t.Fatalf("set thread: %v", err)
+	}
+	if err := runIssueCommentList(cmd, []string{"MUL-1"}); err != nil {
+		stdout.restore()
+		t.Fatalf("runIssueCommentList: %v", err)
+	}
+
+	var got []map[string]any
+	if err := json.Unmarshal([]byte(stdout.read()), &got); err != nil {
+		t.Fatalf("parse stdout: %v", err)
+	}
+	if len(got) != 2 {
+		t.Errorf("want 2 comments in thread mode, got %d", len(got))
+	}
+}
+
 func TestValidIssueStatuses(t *testing.T) {
 	expected := map[string]bool{
 		"backlog":     true,

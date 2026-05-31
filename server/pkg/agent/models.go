@@ -134,6 +134,8 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
+	case "antigravity":
+		return antigravityStaticModels(), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -267,6 +269,16 @@ func copilotStaticModels() []Model {
 		{ID: "claude-sonnet-4.6", Label: "Claude Sonnet 4.6", Provider: "anthropic"},
 		{ID: "claude-sonnet-4.5", Label: "Claude Sonnet 4.5", Provider: "anthropic"},
 		{ID: "claude-haiku-4.5", Label: "Claude Haiku 4.5", Provider: "anthropic"},
+	}
+}
+
+// antigravityStaticModels returns the minimal model catalog for Antigravity.
+// The CLI has no built-in model-discovery subcommand, so we ship a single
+// default entry that lets the user pick a model from the dropdown. Pass ""
+// to let the CLI apply its own default.
+func antigravityStaticModels() []Model {
+	return []Model{
+		{ID: "default", Label: "Default", Provider: "antigravity", Default: true},
 	}
 }
 

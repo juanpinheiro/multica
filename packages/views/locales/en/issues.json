@@ -313,7 +313,10 @@
     "transcript_button": "View transcript",
     "stop_button": "Stop",
     "stop_tooltip": "Stop agent",
-    "cancel_failed": "Failed to cancel task"
+    "cancel_failed": "Failed to cancel task",
+    "more_agents_one": "+{{count}} more agent running",
+    "more_agents_other": "+{{count}} more agents running",
+    "hide_agents": "Hide additional agents"
   },
   "execution_log": {
     "section": "Execution log",
@@ -338,7 +341,8 @@
     "status_running": "Working",
     "status_completed": "Completed",
     "status_failed": "Failed",
-    "status_cancelled": "Cancelled"
+    "status_cancelled": "Cancelled",
+    "status_waiting_local_directory": "Waiting"
   },
   "terminate_dialog": {
     "title": "Stop this task?",

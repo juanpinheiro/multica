@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, Clock, Loader2, Square } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp, Clock, Loader2, Square } from "lucide-react";
 import { api } from "@multica/core/api";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import type { TaskMessagePayload } from "@multica/core/types/events";
@@ -54,6 +54,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
+  const [showAll, setShowAll] = useState(false);
   const seenSeqs = useRef(new Set<string>());
   const hydratedTaskIds = useRef(new Set<string>());
   const mountedRef = useRef(true);
@@ -223,6 +224,7 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
     running: 0,
     dispatched: 1,
     queued: 2,
+    waiting_local_directory: 2,
     completed: 3,
     failed: 3,
     cancelled: 3,
@@ -244,18 +246,36 @@ export function AgentLiveCard({ issueId }: AgentLiveCardProps) {
           agentName={firstEntry.task.agent_id ? getActorName("agent", firstEntry.task.agent_id) : t(($) => $.agent_live.fallback_name)}
         />
       </div>
-      {/* Additional agents — non-sticky, scroll with the page */}
+      {/* Additional agents — collapsible accordion */}
       {restEntries.length > 0 && (
-        <div className="mt-1.5 space-y-1.5">
-          {restEntries.map(({ task, items }) => (
-            <SingleAgentLiveCard
-              key={task.id}
-              task={task}
-              items={items}
-              issueId={issueId}
-              agentName={task.agent_id ? getActorName("agent", task.agent_id) : t(($) => $.agent_live.fallback_name)}
-            />
-          ))}
+        <div className="mt-1.5">
+          <button
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="flex items-center gap-1.5 w-full px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/40 rounded-lg transition-colors"
+          >
+            {showAll
+              ? <ChevronUp className="h-3 w-3 shrink-0" />
+              : <ChevronDown className="h-3 w-3 shrink-0" />}
+            <span>
+              {showAll
+                ? t(($) => $.agent_live.hide_agents)
+                : t(($) => $.agent_live.more_agents, { count: restEntries.length })}
+            </span>
+          </button>
+          {showAll && (
+            <div className="mt-0.5 space-y-1.5">
+              {restEntries.map(({ task, items }) => (
+                <SingleAgentLiveCard
+                  key={task.id}
+                  task={task}
+                  items={items}
+                  issueId={issueId}
+                  agentName={task.agent_id ? getActorName("agent", task.agent_id) : t(($) => $.agent_live.fallback_name)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </>
@@ -351,6 +371,7 @@ function SingleAgentLiveCard({ task, items, issueId, agentName }: SingleAgentLiv
             />
           )}
           <button
+            type="button"
             onClick={requestCancel}
             disabled={cancelling}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"

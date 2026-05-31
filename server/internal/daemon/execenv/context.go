@@ -89,7 +89,13 @@ func (p FeatureResourceForEnv) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// writeFeatureResources writes .multica/project/resources.json into the
+// InPlaceFeatureDir is the sub-path under the umbrella's .multica directory
+// where the daemon writes per-task runtime context (feature resources, etc.).
+// It lives alongside workspace.toml without interfering with manifest resolution,
+// which only ever reads .multica/workspace.toml by exact name.
+const InPlaceFeatureDir = ".multica/feature"
+
+// writeFeatureResources writes InPlaceFeatureDir/resources.json into the
 // working directory when the task carries feature context. The file is
 // always written when a feature is attached (even with zero resources) so
 // agents can rely on its presence as a signal that a feature exists.
@@ -97,7 +103,7 @@ func writeFeatureResources(workDir string, ctx TaskContextForEnv) error {
 	if ctx.FeatureID == "" && len(ctx.FeatureResources) == 0 {
 		return nil
 	}
-	dir := filepath.Join(workDir, ".multica", "feature")
+	dir := filepath.Join(workDir, InPlaceFeatureDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

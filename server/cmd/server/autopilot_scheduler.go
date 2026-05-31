@@ -48,7 +48,7 @@ func recoverLostTriggers(ctx context.Context, queries *db.Queries) {
 		if !t.CronExpression.Valid || t.CronExpression.String == "" {
 			continue
 		}
-		tz := "UTC"
+		tz := service.DefaultTimezone
 		if t.Timezone.Valid && t.Timezone.String != "" {
 			tz = t.Timezone.String
 		}
@@ -92,8 +92,13 @@ func tickScheduledAutopilots(ctx context.Context, queries *db.Queries, svc *serv
 			continue
 		}
 
+		tz := service.DefaultTimezone
+		if t.Timezone.Valid && t.Timezone.String != "" {
+			tz = t.Timezone.String
+		}
+
 		// Dispatch the autopilot run.
-		if _, err := svc.DispatchAutopilot(ctx, autopilot, t.ID, "schedule", nil); err != nil {
+		if _, err := svc.DispatchAutopilot(ctx, autopilot, t.ID, "schedule", nil, tz); err != nil {
 			slog.Warn("autopilot scheduler: dispatch failed",
 				"autopilot_id", util.UUIDToString(autopilot.ID),
 				"trigger_id", util.UUIDToString(t.ID),
@@ -112,7 +117,7 @@ func advanceNextRun(ctx context.Context, queries *db.Queries, t db.ClaimDueSched
 		return
 	}
 
-	tz := "UTC"
+	tz := service.DefaultTimezone
 	if t.Timezone.Valid && t.Timezone.String != "" {
 		tz = t.Timezone.String
 	}

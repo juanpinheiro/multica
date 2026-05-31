@@ -56,6 +56,74 @@ describe("useRecentIssuesStore.pruneWorkspaces", () => {
   });
 });
 
+describe("useRecentIssuesStore.removeId", () => {
+  it("removes the given issue id from the workspace bucket", () => {
+    const { recordVisit, removeId } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-1");
+    recordVisit("ws-a", "issue-2");
+    recordVisit("ws-a", "issue-3");
+
+    removeId("ws-a", "issue-2");
+
+    const ids = useRecentIssuesStore.getState().byWorkspace["ws-a"]?.map((e) => e.id);
+    expect(ids).toEqual(["issue-3", "issue-1"]);
+  });
+
+  it("is a no-op when the id is not in the bucket", () => {
+    const { recordVisit, removeId } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-1");
+    const before = useRecentIssuesStore.getState().byWorkspace["ws-a"];
+
+    removeId("ws-a", "not-there");
+
+    expect(useRecentIssuesStore.getState().byWorkspace["ws-a"]).toBe(before);
+  });
+
+  it("is a no-op when the workspace bucket does not exist", () => {
+    const { removeId } = useRecentIssuesStore.getState();
+    const before = useRecentIssuesStore.getState().byWorkspace;
+
+    removeId("ws-unknown", "issue-1");
+
+    expect(useRecentIssuesStore.getState().byWorkspace).toBe(before);
+  });
+
+  it("does not affect other workspace buckets", () => {
+    const { recordVisit, removeId } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-1");
+    recordVisit("ws-b", "issue-1");
+
+    removeId("ws-a", "issue-1");
+
+    expect(useRecentIssuesStore.getState().byWorkspace["ws-a"]).toHaveLength(0);
+    expect(useRecentIssuesStore.getState().byWorkspace["ws-b"]?.map((e) => e.id)).toEqual(["issue-1"]);
+  });
+});
+
+describe("useRecentIssuesStore — delete integration", () => {
+  it("removes the id from the store when recordVisit was called before deletion", () => {
+    const { recordVisit, removeId } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-del");
+    recordVisit("ws-a", "issue-keep");
+
+    removeId("ws-a", "issue-del");
+
+    const ids = useRecentIssuesStore.getState().byWorkspace["ws-a"]?.map((e) => e.id);
+    expect(ids).toEqual(["issue-keep"]);
+    expect(ids).not.toContain("issue-del");
+  });
+
+  it("is a no-op when the deleted id was never in recents", () => {
+    const { recordVisit, removeId } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-keep");
+    const before = useRecentIssuesStore.getState().byWorkspace["ws-a"];
+
+    removeId("ws-a", "never-visited");
+
+    expect(useRecentIssuesStore.getState().byWorkspace["ws-a"]).toBe(before);
+  });
+});
+
 describe("selectRecentIssues", () => {
   it("returns the bucket for the given workspace", () => {
     useRecentIssuesStore.getState().recordVisit("ws-a", "issue-1");

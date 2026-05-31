@@ -606,6 +606,19 @@ func (h *Handler) linkAttachmentsByIDs(ctx context.Context, commentID, issueID p
 	}
 }
 
+// unlinkAttachmentsFromComment removes the comment binding from the given
+// attachment IDs. Only operates on attachments whose comment_id matches
+// commentID, so stale IDs from other comments are silently ignored.
+func (h *Handler) unlinkAttachmentsFromComment(ctx context.Context, commentID, workspaceID pgtype.UUID, ids []pgtype.UUID) {
+	if err := h.Queries.UnlinkAttachmentsFromComment(ctx, db.UnlinkAttachmentsFromCommentParams{
+		CommentID:   commentID,
+		WorkspaceID: workspaceID,
+		Column3:     ids,
+	}); err != nil {
+		slog.Error("failed to unlink attachments from comment", "error", err)
+	}
+}
+
 // deleteS3Object removes a single file from S3 by its CDN URL.
 func (h *Handler) deleteS3Object(ctx context.Context, url string) {
 	if h.Storage == nil || url == "" {

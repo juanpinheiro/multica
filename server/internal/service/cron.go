@@ -2,10 +2,15 @@ package service
 
 import (
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/robfig/cron/v3"
 )
+
+// DefaultTimezone is the fallback used when a trigger carries no timezone or
+// an unrecognized one.
+const DefaultTimezone = "UTC"
 
 // cronParser accepts standard 5-field cron expressions.
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
@@ -31,4 +36,19 @@ func ValidateTimezone(timezone string) error {
 		return fmt.Errorf("invalid timezone %q: %w", timezone, err)
 	}
 	return nil
+}
+
+// ResolveTimezone returns the time.Location for tz, falling back to UTC when
+// tz is empty or unrecognized. A warning is logged when falling back due to an
+// invalid zone name so misconfigured triggers are surfaced without crashing.
+func ResolveTimezone(tz string) *time.Location {
+	if tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		slog.Warn("autopilot: unrecognized timezone, falling back to UTC", "timezone", tz)
+		return time.UTC
+	}
+	return loc
 }

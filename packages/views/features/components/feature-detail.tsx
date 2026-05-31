@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useCallback, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { Check, ChevronRight, GitBranch, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
+import { Check, ChevronRight, GitBranch, Layers2, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
@@ -19,7 +19,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { FEATURE_STATUS_ORDER, FEATURE_STATUS_CONFIG, FEATURE_PRIORITY_ORDER } from "@multica/core/features/config";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { AppLink, useNavigation } from "../../navigation";
+import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { StatusIcon } from "../../issues/components/status-icon";
@@ -47,7 +47,7 @@ import {
   TooltipContent,
 } from "@multica/ui/components/ui/tooltip";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader } from "../../layout";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -418,6 +418,7 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
       {/* Properties */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -541,6 +542,24 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
               </PopoverContent>
             </Popover>
           </PropRow>
+          {workspace?.mode === "in_place" && (
+            <PropRow label={t(($) => $.detail.exec_mode_label)}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <span
+                      data-testid="inplace-mode-indicator"
+                      className="inline-flex items-center gap-1 text-xs text-foreground"
+                    >
+                      <Layers2 className="h-3 w-3" />
+                      {t(($) => $.detail.exec_mode_inplace)}
+                    </span>
+                  }
+                />
+                <TooltipContent>{t(($) => $.detail.exec_mode_inplace_tooltip)}</TooltipContent>
+              </Tooltip>
+            </PropRow>
+          )}
         </div>}
       </div>
 
@@ -550,6 +569,7 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
         return (
           <div>
             <button
+              type="button"
               className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => setProgressOpen(!progressOpen)}
             >
@@ -585,89 +605,101 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
       <ResizablePanelGroup orientation="horizontal" className="flex-1 min-h-0" defaultLayout={defaultLayout} onLayoutChanged={onLayoutChanged}>
         <ResizablePanel id="content" minSize="50%">
           <div className="flex h-full flex-col">
-            <PageHeader className="gap-2 bg-background text-sm">
-              <div className="flex flex-1 items-center gap-1.5 min-w-0 flex-wrap">
-                <AppLink href={wsPaths.features()} className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
-                  {workspaceName ?? t(($) => $.detail.breadcrumb_fallback)}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-                <span className="truncate">{feature.title}</span>
-                {featureBranch && (
-                  <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-accent text-foreground shrink-0" data-testid="branch-indicator">
-                    <GitBranch className="h-3 w-3" />
-                    {featureBranch}
-                  </span>
-                )}
-                <PRHeaderBadge prs={prs} />
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className={cn("text-muted-foreground", isPinned && "text-foreground")}
-                  title={isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
-                  onClick={() => {
-                    if (isPinned) {
-                      deletePinMut.mutate({ itemType: "feature", itemId: featureId });
-                    } else {
-                      createPin.mutate({ item_type: "feature", item_id: featureId });
-                    }
-                  }}
-                >
-                  {isPinned ? <PinOff /> : <Pin />}
-                </Button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                        <MoreHorizontal />
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="end" className="w-auto">
-                    <DropdownMenuItem onClick={() => {
-                      navigator.clipboard.writeText(window.location.href);
-                      toast.success(t(($) => $.detail.toast_link_copied));
-                    }}>
-                      <Link2 className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.copy_link)}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onClick={() => setDeleteDialogOpen(true)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {t(($) => $.detail.delete_action)}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        variant={sidebarOpen ? "secondary" : "ghost"}
-                        size="icon-sm"
-                        className={sidebarOpen ? "" : "text-muted-foreground"}
-                        onClick={() => {
-                          if (isMobile) {
-                            setMobileSidebarOpen((open) => !open);
-                          } else {
-                            const panel = sidebarRef.current;
-                            if (!panel) return;
-                            if (panel.isCollapsed()) panel.expand();
-                            else panel.collapse();
-                          }
-                        }}
+            <BreadcrumbHeader
+              segments={[
+                {
+                  label: workspaceName ?? t(($) => $.detail.breadcrumb_fallback),
+                  href: wsPaths.features(),
+                },
+                {
+                  label: (
+                    <>
+                      <span className="truncate">{feature.title}</span>
+                      {featureBranch && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs bg-accent text-foreground shrink-0"
+                          data-testid="branch-indicator"
+                        >
+                          <GitBranch className="h-3 w-3" />
+                          {featureBranch}
+                        </span>
+                      )}
+                      <PRHeaderBadge prs={prs} />
+                    </>
+                  ),
+                  className: "flex items-center gap-1.5 min-w-0",
+                },
+              ]}
+              actions={
+                <>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className={cn("text-muted-foreground", isPinned && "text-foreground")}
+                    title={isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
+                    onClick={() => {
+                      if (isPinned) {
+                        deletePinMut.mutate({ itemType: "feature", itemId: featureId });
+                      } else {
+                        createPin.mutate({ item_type: "feature", item_id: featureId });
+                      }
+                    }}
+                  >
+                    {isPinned ? <PinOff /> : <Pin />}
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                          <MoreHorizontal />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="end" className="w-auto">
+                      <DropdownMenuItem onClick={() => {
+                        navigator.clipboard.writeText(window.location.href);
+                        toast.success(t(($) => $.detail.toast_link_copied));
+                      }}>
+                        <Link2 className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.copy_link)}
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => setDeleteDialogOpen(true)}
                       >
-                        <PanelRight />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-                </Tooltip>
-              </div>
-            </PageHeader>
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t(($) => $.detail.delete_action)}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant={sidebarOpen ? "secondary" : "ghost"}
+                          size="icon-sm"
+                          className={sidebarOpen ? "" : "text-muted-foreground"}
+                          onClick={() => {
+                            if (isMobile) {
+                              setMobileSidebarOpen((open) => !open);
+                            } else {
+                              const panel = sidebarRef.current;
+                              if (!panel) return;
+                              if (panel.isCollapsed()) panel.expand();
+                              else panel.collapse();
+                            }
+                          }}
+                        >
+                          <PanelRight />
+                        </Button>
+                      }
+                    />
+                    <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
+                  </Tooltip>
+                </>
+              }
+            />
 
             {/* Main scrollable content */}
             <div className="flex-1 overflow-y-auto">

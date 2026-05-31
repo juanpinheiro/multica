@@ -36,7 +36,7 @@ export function findIssueLocation(
   return null;
 }
 
-/** Add an issue to its status bucket (no-op if already present). */
+/** Add an issue to its status bucket at the start (no-op if already present). */
 export function addIssueToBuckets(
   resp: ListIssuesCache,
   issue: Issue,
@@ -44,7 +44,7 @@ export function addIssueToBuckets(
   const bucket = getBucket(resp, issue.status);
   if (bucket.issues.some((i) => i.id === issue.id)) return resp;
   return setBucket(resp, issue.status, {
-    issues: [...bucket.issues, issue],
+    issues: [issue, ...bucket.issues],
     total: bucket.total + 1,
   });
 }

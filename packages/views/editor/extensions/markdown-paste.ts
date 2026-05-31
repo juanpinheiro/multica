@@ -62,6 +62,10 @@ function isStructuredPlainText(text: string): boolean {
   return isJsonDocumentText(text);
 }
 
+function looksLikeHtmlSnippet(text: string): boolean {
+  return /^\s*<[a-zA-Z!?/]/.test(text);
+}
+
 function classifyPaste({
   text,
   html,
@@ -74,6 +78,7 @@ function classifyPaste({
   if (html && html.includes("data-pm-slice")) return "native";
   if (text.length > LARGE_PASTE_TEXT_THRESHOLD) return "literal";
   if (isStructuredPlainText(text)) return "literal";
+  if (looksLikeHtmlSnippet(text)) return "literal";
   return "markdown";
 }
 

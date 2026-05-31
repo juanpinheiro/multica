@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/workspace/resolve"
@@ -19,6 +20,8 @@ type fakeServer struct {
 	listErr error
 
 	createdWorkspaces []string            // slugs
+	createdModes      map[string]string   // slug -> mode passed at create
+	updatedModes      map[string]string   // workspaceID -> mode passed at update
 	createdRepos      map[string][]string // workspaceID -> repo names created
 	nextID            func(slug string) string
 }
@@ -27,6 +30,8 @@ func newFakeServer() *fakeServer {
 	return &fakeServer{
 		repoNames:    map[string][]string{},
 		byRemote:     map[string]resolve.Workspace{},
+		createdModes: map[string]string{},
+		updatedModes: map[string]string{},
 		createdRepos: map[string][]string{},
 		nextID:       func(slug string) string { return "id-" + slug },
 	}
@@ -39,11 +44,22 @@ func (f *fakeServer) ListWorkspaces(context.Context) ([]resolve.Workspace, error
 	return f.workspaces, nil
 }
 
-func (f *fakeServer) CreateWorkspace(_ context.Context, slug, _ string) (resolve.Workspace, error) {
+func (f *fakeServer) CreateWorkspace(_ context.Context, slug, _, mode string) (resolve.Workspace, error) {
 	f.createdWorkspaces = append(f.createdWorkspaces, slug)
-	ws := resolve.Workspace{ID: f.nextID(slug), Slug: slug}
+	f.createdModes[slug] = mode
+	ws := resolve.Workspace{ID: f.nextID(slug), Slug: slug, Mode: mode}
 	f.workspaces = append(f.workspaces, ws)
 	return ws, nil
+}
+
+func (f *fakeServer) UpdateWorkspaceMode(_ context.Context, workspaceID, mode string) error {
+	f.updatedModes[workspaceID] = mode
+	for i := range f.workspaces {
+		if f.workspaces[i].ID == workspaceID {
+			f.workspaces[i].Mode = mode
+		}
+	}
+	return nil
 }
 
 func (f *fakeServer) ListRepoNames(_ context.Context, workspaceID string) ([]string, error) {
@@ -219,6 +235,9 @@ remote = "github.com/x/frontend"
 	if len(srv.createdWorkspaces) != 1 || srv.createdWorkspaces[0] != "meu-produto" {
 		t.Fatalf("createdWorkspaces = %v, want [meu-produto]", srv.createdWorkspaces)
 	}
+	if srv.createdModes["meu-produto"] != "worktree" {
+		t.Fatalf("created mode = %q, want worktree default", srv.createdModes["meu-produto"])
+	}
 	created := srv.createdRepos[got.Workspace.ID]
 	if len(created) != 2 {
 		t.Fatalf("created repos = %v, want backend+frontend", created)
@@ -264,6 +283,133 @@ remote = "github.com/x/backend"
 	if got := len(srv.createdRepos[first.Workspace.ID]); got != 1 {
 		t.Fatalf("re-run created repos again: total %d, want 1", got)
 	}
+}
+
+func TestResolve_ManifestCreatesWithInPlaceModeAndNotesSerial(t *testing.T) {
+	srv := newFakeServer() // fresh/wiped DB
+
+	fs := memFS{files: map[string]string{
+		manifestPath("/umb"): `
+workspace = "meu-produto"
+mode = "in_place"
+`,
+	}}
+
+	var notes []string
+	got, err := resolve.Resolve(context.Background(), srv, resolve.Inputs{
+		StartDir: "/umb",
+		FS:       fs,
+		Git:      fakeGit{},
+		Warnf:    func(format string, _ ...any) { notes = append(notes, format) },
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if srv.createdModes["meu-produto"] != "in_place" {
+		t.Fatalf("created mode = %q, want in_place", srv.createdModes["meu-produto"])
+	}
+	if got.Workspace.Mode != "in_place" {
+		t.Fatalf("resolved workspace mode = %q, want in_place", got.Workspace.Mode)
+	}
+	if !containsSubstr(notes, "serial") {
+		t.Fatalf("expected a serial-execution note, got %v", notes)
+	}
+}
+
+func TestResolve_ManifestSwitchToInPlaceUpdatesMode(t *testing.T) {
+	srv := newFakeServer()
+	srv.workspaces = []resolve.Workspace{{ID: "id-meu", Slug: "meu-produto", Mode: "worktree"}}
+
+	fs := memFS{files: map[string]string{
+		manifestPath("/umb"): `
+workspace = "meu-produto"
+mode = "in_place"
+`,
+	}}
+
+	var notes []string
+	_, err := resolve.Resolve(context.Background(), srv, resolve.Inputs{
+		StartDir: "/umb",
+		FS:       fs,
+		Git:      fakeGit{},
+		Warnf:    func(format string, _ ...any) { notes = append(notes, format) },
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if srv.updatedModes["id-meu"] != "in_place" {
+		t.Fatalf("updated mode = %q, want in_place", srv.updatedModes["id-meu"])
+	}
+	if len(srv.createdWorkspaces) != 0 {
+		t.Fatalf("switch must not create a workspace; created %v", srv.createdWorkspaces)
+	}
+	if !containsSubstr(notes, "serial") {
+		t.Fatalf("expected a serial-execution note on switch, got %v", notes)
+	}
+}
+
+func TestResolve_ManifestInSyncModeNeedsNoUpdate(t *testing.T) {
+	srv := newFakeServer()
+	srv.workspaces = []resolve.Workspace{{ID: "id-meu", Slug: "meu-produto", Mode: "in_place"}}
+
+	fs := memFS{files: map[string]string{
+		manifestPath("/umb"): `
+workspace = "meu-produto"
+mode = "in_place"
+`,
+	}}
+
+	_, err := resolve.Resolve(context.Background(), srv, resolve.Inputs{
+		StartDir: "/umb",
+		FS:       fs,
+		Git:      fakeGit{},
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if _, updated := srv.updatedModes["id-meu"]; updated {
+		t.Fatalf("in-sync mode must not trigger an update: %v", srv.updatedModes)
+	}
+}
+
+func TestResolve_ManifestUnknownModeWarnsAndDefaults(t *testing.T) {
+	srv := newFakeServer()
+
+	fs := memFS{files: map[string]string{
+		manifestPath("/umb"): `
+workspace = "meu-produto"
+mode = "isolated"
+`,
+	}}
+
+	var warnings []string
+	_, err := resolve.Resolve(context.Background(), srv, resolve.Inputs{
+		StartDir: "/umb",
+		FS:       fs,
+		Git:      fakeGit{},
+		Warnf:    func(format string, _ ...any) { warnings = append(warnings, format) },
+	})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if srv.createdModes["meu-produto"] != "worktree" {
+		t.Fatalf("unknown mode must default to worktree, got %q", srv.createdModes["meu-produto"])
+	}
+	if !containsSubstr(warnings, "unknown execution mode") {
+		t.Fatalf("expected an unknown-mode warning, got %v", warnings)
+	}
+	if containsSubstr(warnings, "serial") {
+		t.Fatalf("worktree default must not emit a serial note: %v", warnings)
+	}
+}
+
+func containsSubstr(msgs []string, want string) bool {
+	for _, m := range msgs {
+		if strings.Contains(m, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestResolve_GitRemoteLookup(t *testing.T) {

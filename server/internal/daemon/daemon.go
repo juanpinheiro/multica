@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/workspace/inplace"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -117,6 +118,11 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+
+	// umbrellaLocker serializes in-place runs that share a workspace umbrella
+	// directory, so a second in-place task parks in waiting_local_directory
+	// until the first releases. Worktree tasks never touch it and stay parallel.
+	umbrellaLocker *inplace.Locker
 }
 
 // New creates a new Daemon instance.
@@ -141,6 +147,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		umbrellaLocker:            inplace.NewLocker(),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	return d
@@ -1854,6 +1861,61 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}
 }
 
+// maxTerminalCallbackAttempts is the number of times the daemon will attempt
+// to report a terminal task result before giving up. Only transient failures
+// (network errors, 5xx responses) trigger retries; 4xx errors are permanent.
+const maxTerminalCallbackAttempts = 3
+
+// terminalCallbackRetryDelay is the fixed wait between retry attempts.
+// Overrideable in tests to avoid slow retries.
+var terminalCallbackRetryDelay = 2 * time.Second
+
+// isTransientCallbackError returns true when err is worth retrying: a
+// network-level failure (no HTTP response at all) or a 5xx server error.
+// Context cancellation and 4xx client errors are permanent and not retried.
+func isTransientCallbackError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return true
+	}
+	return reqErr.StatusCode >= 500
+}
+
+// retryTerminalCallback calls fn up to maxTerminalCallbackAttempts times,
+// sleeping between attempts when the failure is transient. It returns the last
+// error when all attempts are exhausted, or nil on success.
+func retryTerminalCallback(ctx context.Context, fn func() error, taskLog *slog.Logger) error {
+	var lastErr error
+	for attempt := 1; attempt <= maxTerminalCallbackAttempts; attempt++ {
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		if !isTransientCallbackError(lastErr) {
+			return lastErr
+		}
+		if attempt < maxTerminalCallbackAttempts {
+			taskLog.Warn("terminal callback transient failure, retrying",
+				"attempt", attempt,
+				"max", maxTerminalCallbackAttempts,
+				"error", lastErr,
+			)
+			select {
+			case <-time.After(terminalCallbackRetryDelay):
+			case <-ctx.Done():
+				return lastErr
+			}
+		}
+	}
+	return lastErr
+}
+
 // reportTaskResult writes the final task disposition back to the server.
 //
 // Fail closed: only an explicit "completed" status is reported as success.
@@ -1863,14 +1925,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 // out-of-credit / runtime crash). Forward SessionID/WorkDir on every path:
 // the agent may have built a real session before getting stuck, and we want
 // the next chat turn to resume there rather than start over and "forget"
-// the conversation.
+// the conversation. Each call is retried on transient failures.
 func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
-		if err := d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir); err != nil {
+		if err := retryTerminalCallback(ctx, func() error {
+			return d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+		}, taskLog); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
-			if failErr := d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error"); failErr != nil {
+			if failErr := retryTerminalCallback(ctx, func() error {
+				return d.client.FailTask(ctx, taskID, fmt.Sprintf("complete task failed: %s", err.Error()), result.SessionID, result.WorkDir, "agent_error")
+			}, taskLog); failErr != nil {
 				taskLog.Error("fail task fallback also failed", "error", failErr)
 			}
 		}
@@ -1884,7 +1950,9 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			}
 		}
 		taskLog.Info("task did not complete, reporting failure", "status", result.Status, "failure_reason", failureReason)
-		if err := d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason); err != nil {
+		if err := retryTerminalCallback(ctx, func() error {
+			return d.client.FailTask(ctx, taskID, result.Comment, result.SessionID, result.WorkDir, failureReason)
+		}, taskLog); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
 	}
@@ -2000,64 +2068,98 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CrossRepoSiblings:                convertCrossRepoSiblingsForEnv(task.CrossRepoSiblings),
 	}
 
-	// Mark candidate env roots as active before any env work so the GC loop
-	// can't reclaim artifacts inside them mid-execution. We mark both the
-	// predicted root for a fresh Prepare and the prior root for Reuse — they
-	// usually differ (Reuse keeps the original task's directory).
-	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	d.markActiveEnvRoot(predictedRoot)
-	defer d.unmarkActiveEnvRoot(predictedRoot)
-	if task.PriorWorkDir != "" {
-		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != predictedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
-	}
+	// Execution mode selects WHERE the agent runs. In-place runs at the
+	// workspace's real umbrella directory (serialized per workspace); worktree
+	// runs in an isolated per-task directory (parallel). Only the umbrella path
+	// touches the developer's real tree, so the two paths diverge entirely here.
+	inPlace := execModeIsInPlace(task.Mode)
 
-	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
-	codexVersion := d.agentVersion("codex")
-	openclawBin := ""
-	if provider == "openclaw" {
-		openclawBin = entry.Path
-	}
-	if task.PriorWorkDir != "" {
-		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:      task.PriorWorkDir,
-			Provider:     provider,
-			CodexVersion: codexVersion,
-			OpenclawBin:  openclawBin,
-			Task:         taskCtx,
-		}, d.logger)
-	}
-	if env == nil {
-		var err error
-		env, err = execenv.Prepare(execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
-			Provider:       provider,
-			CodexVersion:   codexVersion,
-			OpenclawBin:    openclawBin,
-			Task:           taskCtx,
-		}, d.logger)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
-		}
-	}
-	// Belt-and-suspenders: also mark whatever root we ended up with, in case
-	// future changes diverge from PredictRootDir.
-	if env.RootDir != predictedRoot && env.RootDir != "" {
-		d.markActiveEnvRoot(env.RootDir)
-		defer d.unmarkActiveEnvRoot(env.RootDir)
-	}
+	var runtimeBrief string
+	forceInlineBrief := false
 
-	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
-	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
-	if err != nil {
-		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	if inPlace {
+		umbrella, release, err := d.prepareInPlace(ctx, task, taskLog)
+		if err != nil {
+			return TaskResult{}, err
+		}
+		// Hold the umbrella lock for the rest of the run so a second in-place
+		// task in this workspace stays parked until the agent here is done.
+		defer release()
+		env = &execenv.Environment{WorkDir: umbrella}
+		// Additive context only — never the instruction file, which would
+		// clobber the developer's own CLAUDE.md / AGENTS.md / GEMINI.md.
+		if werr := execenv.WriteInPlaceContextFiles(umbrella, provider, taskCtx); werr != nil {
+			d.logger.Warn("execenv: in-place context write failed (non-fatal)", "error", werr)
+		}
+		brief, wrote, ierr := execenv.InjectRuntimeConfigPreserving(umbrella, provider, taskCtx)
+		if ierr != nil {
+			d.logger.Warn("execenv: in-place inject runtime config failed (non-fatal)", "error", ierr)
+		}
+		runtimeBrief = brief
+		// A preserved user instruction file means we wrote no brief to disk, so
+		// the agent only receives runtime context if we deliver it inline.
+		forceInlineBrief = !wrote
+	} else {
+		// Mark candidate env roots as active before any env work so the GC loop
+		// can't reclaim artifacts inside them mid-execution. We mark both the
+		// predicted root for a fresh Prepare and the prior root for Reuse — they
+		// usually differ (Reuse keeps the original task's directory).
+		predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+		d.markActiveEnvRoot(predictedRoot)
+		defer d.unmarkActiveEnvRoot(predictedRoot)
+		if task.PriorWorkDir != "" {
+			priorRoot := filepath.Dir(task.PriorWorkDir)
+			if priorRoot != predictedRoot {
+				d.markActiveEnvRoot(priorRoot)
+				defer d.unmarkActiveEnvRoot(priorRoot)
+			}
+		}
+
+		// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
+		codexVersion := d.agentVersion("codex")
+		openclawBin := ""
+		if provider == "openclaw" {
+			openclawBin = entry.Path
+		}
+		if task.PriorWorkDir != "" {
+			env = execenv.Reuse(execenv.ReuseParams{
+				WorkDir:      task.PriorWorkDir,
+				Provider:     provider,
+				CodexVersion: codexVersion,
+				OpenclawBin:  openclawBin,
+				Task:         taskCtx,
+			}, d.logger)
+		}
+		if env == nil {
+			var err error
+			env, err = execenv.Prepare(execenv.PrepareParams{
+				WorkspacesRoot: d.cfg.WorkspacesRoot,
+				WorkspaceID:    task.WorkspaceID,
+				TaskID:         task.ID,
+				AgentName:      agentName,
+				Provider:       provider,
+				CodexVersion:   codexVersion,
+				OpenclawBin:    openclawBin,
+				Task:           taskCtx,
+			}, d.logger)
+			if err != nil {
+				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+			}
+		}
+		// Belt-and-suspenders: also mark whatever root we ended up with, in case
+		// future changes diverge from PredictRootDir.
+		if env.RootDir != predictedRoot && env.RootDir != "" {
+			d.markActiveEnvRoot(env.RootDir)
+			defer d.unmarkActiveEnvRoot(env.RootDir)
+		}
+
+		// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
+		brief, ierr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
+		if ierr != nil {
+			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", ierr)
+		}
+		runtimeBrief = brief
 	}
 	// NOTE: No cleanup — workdir is preserved for reuse by future tasks on
 	// the same (agent, issue) pair. The work_dir path is stored in DB on
@@ -2259,7 +2361,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Hermes loads AGENTS.md / .agent_context itself. Prepending the full runtime
 	// brief into the ACP user prompt duplicates that context, bloats every turn,
 	// and has triggered upstream safety filters on harmless tasks.
-	if providerNeedsInlineSystemPrompt(provider) {
+	if providerNeedsInlineSystemPrompt(provider) || forceInlineBrief {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 

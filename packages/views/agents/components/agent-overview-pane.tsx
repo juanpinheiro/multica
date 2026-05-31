@@ -7,6 +7,7 @@ import {
   FileText,
   KeyRound,
   ListTodo,
+  Server,
   Terminal,
 } from "lucide-react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -25,6 +26,7 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
+import { McpTab } from "./tabs/mcp-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
@@ -34,15 +36,17 @@ type DetailTab =
   | "instructions"
   | "skills"
   | "env"
-  | "custom_args";
+  | "custom_args"
+  | "mcp";
 
-const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args"> = {
+const TAB_LABEL_KEY: Record<DetailTab, "activity" | "tasks" | "instructions" | "skills" | "environment" | "custom_args" | "mcp"> = {
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
   skills: "skills",
   env: "environment",
   custom_args: "custom_args",
+  mcp: "mcp",
 };
 
 const detailTabs: {
@@ -55,6 +59,7 @@ const detailTabs: {
   { id: "skills", icon: BookOpenText },
   { id: "env", icon: KeyRound },
   { id: "custom_args", icon: Terminal },
+  { id: "mcp", icon: Server },
 ];
 
 interface AgentOverviewPaneProps {
@@ -180,6 +185,15 @@ export function AgentOverviewPane({
             <CustomArgsTab
               agent={agent}
               runtimeDevice={runtime ?? undefined}
+              onSave={(updates) => onUpdate(agent.id, updates)}
+              onDirtyChange={setActiveDirty}
+            />
+          </TabContent>
+        )}
+        {activeTab === "mcp" && (
+          <TabContent>
+            <McpTab
+              agent={agent}
               onSave={(updates) => onUpdate(agent.id, updates)}
               onDirtyChange={setActiveDirty}
             />

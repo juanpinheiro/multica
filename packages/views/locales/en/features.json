@@ -68,7 +68,10 @@
     "section_ready_now": "Ready now",
     "section_blocked": "Blocked",
     "section_issues": "Issues",
-    "branch_label": "Branch"
+    "branch_label": "Branch",
+    "exec_mode_label": "Exec",
+    "exec_mode_inplace": "In-place",
+    "exec_mode_inplace_tooltip": "Issues run serially in the workspace's real directory. A second task waits until the first finishes."
   },
   "resources": {
     "section_header": "Resources",

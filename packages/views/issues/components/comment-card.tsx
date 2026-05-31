@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, Copy, MoreHorizontal, Pencil, RotateCcw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -64,7 +64,7 @@ interface CommentCardProps {
    */
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
-  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[], removeAttachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
@@ -114,6 +114,47 @@ function DeleteCommentDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit-mode attachment list — renders non-inline attachments with a remove button
+// ---------------------------------------------------------------------------
+
+function EditAttachmentList({
+  attachments,
+  content,
+  onRemove,
+}: {
+  attachments: Attachment[];
+  content: string;
+  onRemove: (id: string) => void;
+}) {
+  const standalone = content
+    ? attachments.filter((a) => !content.includes(a.url))
+    : attachments;
+  if (!standalone.length) return null;
+
+  return (
+    <div className="mt-1.5 flex flex-col gap-1">
+      {standalone.map((a) => (
+        <div key={a.id} className="flex items-center gap-1">
+          <div className="flex-1 min-w-0">
+            <AttachmentDownloadProvider attachments={[a]}>
+              <AttachmentRenderer attachment={{ kind: "record", attachment: a }} />
+            </AttachmentDownloadProvider>
+          </div>
+          <button
+            type="button"
+            aria-label={`Remove attachment ${a.filename}`}
+            onClick={() => onRemove(a.id)}
+            className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -175,7 +216,7 @@ function CommentRow({
   entry: TimelineEntry;
   currentUserId?: string;
   canModerate?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds?: string[], removeAttachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
@@ -192,9 +233,11 @@ function CommentRow({
   // them to the comment (otherwise they'd remain orphaned at the issue level
   // and disappear after refresh).
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const editorAttachments = pendingAttachments.length > 0
-    ? [...(entry.attachments ?? []), ...pendingAttachments]
-    : entry.attachments;
+  const [removedAttachmentIds, setRemovedAttachmentIds] = useState<Set<string>>(new Set());
+  const visibleExistingAttachments = (entry.attachments ?? []).filter(
+    (a) => !removedAttachmentIds.has(a.id),
+  );
+  const editorAttachments = [...visibleExistingAttachments, ...pendingAttachments];
   const handleEditUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
     if (result) setPendingAttachments((prev) => [...prev, result]);
@@ -236,6 +279,7 @@ function CommentRow({
     cancelledRef.current = true;
     setEditing(false);
     setPendingAttachments([]);
+    setRemovedAttachmentIds(new Set());
     clearEditDraft(editDraftKey);
   };
 
@@ -248,16 +292,19 @@ function CommentRow({
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
       setPendingAttachments([]);
+      setRemovedAttachmentIds(new Set());
       clearEditDraft(editDraftKey);
       return;
     }
     const activeIds = pendingAttachments
       .filter((a) => trimmed.includes(a.url))
       .map((a) => a.id);
+    const removeIds = removedAttachmentIds.size > 0 ? [...removedAttachmentIds] : undefined;
     try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
+      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined, removeIds);
       setEditing(false);
       setPendingAttachments([]);
+      setRemovedAttachmentIds(new Set());
       clearEditDraft(editDraftKey);
     } catch (err) {
       toast.error(
@@ -365,6 +412,14 @@ function CommentRow({
               attachments={editorAttachments}
             />
           </div>
+
+          {visibleExistingAttachments.length > 0 && (
+            <EditAttachmentList
+              attachments={visibleExistingAttachments}
+              content={editEditorRef.current?.getMarkdown() ?? entry.content ?? ""}
+              onRemove={(id) => setRemovedAttachmentIds((prev) => new Set([...prev, id]))}
+            />
+          )}
           <div className="flex items-center justify-between mt-2">
             <FileUploadButton
               size="sm"
@@ -430,9 +485,11 @@ function CommentCardImpl({
   const cancelledRef = useRef(false);
   // Pending uploads from the root-comment edit pass — same rationale as CommentRow.
   const [parentPendingAttachments, setParentPendingAttachments] = useState<Attachment[]>([]);
-  const parentEditorAttachments = parentPendingAttachments.length > 0
-    ? [...(entry.attachments ?? []), ...parentPendingAttachments]
-    : entry.attachments;
+  const [parentRemovedAttachmentIds, setParentRemovedAttachmentIds] = useState<Set<string>>(new Set());
+  const parentVisibleExistingAttachments = (entry.attachments ?? []).filter(
+    (a) => !parentRemovedAttachmentIds.has(a.id),
+  );
+  const parentEditorAttachments = [...parentVisibleExistingAttachments, ...parentPendingAttachments];
   const handleParentEditUpload = useCallback(async (file: File) => {
     const result = await uploadWithToast(file, { issueId });
     if (result) setParentPendingAttachments((prev) => [...prev, result]);
@@ -471,6 +528,7 @@ function CommentCardImpl({
     cancelledRef.current = true;
     setEditing(false);
     setParentPendingAttachments([]);
+    setParentRemovedAttachmentIds(new Set());
     clearParentEditDraft(parentEditDraftKey);
   };
 
@@ -483,16 +541,19 @@ function CommentCardImpl({
     if (!trimmed || trimmed === (entry.content ?? "").trim()) {
       setEditing(false);
       setParentPendingAttachments([]);
+      setParentRemovedAttachmentIds(new Set());
       clearParentEditDraft(parentEditDraftKey);
       return;
     }
     const activeIds = parentPendingAttachments
       .filter((a) => trimmed.includes(a.url))
       .map((a) => a.id);
+    const removeIds = parentRemovedAttachmentIds.size > 0 ? [...parentRemovedAttachmentIds] : undefined;
     try {
-      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined);
+      await onEdit(entry.id, trimmed, activeIds.length > 0 ? activeIds : undefined, removeIds);
       setEditing(false);
       setParentPendingAttachments([]);
+      setParentRemovedAttachmentIds(new Set());
       clearParentEditDraft(parentEditDraftKey);
     } catch (err) {
       toast.error(
@@ -664,6 +725,14 @@ function CommentCardImpl({
                     attachments={parentEditorAttachments}
                   />
                 </div>
+
+                {parentVisibleExistingAttachments.length > 0 && (
+                  <EditAttachmentList
+                    attachments={parentVisibleExistingAttachments}
+                    content={editEditorRef.current?.getMarkdown() ?? entry.content ?? ""}
+                    onRemove={(id) => setParentRemovedAttachmentIds((prev) => new Set([...prev, id]))}
+                  />
+                )}
                 <div className="flex items-center justify-between mt-2">
                   <FileUploadButton
                     size="sm"

@@ -3244,3 +3244,326 @@ func createEphemeralMember(t *testing.T, workspaceID, label, role string) (strin
 	})
 	return userID, memberID
 }
+
+// TestDaemonRegister_MergesDeviceNameRuntime verifies the WSL2 consolidation
+// path: when a runtime row already exists for the same device_name (e.g.
+// registered by the native Windows daemon) and the WSL2 daemon now registers
+// with a different daemon_id but the same device_name, the handler must:
+//
+//   - reassign every agent pointing at the old (Windows) runtime to the new (WSL2) row,
+//   - reassign every task to the new row,
+//   - delete the stale old row so there's exactly one runtime per physical machine,
+//   - record the stale daemon_id on the new row as a legacy audit id.
+func TestDaemonRegister_MergesDeviceNameRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const windowsDaemonID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	const wsl2DaemonID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	const sharedDeviceName = "desktop-wsl2test"
+
+	// Seed the pre-existing Windows runtime row (registered under the Windows daemon UUID).
+	var windowsRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, device_name, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, $2, $3, 'Claude (desktop-wsl2test)', 'local', 'claude', 'offline', 'desktop-wsl2test · 1.0.0', '{}'::jsonb, now() - interval '5 minutes')
+		RETURNING id
+	`, testWorkspaceID, windowsDaemonID, sharedDeviceName).Scan(&windowsRuntimeID); err != nil {
+		t.Fatalf("seed windows runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, windowsRuntimeID)
+	})
+
+	// An agent bound to the Windows runtime.
+	var windowsAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1, 'windows-agent-wsl2test', 'local', '{}'::jsonb, $2, 'workspace', 1)
+		RETURNING id
+	`, testWorkspaceID, windowsRuntimeID).Scan(&windowsAgentID); err != nil {
+		t.Fatalf("seed windows agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, windowsAgentID)
+	})
+
+	// A task also bound to the Windows runtime.
+	var wsl2IssueID, wsl2TaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'wsl2-task-owner', 'todo', 'medium', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 97800) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&wsl2IssueID); err != nil {
+		t.Fatalf("seed wsl2 issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, wsl2IssueID) })
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
+		VALUES ($1, $2, 'completed', $3)
+		RETURNING id
+	`, windowsAgentID, wsl2IssueID, windowsRuntimeID).Scan(&wsl2TaskID); err != nil {
+		t.Fatalf("seed wsl2 task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, wsl2TaskID)
+	})
+
+	// Now the WSL2 daemon registers under a different daemon_id but the same device_name.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    wsl2DaemonID,
+		"device_name":  sharedDeviceName,
+		"runtimes": []map[string]any{
+			{"name": "test-wsl2-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister (WSL2): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes := resp["runtimes"].([]any)
+	wsl2RuntimeID := runtimes[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, wsl2RuntimeID)
+	})
+
+	if wsl2RuntimeID == windowsRuntimeID {
+		t.Fatalf("expected a new runtime row for the WSL2 daemon, got the Windows row id back")
+	}
+
+	// Agent must now point at the WSL2 runtime (not the deleted Windows row).
+	var agentRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, windowsAgentID).Scan(&agentRuntimeID); err != nil {
+		t.Fatalf("read agent runtime_id: %v", err)
+	}
+	if agentRuntimeID != wsl2RuntimeID {
+		t.Fatalf("agent not reassigned to WSL2 runtime: got %s, want %s", agentRuntimeID, wsl2RuntimeID)
+	}
+
+	// Task must be reassigned (not dropped via cascade delete).
+	var taskRuntimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, wsl2TaskID).Scan(&taskRuntimeID); err != nil {
+		t.Fatalf("read task runtime_id: %v", err)
+	}
+	if taskRuntimeID != wsl2RuntimeID {
+		t.Fatalf("task not reassigned to WSL2 runtime: got %s, want %s", taskRuntimeID, wsl2RuntimeID)
+	}
+
+	// Windows runtime row must be gone — exactly one runtime per physical machine.
+	var windowsCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, windowsRuntimeID).Scan(&windowsCount); err != nil {
+		t.Fatalf("count windows runtime: %v", err)
+	}
+	if windowsCount != 0 {
+		t.Fatalf("expected Windows runtime row to be deleted after WSL2 merge, still present")
+	}
+}
+
+// TestDaemonRegister_DeviceNameDedup_CaseInsensitive verifies that the
+// device-name dedup is case-insensitive so "DESKTOP-ABC" and "desktop-abc"
+// are treated as the same physical machine.
+func TestDaemonRegister_DeviceNameDedup_CaseInsensitive(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const oldDaemonID = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+	const newDaemonID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+
+	// Seed a runtime registered with the uppercase device name.
+	var oldRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, device_name, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, $2, 'DESKTOP-CASETEST', 'Claude (DESKTOP-CASETEST)', 'local', 'claude', 'offline', 'DESKTOP-CASETEST · 1.0.0', '{}'::jsonb, now() - interval '5 minutes')
+		RETURNING id
+	`, testWorkspaceID, oldDaemonID).Scan(&oldRuntimeID); err != nil {
+		t.Fatalf("seed old runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, oldRuntimeID)
+	})
+
+	// New registration with lowercase device name — must still match and merge.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    newDaemonID,
+		"device_name":  "desktop-casetest",
+		"runtimes": []map[string]any{
+			{"name": "case-test-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister (case-insensitive dedup): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes := resp["runtimes"].([]any)
+	newRuntimeID := runtimes[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	// Old runtime must be gone.
+	var oldCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, oldRuntimeID).Scan(&oldCount); err != nil {
+		t.Fatalf("count old runtime: %v", err)
+	}
+	if oldCount != 0 {
+		t.Fatalf("expected old runtime row (uppercase device_name) to be merged and deleted, still present")
+	}
+}
+
+// TestDaemonRegister_DeviceNameDedup_EmptyDeviceNameIsNoop verifies that
+// a registration with an empty device_name does not trigger device-name dedup
+// (the empty string is the DEFAULT for existing rows and must not match anything).
+func TestDaemonRegister_DeviceNameDedup_EmptyDeviceNameIsNoop(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const existingDaemonID = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+	const newDaemonID = "ffffffff-ffff-ffff-ffff-ffffffffffff"
+
+	// Seed an existing runtime with an empty device_name (legacy row).
+	var existingRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, daemon_id, device_name, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, $2, '', 'Claude (no-device-name)', 'local', 'claude', 'offline', 'no-device · 1.0.0', '{}'::jsonb, now() - interval '5 minutes')
+		RETURNING id
+	`, testWorkspaceID, existingDaemonID).Scan(&existingRuntimeID); err != nil {
+		t.Fatalf("seed existing runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, existingRuntimeID)
+	})
+
+	// New registration with empty device_name must NOT merge with the existing row.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    newDaemonID,
+		"device_name":  "",
+		"runtimes": []map[string]any{
+			{"name": "no-device-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
+		},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("DaemonRegister (empty device name): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	runtimes := resp["runtimes"].([]any)
+	newRuntimeID := runtimes[0].(map[string]any)["id"].(string)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, newRuntimeID)
+	})
+
+	// Existing row must still be present — no merge happened.
+	var existingCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, existingRuntimeID).Scan(&existingCount); err != nil {
+		t.Fatalf("count existing runtime: %v", err)
+	}
+	if existingCount != 1 {
+		t.Fatalf("expected existing runtime to survive (empty device_name is not a merge key), count = %d", existingCount)
+	}
+}
+
+// TestClaimTask_QuickCreate_SurfacesParentIssueID verifies that when a
+// quick-create task includes a parent_issue_id in its context, the claim
+// handler surfaces it as quick_create_parent_issue_id in the response so the
+// daemon can instruct the agent to pass --parent to multica issue create.
+func TestClaimTask_QuickCreate_SurfacesParentIssueID(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	// Create a parent issue to reference.
+	var parentIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'quick-create parent', 'todo', 'none', $2, 'member',
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&parentIssueID); err != nil {
+		t.Fatalf("create parent issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parentIssueID) })
+
+	quickContext, _ := json.Marshal(map[string]any{
+		"type":            "quick_create",
+		"prompt":          "create a sub-task",
+		"requester_id":    testUserID,
+		"workspace_id":    testWorkspaceID,
+		"parent_issue_id": parentIssueID,
+	})
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'queued', 3, $3)
+		RETURNING id
+	`, agentID, runtimeID, quickContext).Scan(&taskID); err != nil {
+		t.Fatalf("create quick-create task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "quick-create-parent-test-daemon")
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			QuickCreatePrompt        string `json:"quick_create_prompt"`
+			QuickCreateParentIssueID string `json:"quick_create_parent_issue_id"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatal("expected task in response")
+	}
+	if resp.Task.QuickCreatePrompt != "create a sub-task" {
+		t.Errorf("quick_create_prompt = %q, want %q", resp.Task.QuickCreatePrompt, "create a sub-task")
+	}
+	if resp.Task.QuickCreateParentIssueID != parentIssueID {
+		t.Errorf("quick_create_parent_issue_id = %q, want %q", resp.Task.QuickCreateParentIssueID, parentIssueID)
+	}
+}

@@ -70,6 +70,32 @@ func TestFind(t *testing.T) {
 			wantPath: filepath.Join("C:\\", "repo", ".multica", "workspace.toml"),
 			wantOK:   true,
 		},
+		{
+			// In-place runtime context written by the daemon sits at
+			// .multica/feature/resources.json alongside workspace.toml.
+			// Find must return workspace.toml and ignore the sibling.
+			name: "in-place runtime context sibling does not interfere",
+			fs: memFS{
+				filepath.Join("C:\\", "umbrella", ".multica", "workspace.toml"):              []byte(`workspace = "umbrella"`),
+				filepath.Join("C:\\", "umbrella", ".multica", "feature", "resources.json"):   []byte(`{"feature_id":"abc"}`),
+			},
+			startDir: filepath.Join("C:\\", "umbrella"),
+			wantPath: filepath.Join("C:\\", "umbrella", ".multica", "workspace.toml"),
+			wantOK:   true,
+		},
+		{
+			// Start several levels down from the umbrella; the in-place
+			// runtime context files are also present. Walk-up must still
+			// resolve workspace.toml.
+			name: "in-place runtime context sibling, start inside sub-dir",
+			fs: memFS{
+				filepath.Join("C:\\", "umbrella", ".multica", "workspace.toml"):              []byte(`workspace = "umbrella"`),
+				filepath.Join("C:\\", "umbrella", ".multica", "feature", "resources.json"):   []byte(`{"feature_id":"abc"}`),
+			},
+			startDir: filepath.Join("C:\\", "umbrella", "backend", "pkg"),
+			wantPath: filepath.Join("C:\\", "umbrella", ".multica", "workspace.toml"),
+			wantOK:   true,
+		},
 	}
 
 	for _, tc := range cases {
@@ -151,6 +177,31 @@ remote = "github.com/org/mobile"
 			if m.Repos[i].Name != want {
 				t.Errorf("Repos[%d].Name = %q, want %q", i, m.Repos[i].Name, want)
 			}
+		}
+	})
+
+	t.Run("reads mode when present", func(t *testing.T) {
+		data := []byte(`
+workspace = "meu-produto"
+mode = "in_place"
+`)
+		m, err := manifest.Parse(data)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if m.Mode != "in_place" {
+			t.Errorf("Mode = %q, want %q", m.Mode, "in_place")
+		}
+	})
+
+	t.Run("mode absent is empty string", func(t *testing.T) {
+		data := []byte(`workspace = "meu-produto"`)
+		m, err := manifest.Parse(data)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if m.Mode != "" {
+			t.Errorf("Mode = %q, want empty (normalization is the caller's job)", m.Mode)
 		}
 	})
 

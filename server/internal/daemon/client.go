@@ -156,6 +156,15 @@ func (c *Client) StartTask(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
 }
 
+// WaitForLocalDirectory parks the task in waiting_local_directory while the
+// umbrella directory it needs is held by another in-place task. reason names
+// the held path and current holder. StartTask clears it once the lock frees.
+func (c *Client) WaitForLocalDirectory(ctx context.Context, taskID, reason string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/wait-local-directory", taskID), map[string]any{
+		"reason": reason,
+	}, nil)
+}
+
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/progress", taskID), map[string]any{
 		"summary": summary,

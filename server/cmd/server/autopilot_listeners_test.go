@@ -79,7 +79,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 				}
 			})
 
-			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 			if err != nil {
 				t.Fatalf("DispatchAutopilot: %v", err)
 			}
@@ -183,7 +183,7 @@ func TestAutopilotDispatchSkipsWhenRuntimeOffline(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
 	})
 
-	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
 	})
 
-	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 	if err != nil {
 		t.Fatalf("manual DispatchAutopilot returned error (would 500 the handler): %v", err)
 	}

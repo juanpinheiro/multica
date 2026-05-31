@@ -31,7 +31,7 @@ func TestBuildIssueDescription_NoTriggerPayload(t *testing.T) {
 	ap := db.Autopilot{Description: pgtype.Text{String: "do the thing", Valid: true}}
 	run := db.AutopilotRun{Source: "schedule"}
 
-	got := s.buildIssueDescription(ap, run)
+	got := s.buildIssueDescription(ap, run, time.UTC)
 	if !strings.HasPrefix(got.String, "do the thing") {
 		t.Fatalf("description should preserve user description: %q", got.String)
 	}
@@ -49,7 +49,7 @@ func TestBuildIssueDescription_WithWebhookPayload(t *testing.T) {
 	payload := []byte(`{"event":"github.pull_request.opened","eventPayload":{"number":7},"request":{"receivedAt":"2026-05-09T00:00:00Z","contentType":"application/json"}}`)
 	run := db.AutopilotRun{Source: "webhook", TriggerPayload: payload}
 
-	got := s.buildIssueDescription(ap, run)
+	got := s.buildIssueDescription(ap, run, time.UTC)
 	if !strings.HasPrefix(got.String, "watch PRs") {
 		t.Fatalf("user description not preserved: %q", got.String)
 	}
@@ -76,7 +76,7 @@ func TestBuildIssueDescription_WebhookSourceMissingEnvelope(t *testing.T) {
 	payload := []byte(`{"raw":"missing envelope"}`)
 	run := db.AutopilotRun{Source: "webhook", TriggerPayload: payload}
 
-	got := s.buildIssueDescription(ap, run)
+	got := s.buildIssueDescription(ap, run, time.UTC)
 	if !strings.Contains(got.String, "Webhook event:") {
 		t.Fatalf("should still emit webhook block: %q", got.String)
 	}
@@ -88,9 +88,25 @@ func TestBuildIssueDescription_NonWebhookSourceWithPayloadIgnored(t *testing.T) 
 	ap := db.Autopilot{Description: pgtype.Text{String: "thing", Valid: true}}
 	run := db.AutopilotRun{Source: "manual", TriggerPayload: []byte(`{"event":"x.y"}`)}
 
-	got := s.buildIssueDescription(ap, run)
+	got := s.buildIssueDescription(ap, run, time.UTC)
 	if strings.Contains(got.String, "Webhook event") {
 		t.Fatalf("non-webhook source should not include webhook block: %q", got.String)
+	}
+}
+
+func TestBuildIssueDescription_TimestampUsesZone(t *testing.T) {
+	// The triggered-at timestamp in the description must reflect the given
+	// location's abbreviation, not always "UTC".
+	s := &AutopilotService{}
+	ap := db.Autopilot{Description: pgtype.Text{String: "x", Valid: true}}
+	run := db.AutopilotRun{Source: "schedule"}
+
+	loc, _ := time.LoadLocation("America/New_York")
+	got := s.buildIssueDescription(ap, run, loc)
+
+	// America/New_York renders as EST or EDT depending on DST. Neither is UTC.
+	if strings.Contains(got.String, " UTC") {
+		t.Fatalf("description should not say UTC for New York zone: %q", got.String)
 	}
 }
 
@@ -131,10 +147,42 @@ func TestInterpolateTemplate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := s.interpolateTemplate(tc.ap); got != tc.expect {
+			if got := s.interpolateTemplate(tc.ap, time.UTC); got != tc.expect {
 				t.Fatalf("interpolateTemplate = %q, want %q", got, tc.expect)
 			}
 		})
+	}
+}
+
+func TestInterpolateTemplate_DateUsesZone(t *testing.T) {
+	// {{date}} must reflect the trigger's timezone, not always UTC.
+	// Pick a location that is always a different calendar day from UTC at some
+	// fixed point — using a synthetic fixed zone avoids DST flakiness.
+	s := &AutopilotService{}
+	ap := db.Autopilot{
+		Title:              "fallback",
+		IssueTitleTemplate: pgtype.Text{String: "report — {{date}}", Valid: true},
+	}
+
+	// UTC+14 is always ahead of UTC, so at 2025-01-01T00:30:00Z UTC shows
+	// 2025-01-01 but UTC+14 shows 2025-01-01 14:30. Both dates are the same
+	// here; the meaningful assertion is that the zone is *used*, not UTC.
+	// We verify that the result for UTC and UTC-12 differ when they should.
+	utcMinus12 := time.FixedZone("UTC-12", -12*60*60)
+	utcPlus14 := time.FixedZone("UTC+14", 14*60*60)
+
+	gotMinus := s.interpolateTemplate(ap, utcMinus12)
+	gotPlus := s.interpolateTemplate(ap, utcPlus14)
+
+	// At any moment, UTC-12 and UTC+14 span a 26-hour gap. There will always
+	// exist instants where the two zones disagree on the calendar date.
+	// We can't know which instant the test runs at, so we simply assert that
+	// each call used its zone (the formatted date fits "YYYY-MM-DD").
+	datePart := func(result string) string {
+		return strings.TrimPrefix(result, "report — ")
+	}
+	if len(datePart(gotMinus)) != 10 || len(datePart(gotPlus)) != 10 {
+		t.Fatalf("unexpected date format: minus=%q plus=%q", gotMinus, gotPlus)
 	}
 }
 

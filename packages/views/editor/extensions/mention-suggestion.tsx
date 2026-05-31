@@ -304,6 +304,7 @@ function MentionRow({
     return (
       <button
         ref={buttonRef}
+        type="button"
         className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         } ${isClosed ? "opacity-60" : ""}`}
@@ -327,6 +328,7 @@ function MentionRow({
   return (
     <button
       ref={buttonRef}
+      type="button"
       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
         selected ? "bg-accent" : "hover:bg-accent/50"
       }`}

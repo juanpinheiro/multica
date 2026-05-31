@@ -22,7 +22,7 @@ import {
   Tag,
   Users,
 } from "lucide-react";
-import { PageHeader } from "../../layout/page-header";
+import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -1288,6 +1288,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Properties */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
@@ -1409,6 +1410,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {parentIssue && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${parentIssueOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setParentIssueOpen(!parentIssueOpen)}
           >
@@ -1434,6 +1436,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {githubSettings.prSidebar && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${pullRequestsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setPullRequestsOpen(!pullRequestsOpen)}
           >
@@ -1447,6 +1450,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {/* Details */}
       <div>
         <button
+          type="button"
           className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDetailsOpen(!detailsOpen)}
         >
@@ -1476,6 +1480,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {usage && usage.task_count > 0 && (
         <div>
           <button
+            type="button"
             className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
             onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
           >
@@ -1600,136 +1605,113 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const detailContent = (
     <div className="flex h-full min-w-0 flex-1 flex-col">
-        <PageHeader className="gap-2 bg-background text-sm">
-          <div className="flex flex-1 items-center gap-1.5 min-w-0">
-            {workspace && (
-              <>
-                <AppLink
-                  href={paths.issues()}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  {workspace.name}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {issueProjectId && (
-              <>
-                {breadcrumbProject ? (
-                  <AppLink
-                    href={paths.featureDetail(breadcrumbProject.id)}
-                    className="flex items-center gap-1 min-w-0 max-w-72 text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    <FeatureIcon feature={breadcrumbProject} size="sm" />
-                    <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
-                  </AppLink>
-                ) : breadcrumbProjectError ? (
-                  <span className="italic text-muted-foreground/70 shrink-0">
-                    {t(($) => $.detail.breadcrumb_feature_unknown)}
-                  </span>
-                ) : (
-                  <Skeleton className="h-3.5 w-20 shrink-0" />
-                )}
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            {parentIssue && (
-              <>
-                <AppLink
-                  href={paths.issueDetail(parentIssue.id)}
-                  className="text-muted-foreground hover:text-foreground transition-colors truncate shrink-0"
-                >
-                  {parentIssue.identifier}
-                </AppLink>
-                <ChevronRight className="h-3 w-3 text-muted-foreground/50 shrink-0" />
-              </>
-            )}
-            <span className="text-muted-foreground tabular-nums shrink-0">
-              {issue.identifier}
-            </span>
-            <span className="truncate font-medium text-foreground">
-              {issue.title}
-            </span>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
+        <BreadcrumbHeader
+          segments={[
+            ...(workspace ? [{ label: workspace.name, href: paths.issues() } satisfies BreadcrumbSegment] : []),
+            ...(issueProjectId ? [{
+              label: breadcrumbProject ? (
+                <span className="flex items-center gap-1 min-w-0">
+                  <FeatureIcon feature={breadcrumbProject} size="sm" />
+                  <span className="min-w-0 truncate">{breadcrumbProject.title}</span>
+                </span>
+              ) : breadcrumbProjectError ? (
+                <span className="italic">{t(($) => $.detail.breadcrumb_feature_unknown)}</span>
+              ) : (
+                <Skeleton className="h-3.5 w-20 shrink-0" />
+              ),
+              href: breadcrumbProject ? paths.featureDetail(breadcrumbProject.id) : undefined,
+              className: breadcrumbProject ? "max-w-72" : undefined,
+            } satisfies BreadcrumbSegment] : []),
+            ...(parentIssue ? [{ label: parentIssue.identifier, href: paths.issueDetail(parentIssue.id), className: "shrink-0" } satisfies BreadcrumbSegment] : []),
+            {
+              label: (
+                <>
+                  <span className="text-muted-foreground tabular-nums shrink-0">{issue.identifier}</span>
+                  <span className="truncate">{issue.title}</span>
+                </>
+              ),
+              className: "flex items-center gap-1.5 min-w-0",
+            } satisfies BreadcrumbSegment,
+          ]}
+          actions={
+            <>
+              {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
+                      >
+                        <CircleCheck />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.detail.mark_done_tooltip)}</TooltipContent>
+                </Tooltip>
+              )}
+              {onDone && issue.status === "done" && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        onClick={() => { onDone(); }}
+                      >
+                        <Archive />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.detail.archive_tooltip)}</TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      className="text-muted-foreground"
-                      onClick={() => { handleUpdateField({ status: "done" }); onDone?.(); }}
+                      className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
+                      onClick={actions.togglePin}
                     >
-                      <CircleCheck />
+                      {actions.isPinned ? <PinOff /> : <Pin />}
                     </Button>
                   }
                 />
-                <TooltipContent side="bottom">{t(($) => $.detail.mark_done_tooltip)}</TooltipContent>
+                <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
               </Tooltip>
-            )}
-            {onDone && issue.status === "done" && (
+              <IssueActionsDropdown
+                issue={issue}
+                align="end"
+                onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+                trigger={
+                  <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+                    <MoreHorizontal />
+                  </Button>
+                }
+              />
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
-                      variant="ghost"
+                      variant={sidebarOpen ? "secondary" : "ghost"}
                       size="icon-sm"
-                      className="text-muted-foreground"
-                      onClick={() => { onDone(); }}
+                      className={sidebarOpen ? "" : "text-muted-foreground"}
+                      onClick={handleToggleSidebar}
                     >
-                      <Archive />
+                      <PanelRight />
                     </Button>
                   }
                 />
-                <TooltipContent side="bottom">{t(($) => $.detail.archive_tooltip)}</TooltipContent>
+                <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
               </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
-                    onClick={actions.togglePin}
-                  >
-                    {actions.isPinned ? <PinOff /> : <Pin />}
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
-            </Tooltip>
-            <IssueActionsDropdown
-              issue={issue}
-              align="end"
-              // When a parent passes `onDelete`, we detect deletion via effect
-              // above and skip navigation. Otherwise the modal navigates for us.
-              onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
-              trigger={
-                <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
-                  <MoreHorizontal />
-                </Button>
-              }
-            />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant={sidebarOpen ? "secondary" : "ghost"}
-                    size="icon-sm"
-                    className={sidebarOpen ? "" : "text-muted-foreground"}
-                    onClick={handleToggleSidebar}
-                  >
-                    <PanelRight />
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-            </Tooltip>
-          </div>
-        </PageHeader>
+            </>
+          }
+        />
 
         <div
           ref={setScrollContainerEl}
@@ -1905,6 +1887,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               </div>
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
                   onClick={handleToggleSubscribe}
                   className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >

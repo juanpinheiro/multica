@@ -1013,7 +1013,7 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAutopilot: %v", err)
 	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchAutopilot schedule duplicate: %v", err)
 	}
@@ -1096,7 +1096,7 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAutopilot: %v", err)
 	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}
@@ -1189,7 +1189,7 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAutopilot: %v", err)
 	}
-	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}

@@ -2,12 +2,77 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"testing"
 )
+
+// createWorkspaceForMode posts a create request and returns the decoded
+// response, cleaning up the workspace when the test ends.
+func createWorkspaceForMode(t *testing.T, slug string, body map[string]any) WorkspaceResponse {
+	t.Helper()
+	ctx := context.Background()
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	w := httptest.NewRecorder()
+	testHandler.CreateWorkspace(w, newRequest("POST", "/api/workspaces", body))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateWorkspace: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp WorkspaceResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+	})
+	return resp
+}
+
+func TestCreateWorkspace_DefaultsModeToWorktree(t *testing.T) {
+	resp := createWorkspaceForMode(t, "mode-default-ws", map[string]any{
+		"name": "Mode Default",
+		"slug": "mode-default-ws",
+	})
+	if resp.Mode != "worktree" {
+		t.Fatalf("Mode = %q, want worktree default", resp.Mode)
+	}
+}
+
+func TestCreateWorkspace_PersistsInPlaceMode(t *testing.T) {
+	resp := createWorkspaceForMode(t, "mode-inplace-ws", map[string]any{
+		"name": "Mode In Place",
+		"slug": "mode-inplace-ws",
+		"mode": "in_place",
+	})
+	if resp.Mode != "in_place" {
+		t.Fatalf("Mode = %q, want in_place", resp.Mode)
+	}
+
+	var stored string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT mode FROM workspace WHERE slug = $1`, "mode-inplace-ws").Scan(&stored); err != nil {
+		t.Fatalf("read stored mode: %v", err)
+	}
+	if stored != "in_place" {
+		t.Fatalf("stored mode = %q, want in_place", stored)
+	}
+}
+
+func TestCreateWorkspace_UnknownModeFallsBackToWorktree(t *testing.T) {
+	resp := createWorkspaceForMode(t, "mode-unknown-ws", map[string]any{
+		"name": "Mode Unknown",
+		"slug": "mode-unknown-ws",
+		"mode": "isolated",
+	})
+	if resp.Mode != "worktree" {
+		t.Fatalf("Mode = %q, want worktree (unknown falls back)", resp.Mode)
+	}
+}
 
 func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 	// Drive the test off the actual reservedSlugs map so the test can never

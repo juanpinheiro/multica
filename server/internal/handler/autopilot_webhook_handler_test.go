@@ -102,6 +102,22 @@ func postWebhook(t *testing.T, token string, body any, headers map[string]string
 	return w
 }
 
+func setTriggerEventFilters(t *testing.T, triggerID string, filters []string) {
+	t.Helper()
+	if filters == nil {
+		filters = []string{}
+	}
+	if _, err := testHandler.Queries.SetAutopilotTriggerEventFilters(
+		context.Background(),
+		db.SetAutopilotTriggerEventFiltersParams{
+			ID:           parseUUID(triggerID),
+			EventFilters: filters,
+		},
+	); err != nil {
+		t.Fatalf("set event filters: %v", err)
+	}
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 func TestCreateWebhookTrigger_GeneratesToken(t *testing.T) {
@@ -662,3 +678,107 @@ func TestGetAutopilotRun_ReturnsFullPayload(t *testing.T) {
 // Queries interface to drive deterministically. We pin the behaviour
 // via code review rather than a brittle race test. See PR #2348 review
 // item under "Test coverage gaps."
+
+// ── Event filter tests ───────────────────────────────────────────────────────
+
+func TestWebhookHandler_EventFilterMatch_Dispatches(t *testing.T) {
+	// An event that matches the trigger's filter must be dispatched normally.
+	agentID := createWebhookTestAgent(t, "EventFilterMatch Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	// Set event_filters to only allow "github.push".
+	setTriggerEventFilters(t, trig.ID, []string{"github.push"})
+
+	headers := map[string]string{"X-GitHub-Event": "push"}
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"ref": "refs/heads/main"}, headers)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "accepted" {
+		t.Fatalf("expected accepted, got %v body=%s", resp["status"], w.Body.String())
+	}
+}
+
+func TestWebhookHandler_EventFilterMismatch_RecordsSkip(t *testing.T) {
+	// An event that does NOT match the trigger's filter must be recorded as a
+	// skipped run, not dispatched.
+	agentID := createWebhookTestAgent(t, "EventFilterMismatch Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	// Set filter to only allow "github.push".
+	setTriggerEventFilters(t, trig.ID, []string{"github.push"})
+
+	// Send a pull_request event — should be filtered out.
+	headers := map[string]string{"X-GitHub-Event": "pull_request"}
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"action": "opened"}, headers)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "skipped" {
+		t.Fatalf("expected skipped, got %v body=%s", resp["status"], w.Body.String())
+	}
+	if resp["reason"] != "event_filter_mismatch" {
+		t.Fatalf("expected event_filter_mismatch reason, got %v", resp["reason"])
+	}
+	runID, _ := resp["run_id"].(string)
+	if runID == "" {
+		t.Fatal("run_id should be present for filter-skipped event")
+	}
+	// The run must be persisted with status=skipped.
+	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), parseUUID(runID))
+	if err != nil {
+		t.Fatalf("load skipped run: %v", err)
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("run.status: got %q want skipped", run.Status)
+	}
+	if !run.FailureReason.Valid || run.FailureReason.String != "event_filter_mismatch" {
+		t.Fatalf("run.failure_reason: got %v", run.FailureReason)
+	}
+}
+
+func TestWebhookHandler_EmptyEventFilter_FiresOnAllEvents(t *testing.T) {
+	// An empty filter list must preserve the fire-on-everything behavior.
+	agentID := createWebhookTestAgent(t, "EventFilterEmpty Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	// Explicitly set empty filters (no filter).
+	setTriggerEventFilters(t, trig.ID, []string{})
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"anything": "works"}, nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "accepted" {
+		t.Fatalf("expected accepted with empty filter, got %v body=%s", resp["status"], w.Body.String())
+	}
+}
+
+func TestWebhookHandler_EventFilterGlobPattern_Matches(t *testing.T) {
+	// A glob pattern like "github.pull_request.*" should match sub-events.
+	agentID := createWebhookTestAgent(t, "EventFilterGlob Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	setTriggerEventFilters(t, trig.ID, []string{"github.pull_request.*"})
+
+	headers := map[string]string{"X-GitHub-Event": "pull_request"}
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"action": "closed"}, headers)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "accepted" {
+		t.Fatalf("expected accepted for glob match, got %v body=%s", resp["status"], w.Body.String())
+	}
+}

@@ -435,6 +435,40 @@ func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
 	}
 }
 
+func TestBuildPromptQuickCreate_WithParent(t *testing.T) {
+	t.Parallel()
+
+	parentID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	prompt := BuildPrompt(Task{
+		QuickCreatePrompt:        "create a sub-task for the login page",
+		QuickCreateParentIssueID: parentID,
+		Agent:                    &AgentData{ID: "agent-1", Name: "TestAgent"},
+	}, "claude")
+
+	if !strings.Contains(prompt, "--parent") {
+		t.Fatalf("prompt missing --parent flag:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, parentID) {
+		t.Fatalf("prompt missing parent issue UUID %q:\n%s", parentID, prompt)
+	}
+}
+
+func TestBuildPromptQuickCreate_WithoutParent(t *testing.T) {
+	t.Parallel()
+
+	prompt := BuildPrompt(Task{
+		QuickCreatePrompt: "create a top-level issue",
+		Agent:             &AgentData{ID: "agent-1", Name: "TestAgent"},
+	}, "claude")
+
+	if strings.Contains(prompt, "--parent") {
+		t.Fatalf("prompt should not contain --parent when no parent set:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "omit") {
+		t.Fatalf("prompt should say parent is omitted when no parent set:\n%s", prompt)
+	}
+}
+
 func TestIsWorkspaceNotFoundError(t *testing.T) {
 	t.Parallel()
 
@@ -1890,5 +1924,121 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	// given that the runner blocks on runCtx.Done().
 	if usageIdx < pollStatusIdx {
 		t.Fatalf("usage reported before poll-status (order: %v) — poll-status must come first", order)
+	}
+}
+
+func TestIsTransientCallbackError_NetworkError(t *testing.T) {
+	t.Parallel()
+	if !isTransientCallbackError(errors.New("connection refused")) {
+		t.Fatal("plain network error should be transient")
+	}
+}
+
+func TestIsTransientCallbackError_5xxIsTransient(t *testing.T) {
+	t.Parallel()
+	for _, code := range []int{500, 502, 503, 504} {
+		if !isTransientCallbackError(&requestError{StatusCode: code}) {
+			t.Errorf("status %d should be transient", code)
+		}
+	}
+}
+
+func TestIsTransientCallbackError_4xxNotTransient(t *testing.T) {
+	t.Parallel()
+	for _, code := range []int{400, 404, 409, 422} {
+		if isTransientCallbackError(&requestError{StatusCode: code}) {
+			t.Errorf("status %d should not be transient", code)
+		}
+	}
+}
+
+func TestIsTransientCallbackError_NilNotTransient(t *testing.T) {
+	t.Parallel()
+	if isTransientCallbackError(nil) {
+		t.Fatal("nil should not be transient")
+	}
+}
+
+func TestIsTransientCallbackError_ContextCancelledNotTransient(t *testing.T) {
+	t.Parallel()
+	if isTransientCallbackError(context.Canceled) {
+		t.Fatal("context.Canceled should not be transient")
+	}
+	if isTransientCallbackError(context.DeadlineExceeded) {
+		t.Fatal("context.DeadlineExceeded should not be transient")
+	}
+}
+
+// TestReportTaskResult_RetriesOnTransient verifies that reportTaskResult retries
+// the CompleteTask call when it receives a transient 5xx before succeeding.
+func TestReportTaskResult_RetriesOnTransient(t *testing.T) {
+	t.Parallel()
+	t.Cleanup(func() { terminalCallbackRetryDelay = 2 * time.Second })
+	terminalCallbackRetryDelay = 0
+
+	taskID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	callCount := new(atomic.Int32)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/complete") {
+			http.NotFound(w, r)
+			return
+		}
+		n := callCount.Add(1)
+		if n < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.client.SetToken("test-token")
+
+	d.reportTaskResult(context.Background(), taskID, TaskResult{Status: "completed"}, slog.Default())
+
+	if n := callCount.Load(); n != 3 {
+		t.Fatalf("expected 3 calls (2 transient + 1 success), got %d", n)
+	}
+}
+
+// TestReportTaskResult_GivesUpAfterMaxAttempts verifies that after all retry
+// attempts fail with transient errors, the daemon falls back to FailTask.
+func TestReportTaskResult_GivesUpAfterMaxAttempts(t *testing.T) {
+	t.Parallel()
+	t.Cleanup(func() { terminalCallbackRetryDelay = 2 * time.Second })
+	terminalCallbackRetryDelay = 0
+
+	taskID := "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+	completeCalls := new(atomic.Int32)
+	failCalls := new(atomic.Int32)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/complete"):
+			completeCalls.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+		case strings.HasSuffix(r.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.client.SetToken("test-token")
+
+	d.reportTaskResult(context.Background(), taskID, TaskResult{Status: "completed"}, slog.Default())
+
+	if n := completeCalls.Load(); n != maxTerminalCallbackAttempts {
+		t.Fatalf("expected %d complete calls, got %d", maxTerminalCallbackAttempts, n)
+	}
+	if n := failCalls.Load(); n < 1 {
+		t.Fatal("expected at least 1 fail call after complete exhausted retries")
 	}
 }

@@ -11,16 +11,20 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/multica-ai/multica/server/internal/workspace/execmode"
 	"github.com/multica-ai/multica/server/internal/workspace/manifest"
 	"github.com/multica-ai/multica/server/internal/workspace/reconcile"
 )
 
 // Workspace is the minimal identity the resolver returns and the consumer
 // stamps onto API requests. Slug is always set when known; ID is set when the
-// server has been consulted.
+// server has been consulted. Mode is the workspace's execution mode — the
+// server's current value when read from a listing, the manifest's effective
+// value on the resolved result.
 type Workspace struct {
 	ID   string
 	Slug string
+	Mode string
 }
 
 // RepoInput is a repo the resolver asks the server to register during a
@@ -36,8 +40,12 @@ type RepoInput struct {
 type Server interface {
 	// ListWorkspaces returns every workspace the caller can access.
 	ListWorkspaces(ctx context.Context) ([]Workspace, error)
-	// CreateWorkspace registers a new workspace and returns it with its ID.
-	CreateWorkspace(ctx context.Context, slug, name string) (Workspace, error)
+	// CreateWorkspace registers a new workspace with the given execution mode
+	// and returns it with its ID.
+	CreateWorkspace(ctx context.Context, slug, name, mode string) (Workspace, error)
+	// UpdateWorkspaceMode projects a new execution mode onto an existing
+	// workspace.
+	UpdateWorkspaceMode(ctx context.Context, workspaceID, mode string) error
 	// ListRepoNames returns the names of repos registered under a workspace.
 	ListRepoNames(ctx context.Context, workspaceID string) ([]string, error)
 	// CreateRepo registers a repo under a workspace.
@@ -169,8 +177,12 @@ func resolveManifest(ctx context.Context, srv Server, fs FS, manifestPath string
 	if err != nil {
 		return Result{}, fmt.Errorf("parse manifest %s: %w", manifestPath, err)
 	}
+	mode, known := execmode.Normalize(m.Mode)
+	if !known {
+		warnf("workspace %q: unknown execution mode %q, using %q", m.Workspace, m.Mode, execmode.Worktree)
+	}
 
-	ws := Workspace{Slug: m.Workspace}
+	ws := Workspace{Slug: m.Workspace, Mode: mode}
 	dir := manifest.ManifestDir(manifestPath)
 	if id, err := applyManifest(ctx, srv, m, dir, fs, warnf); err != nil {
 		warnf("workspace %q: reconcile skipped: %v", m.Workspace, err)
@@ -193,11 +205,19 @@ func applyManifest(ctx context.Context, srv Server, m manifest.Manifest, dir str
 	plan := reconcile.Reconcile(m, state)
 
 	if plan.CreateWorkspace {
-		created, err := srv.CreateWorkspace(ctx, m.Workspace, m.Workspace)
+		created, err := srv.CreateWorkspace(ctx, m.Workspace, m.Workspace, plan.WorkspaceMode)
 		if err != nil {
 			return "", err
 		}
 		workspaceID = created.ID
+	} else if plan.UpdateMode {
+		if err := srv.UpdateWorkspaceMode(ctx, workspaceID, plan.WorkspaceMode); err != nil {
+			return "", err
+		}
+	}
+
+	if plan.WorkspaceMode == execmode.InPlace && (plan.CreateWorkspace || plan.UpdateMode) {
+		warnf("workspace %q: in-place execution is serial — a second task waits until the first releases", m.Workspace)
 	}
 
 	for _, repo := range plan.ReposToCreate {
@@ -234,6 +254,7 @@ func serverState(ctx context.Context, srv Server, m manifest.Manifest, dir strin
 	for _, ws := range workspaces {
 		if ws.Slug == m.Workspace {
 			state.WorkspaceExists = true
+			state.WorkspaceMode = ws.Mode
 			workspaceID = ws.ID
 			break
 		}

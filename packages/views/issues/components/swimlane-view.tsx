@@ -310,12 +310,10 @@ function buildFeatureLanes(
   for (const p of features) featureMap.set(p.id, p);
 
   const seen = new Map<string, LaneGroup>();
-  for (const issue of visibleIssues) {
-    if (issue.feature_id === null) continue;
-    const key = `feature:${issue.feature_id}`;
-    if (seen.has(key)) continue;
-    const feature = featureMap.get(issue.feature_id) ?? null;
-    const featureId = issue.feature_id;
+
+  function addFeatureLane(featureId: string, feature: Feature | null) {
+    const key = `feature:${featureId}`;
+    if (seen.has(key)) return;
     seen.set(key, {
       key,
       rawId: featureId,
@@ -329,6 +327,19 @@ function buildFeatureLanes(
       matches: (i) => i.feature_id === featureId,
       moveUpdates: { feature_id: featureId },
     });
+  }
+
+  // Include lanes for all known features so that features whose issues
+  // are on a later page (not yet loaded) still render a lane header.
+  for (const feature of features) {
+    addFeatureLane(feature.id, feature);
+  }
+
+  // Also pick up any feature ids that appear in visible issues but are
+  // not in the features list (e.g. stale cache or race condition).
+  for (const issue of visibleIssues) {
+    if (issue.feature_id === null) continue;
+    addFeatureLane(issue.feature_id, featureMap.get(issue.feature_id) ?? null);
   }
 
   const orderIndex = new Map<string, number>();

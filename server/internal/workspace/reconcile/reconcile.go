@@ -1,6 +1,7 @@
 package reconcile
 
 import (
+	"github.com/multica-ai/multica/server/internal/workspace/execmode"
 	"github.com/multica-ai/multica/server/internal/workspace/manifest"
 	"github.com/multica-ai/multica/server/internal/workspace/scan"
 )
@@ -17,6 +18,9 @@ type WorkspaceState struct {
 	RepoDiskPresence map[string]bool
 	// ScannedRepos are git repos discovered on disk by the scanner.
 	ScannedRepos []scan.Candidate
+	// WorkspaceMode is the execution mode the workspace currently has on the
+	// server. Empty when the workspace is absent.
+	WorkspaceMode string
 }
 
 // Plan describes the actions needed to reconcile the manifest with the server.
@@ -29,6 +33,12 @@ type Plan struct {
 	ReposMissingOnDisk []string
 	// ReposOrphanOnDisk are git repos found on disk that are absent from the manifest.
 	ReposOrphanOnDisk []scan.Candidate
+	// WorkspaceMode is the normalized execution mode the manifest declares. It
+	// is the mode to set on create and the target of a switch.
+	WorkspaceMode string
+	// UpdateMode is true when the workspace exists but its server mode differs
+	// from the manifest's, so the reconciler must project the new mode onto it.
+	UpdateMode bool
 }
 
 // Reconcile computes what actions are needed to bring the server in sync with m.
@@ -37,6 +47,10 @@ func Reconcile(m manifest.Manifest, srv WorkspaceState) Plan {
 	var p Plan
 
 	p.CreateWorkspace = !srv.WorkspaceExists
+
+	desiredMode, _ := execmode.Normalize(m.Mode)
+	p.WorkspaceMode = desiredMode
+	p.UpdateMode = srv.WorkspaceExists && srv.WorkspaceMode != desiredMode
 
 	// Build a set of manifest repo names for orphan detection.
 	manifestNames := make(map[string]bool, len(m.Repos))

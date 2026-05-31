@@ -195,6 +195,7 @@
     "skills": "Skills",
     "environment": "Environment",
     "custom_args": "Custom Args",
+    "mcp": "MCP",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -294,6 +295,17 @@
       "saved_toast": "Custom arguments saved",
       "save_failed_toast": "Failed to save custom arguments"
     },
+    "mcp": {
+      "intro": "Pass MCP server configuration to this agent when it runs. Forwarded verbatim via --mcp-config to the agent CLI.",
+      "label": "Configuration (JSON)",
+      "placeholder": "{\n  \"mcpServers\": {\n    \"my-server\": {\n      \"command\": \"npx\",\n      \"args\": [\"-y\", \"@my/mcp-server\"]\n    }\n  }\n}",
+      "redacted_notice": "The MCP configuration for this agent is hidden. Only workspace admins and the agent owner can view or edit it.",
+      "invalid_json": "Invalid JSON",
+      "invalid_schema": "Must be a JSON object with a top-level mcpServers key",
+      "empty_state": "No MCP configuration set. Paste a JSON config below to give this agent access to MCP servers.",
+      "saved_toast": "MCP configuration saved",
+      "save_failed_toast": "Failed to save MCP configuration"
+    },
     "skills": {
       "intro": "Workspace skills assigned to this agent. Local runtime skills are always available automatically.",
       "add_action": "Add skill",
@@ -352,7 +364,11 @@
       "cancel_failed_toast": "Failed to cancel task",
       "started_prefix": "Started {{when}}",
       "dispatched_prefix": "Dispatched {{when}}",
-      "queued_prefix": "Queued {{when}}"
+      "queued_prefix": "Queued {{when}}",
+      "waiting_prefix": "Waiting since {{when}}",
+      "wait_reason_label": "Waiting for: {{reason}}",
+      "exec_mode_inplace_badge": "in-place",
+      "exec_mode_inplace_tooltip": "Running in the workspace's real directory — executes serially"
     }
   },
   "char_counter": {

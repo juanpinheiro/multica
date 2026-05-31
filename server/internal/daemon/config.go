@@ -1,12 +1,14 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -31,16 +33,16 @@ const (
 	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
 	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
 	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog = 30 * time.Minute
-	DefaultRuntimeName                    = "Local Agent"
-	DefaultWorkspaceSyncInterval          = 30 * time.Second
-	DefaultHealthPort                     = 19514
-	DefaultMaxConcurrentTasks             = 20
-	DefaultGCInterval                     = 1 * time.Hour
-	DefaultGCTTL                          = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL                    = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
-	DefaultGCArtifactTTL                  = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
-	DefaultAutoUpdateCheckInterval        = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	DefaultAgentIdleWatchdog       = 30 * time.Minute
+	DefaultRuntimeName             = "Local Agent"
+	DefaultWorkspaceSyncInterval   = 30 * time.Second
+	DefaultHealthPort              = 19514
+	DefaultMaxConcurrentTasks      = 20
+	DefaultGCInterval              = 1 * time.Hour
+	DefaultGCTTL                   = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -173,6 +175,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if e, ok := probe("MULTICA_CODEX_PATH", "codex", "MULTICA_CODEX_MODEL"); ok {
 		agents["codex"] = e
+	} else if e, ok := probeBundle(codexDesktopBundleCandidates(), strings.TrimSpace(os.Getenv("MULTICA_CODEX_MODEL"))); ok {
+		agents["codex"] = e
 	}
 	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
 		agents["opencode"] = e
@@ -218,6 +222,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	host, err := os.Hostname()
 	if err != nil || strings.TrimSpace(host) == "" {
 		host = "local-machine"
+	}
+	// WSL2 consolidation: when running inside WSL2 on a Windows host, replace
+	// the WSL2 VM hostname with the Windows machine name so the daemon registers
+	// under the same device_name as the native Windows daemon. This prevents the
+	// two daemons from appearing as separate runtimes in the UI.
+	if isWSL2() {
+		if winHost := os.Getenv("COMPUTERNAME"); winHost != "" {
+			host = strings.ToLower(winHost)
+		}
 	}
 
 	// Durations: override > env > default
@@ -540,6 +553,50 @@ var defaultAgentCommandNames = []string{
 	"gemini", "pi", "cursor-agent", "copilot", "kimi", "kiro-cli",
 }
 
+// codexBundleCandidatesForTest overrides the candidates returned by
+// codexDesktopBundleCandidates in tests that need to inject a fake path.
+// nil means use the real platform candidates.
+var codexBundleCandidatesForTest []string
+
+// codexDesktopBundleCandidates returns filesystem paths where Codex Desktop
+// may have installed its bundled CLI on the current platform. These supplement
+// the standard PATH and login-shell lookups so the daemon works out-of-the-box
+// for users who installed Codex via its desktop application rather than a
+// standalone package manager.
+func codexDesktopBundleCandidates() []string {
+	if codexBundleCandidatesForTest != nil {
+		return codexBundleCandidatesForTest
+	}
+	var paths []string
+	switch runtime.GOOS {
+	case "darwin":
+		home, err := os.UserHomeDir()
+		if err == nil {
+			paths = append(paths,
+				filepath.Join(home, "Applications", "Codex.app", "Contents", "MacOS", "codex"),
+			)
+		}
+		paths = append(paths, "/Applications/Codex.app/Contents/MacOS/codex")
+	case "windows":
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			paths = append(paths, filepath.Join(local, "Programs", "codex", "codex.exe"))
+		}
+	}
+	return paths
+}
+
+// probeBundle tries each candidate path with exec.LookPath and returns the
+// first that resolves to an executable file. model is copied verbatim into the
+// resulting AgentEntry (typically from the corresponding MULTICA_*_MODEL env var).
+func probeBundle(candidates []string, model string) (AgentEntry, bool) {
+	for _, p := range candidates {
+		if _, err := exec.LookPath(p); err == nil {
+			return AgentEntry{Path: p, Model: strings.TrimSpace(model)}, true
+		}
+	}
+	return AgentEntry{}, false
+}
+
 // loginShellResolveTimeout caps how long the daemon will wait for the user's
 // login shell to print canonical agent paths. A broken rc file should not
 // block startup — if the shell takes longer than this, we proceed without
@@ -726,4 +783,21 @@ func isSafeAgentName(s string) bool {
 		}
 	}
 	return true
+}
+
+// isWSL2 reports whether the current process is running inside a WSL2 (Windows
+// Subsystem for Linux version 2) environment. Detection uses two signals in
+// order: the WSL_DISTRO_NAME environment variable (always injected by the
+// Windows kernel into WSL2 processes) and the presence of "microsoft" in
+// /proc/version (a fallback for edge cases where the env var is stripped).
+// Returns false on non-Linux platforms where neither signal exists.
+func isWSL2() bool {
+	if os.Getenv("WSL_DISTRO_NAME") != "" {
+		return true
+	}
+	data, err := os.ReadFile("/proc/version")
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(bytes.ToLower(data), []byte("microsoft"))
 }

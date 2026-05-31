@@ -219,6 +219,10 @@ func isAccessNotFound(err error) bool {
 }
 
 func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	if meta.IssueID == "" {
+		d.logger.Warn("gc: skipping meta with empty issue_id", "dir", filepath.Base(taskDir))
+		return gcActionSkip
+	}
 	status, err := d.client.GetIssueGCCheck(ctx, meta.IssueID)
 	if err != nil {
 		if isAccessNotFound(err) {
@@ -259,6 +263,10 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 }
 
 func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	if meta.ChatSessionID == "" {
+		d.logger.Warn("gc: skipping meta with empty chat_session_id", "dir", filepath.Base(taskDir))
+		return gcActionSkip
+	}
 	status, err := d.client.GetChatSessionGCCheck(ctx, meta.ChatSessionID)
 	if err != nil {
 		if isAccessNotFound(err) {
@@ -305,6 +313,10 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 }
 
 func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	if meta.AutopilotRunID == "" {
+		d.logger.Warn("gc: skipping meta with empty autopilot_run_id", "dir", filepath.Base(taskDir))
+		return gcActionSkip
+	}
 	status, err := d.client.GetAutopilotRunGCCheck(ctx, meta.AutopilotRunID)
 	if err != nil {
 		if isAccessNotFound(err) {
@@ -356,6 +368,10 @@ func isAutopilotRunTerminal(status string) bool {
 }
 
 func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
+	if meta.TaskID == "" {
+		d.logger.Warn("gc: skipping meta with empty task_id", "dir", filepath.Base(taskDir))
+		return gcActionSkip
+	}
 	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
 	if err != nil {
 		if isAccessNotFound(err) {

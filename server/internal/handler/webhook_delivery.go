@@ -302,6 +302,7 @@ func (h *Handler) ReplayAutopilotDelivery(w http.ResponseWriter, r *http.Request
 		trigRow.ID,
 		"webhook",
 		envelopeBytes,
+		"",
 	)
 	if dispatchErr != nil {
 		respBody := map[string]any{"error": "failed to dispatch autopilot"}

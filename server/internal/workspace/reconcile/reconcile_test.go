@@ -255,6 +255,64 @@ func TestReconcile(t *testing.T) {
 	}
 }
 
+func TestReconcileMode(t *testing.T) {
+	cases := []struct {
+		name           string
+		m              manifest.Manifest
+		srv            reconcile.WorkspaceState
+		wantMode       string
+		wantUpdateMode bool
+	}{
+		{
+			name:           "absent workspace carries worktree default via create",
+			m:              manifest.Manifest{Workspace: "ws"},
+			srv:            reconcile.WorkspaceState{WorkspaceExists: false},
+			wantMode:       "worktree",
+			wantUpdateMode: false,
+		},
+		{
+			name:           "absent workspace carries explicit in_place via create",
+			m:              manifest.Manifest{Workspace: "ws", Mode: "in_place"},
+			srv:            reconcile.WorkspaceState{WorkspaceExists: false},
+			wantMode:       "in_place",
+			wantUpdateMode: false,
+		},
+		{
+			name:           "existing workspace in sync needs no update",
+			m:              manifest.Manifest{Workspace: "ws", Mode: "in_place"},
+			srv:            reconcile.WorkspaceState{WorkspaceExists: true, WorkspaceMode: "in_place"},
+			wantMode:       "in_place",
+			wantUpdateMode: false,
+		},
+		{
+			name:           "existing workspace switched to in_place needs update",
+			m:              manifest.Manifest{Workspace: "ws", Mode: "in_place"},
+			srv:            reconcile.WorkspaceState{WorkspaceExists: true, WorkspaceMode: "worktree"},
+			wantMode:       "in_place",
+			wantUpdateMode: true,
+		},
+		{
+			name:           "unknown manifest mode normalizes to worktree",
+			m:              manifest.Manifest{Workspace: "ws", Mode: "bogus"},
+			srv:            reconcile.WorkspaceState{WorkspaceExists: true, WorkspaceMode: "worktree"},
+			wantMode:       "worktree",
+			wantUpdateMode: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reconcile.Reconcile(tc.m, tc.srv)
+			if got.WorkspaceMode != tc.wantMode {
+				t.Errorf("WorkspaceMode = %q, want %q", got.WorkspaceMode, tc.wantMode)
+			}
+			if got.UpdateMode != tc.wantUpdateMode {
+				t.Errorf("UpdateMode = %v, want %v", got.UpdateMode, tc.wantUpdateMode)
+			}
+		})
+	}
+}
+
 func repoNames(repos []manifest.RepoEntry) []string {
 	names := make([]string, len(repos))
 	for i, r := range repos {

@@ -4,6 +4,7 @@ import {
   XCircle,
   Loader2,
   Play,
+  PauseCircle,
 } from "lucide-react";
 
 export const taskStatusConfig: Record<string, { label: string; icon: typeof CheckCircle2; color: string }> = {
@@ -13,4 +14,5 @@ export const taskStatusConfig: Record<string, { label: string; icon: typeof Chec
   completed: { label: "Completed", icon: CheckCircle2, color: "text-success" },
   failed: { label: "Failed", icon: XCircle, color: "text-destructive" },
   cancelled: { label: "Cancelled", icon: XCircle, color: "text-muted-foreground" },
+  waiting_local_directory: { label: "Waiting", icon: PauseCircle, color: "text-muted-foreground" },
 };

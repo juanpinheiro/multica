@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/workspace/execmode"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -308,6 +309,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
 			WorkspaceID: wsUUID,
 			DaemonID:    strToText(req.DaemonID),
+			DeviceName:  req.DeviceName,
 			Name:        name,
 			RuntimeMode: "local",
 			Provider:    provider,
@@ -336,6 +338,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			UpdatedAt:      row.UpdatedAt,
 			OwnerID:        row.OwnerID,
 			LegacyDaemonID: row.LegacyDaemonID,
+			DeviceName:     row.DeviceName,
 		}
 
 		// Inserted is false for normal daemon reconnects/upserts, so
@@ -349,6 +352,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// reassign agents + tasks onto the new UUID-keyed row, then delete
 		// the stale row so there's only ever one runtime per machine.
 		h.mergeLegacyRuntimes(r, registered, provider, req.LegacyDaemonIDs)
+
+		// WSL2 consolidation: if another runtime row shares the same physical
+		// device_name but a different daemon_id (e.g. a native Windows daemon
+		// and its WSL2 sibling both registered under the same COMPUTERNAME),
+		// fold the stale row into the newly registered one. Non-fatal — a
+		// failure here leaves both rows visible until the next registration.
+		if req.DeviceName != "" {
+			h.mergeDeviceNameRuntimes(r, registered, provider, req.DeviceName)
+		}
 
 		resp = append(resp, runtimeToResponse(registered))
 	}
@@ -448,6 +460,85 @@ func (h *Handler) mergeLegacyRuntimes(r *http.Request, registered db.AgentRuntim
 				"tasks_reassigned", tasks,
 			)
 		}
+	}
+}
+
+// mergeDeviceNameRuntimes folds any runtime row that shares the same physical
+// device_name (case-insensitive) but a different daemon_id into the newly
+// registered row. This consolidates WSL2 and Windows daemons that run on the
+// same physical host: both produce different daemon UUIDs but produce the same
+// COMPUTERNAME-derived device_name, so they should appear as a single runtime.
+//
+// The merge strategy mirrors mergeLegacyRuntimes: reassign all agents and tasks
+// to the canonical row, record the stale daemon_id as a legacy id for audit,
+// then delete the stale row. Failures are logged and non-fatal so a DB hiccup
+// does not block the registration response.
+func (h *Handler) mergeDeviceNameRuntimes(r *http.Request, registered db.AgentRuntime, provider, deviceName string) {
+	newID := uuidToString(registered.ID)
+
+	matches, err := h.Queries.FindRuntimesByDeviceName(r.Context(), db.FindRuntimesByDeviceNameParams{
+		WorkspaceID: registered.WorkspaceID,
+		Provider:    provider,
+		DeviceName:  deviceName,
+		DaemonID:    registered.DaemonID,
+	})
+	if err != nil {
+		slog.Warn("device-name runtime merge: lookup failed", "device_name", deviceName, "error", err)
+		return
+	}
+
+	merged := make(map[string]struct{})
+	for _, old := range matches {
+		oldID := uuidToString(old.ID)
+		if oldID == newID {
+			continue
+		}
+		if _, seen := merged[oldID]; seen {
+			continue
+		}
+		merged[oldID] = struct{}{}
+
+		agents, err := h.Queries.ReassignAgentsToRuntime(r.Context(), db.ReassignAgentsToRuntimeParams{
+			NewRuntimeID: registered.ID,
+			OldRuntimeID: old.ID,
+		})
+		if err != nil {
+			slog.Warn("device-name runtime merge: reassign agents failed", "device_name", deviceName, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+			continue
+		}
+		tasks, err := h.Queries.ReassignTasksToRuntime(r.Context(), db.ReassignTasksToRuntimeParams{
+			NewRuntimeID: registered.ID,
+			OldRuntimeID: old.ID,
+		})
+		if err != nil {
+			slog.Warn("device-name runtime merge: reassign tasks failed", "device_name", deviceName, "old_runtime_id", oldID, "new_runtime_id", newID, "error", err)
+			continue
+		}
+		staleDaemonID := ""
+		if old.DaemonID.Valid {
+			staleDaemonID = old.DaemonID.String
+		}
+		if staleDaemonID != "" {
+			if err := h.Queries.RecordRuntimeLegacyDaemonID(r.Context(), db.RecordRuntimeLegacyDaemonIDParams{
+				ID:             registered.ID,
+				LegacyDaemonID: strToText(staleDaemonID),
+			}); err != nil {
+				slog.Warn("device-name runtime merge: record legacy daemon_id failed", "stale_daemon_id", staleDaemonID, "error", err)
+			}
+		}
+		if err := h.Queries.DeleteAgentRuntime(r.Context(), old.ID); err != nil {
+			slog.Warn("device-name runtime merge: delete old runtime failed", "old_runtime_id", oldID, "error", err)
+			continue
+		}
+
+		slog.Info("device-name runtime merged",
+			"device_name", deviceName,
+			"old_runtime_id", oldID,
+			"new_runtime_id", newID,
+			"provider", provider,
+			"agents_reassigned", agents,
+			"tasks_reassigned", tasks,
+		)
 	}
 }
 
@@ -1108,6 +1199,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 
+			// Project the workspace's execution mode so the daemon knows whether
+			// to run in-place (umbrella, serial) or in an isolated worktree.
+			if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil {
+				resp.Mode, _ = execmode.Normalize(ws.Mode)
+			}
+
 			// Squad-leader briefing injection: when the issue is assigned
 			// to a squad and the claiming agent is that squad's current
 			// leader, append a full briefing (Operating Protocol + Roster
@@ -1398,6 +1495,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
+			if qc.ParentIssueID != "" {
+				resp.QuickCreateParentIssueID = qc.ParentIssueID
+			}
 
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
@@ -1617,6 +1717,40 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task started", "task_id", taskID, "agent_id", uuidToString(task.AgentID))
+	writeJSON(w, http.StatusOK, taskToResponse(*task))
+}
+
+// WaitTaskForLocalDirectory parks a dispatched in-place task in
+// waiting_local_directory while the umbrella directory it needs is held by
+// another task. The daemon posts it from the path locker's wait callback; the
+// reason names the held path and current holder. StartTask clears the reason
+// once the lock is acquired.
+type TaskWaitLocalDirectoryRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (h *Handler) WaitTaskForLocalDirectory(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+
+	// Verify the caller owns this task's workspace.
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	var req TaskWaitLocalDirectoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	task, err := h.TaskService.WaitTaskForLocalDirectory(r.Context(), parseUUID(taskID), req.Reason)
+	if err != nil {
+		slog.Warn("wait task for local directory failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	slog.Info("task waiting on local directory", "task_id", taskID, "reason", req.Reason)
 	writeJSON(w, http.StatusOK, taskToResponse(*task))
 }
 

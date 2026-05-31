@@ -499,3 +499,158 @@ func TestLoadConfig_SkipsLoginShellWhenLookPathSucceeds(t *testing.T) {
 		t.Fatalf("unexpected error stat-ing marker file: %v", err)
 	}
 }
+
+// TestIsWSL2_EnvVar verifies that WSL_DISTRO_NAME signals WSL2.
+func TestIsWSL2_EnvVar(t *testing.T) {
+	t.Setenv("WSL_DISTRO_NAME", "Ubuntu")
+	if !isWSL2() {
+		t.Fatal("isWSL2() = false, want true when WSL_DISTRO_NAME is set")
+	}
+}
+
+// TestIsWSL2_NoSignals verifies that isWSL2 returns false when neither
+// WSL_DISTRO_NAME is set nor /proc/version contains "microsoft".
+func TestIsWSL2_NoSignals(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		// On a real Linux machine /proc/version may or may not contain
+		// "microsoft". Only run the negative assertion when we can guarantee
+		// the env var is unset AND we know the host is not WSL2.
+		if os.Getenv("WSL_DISTRO_NAME") != "" {
+			t.Skip("running inside WSL2 — cannot test negative case")
+		}
+	}
+	t.Setenv("WSL_DISTRO_NAME", "")
+	if runtime.GOOS != "linux" {
+		// Non-Linux: /proc/version does not exist; isWSL2 must return false.
+		if isWSL2() {
+			t.Fatal("isWSL2() = true on non-Linux, want false")
+		}
+	}
+}
+
+// TestLoadConfig_WSL2UsesComputerName verifies that when the daemon is running
+// inside WSL2 (simulated via WSL_DISTRO_NAME env var), LoadConfig replaces the
+// WSL2 kernel hostname with the Windows COMPUTERNAME so the device_name
+// matches the Windows daemon's device_name.
+func TestLoadConfig_WSL2UsesComputerName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test simulates WSL2 on Linux; skipping on native Windows")
+	}
+
+	// Simulate WSL2 environment.
+	t.Setenv("WSL_DISTRO_NAME", "Ubuntu")
+	t.Setenv("COMPUTERNAME", "DESKTOP-ABC123")
+
+	// Provide a real agent so LoadConfig does not error on "no agent CLI found".
+	pathDir := t.TempDir()
+	fakeClaude := filepath.Join(pathDir, "claude")
+	if err := os.WriteFile(fakeClaude, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake claude: %v", err)
+	}
+	t.Setenv("PATH", pathDir)
+	t.Setenv("MULTICA_DAEMON_ID", "22222222-2222-2222-2222-222222222222")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Skipf("LoadConfig returned %v (environment not fully set up)", err)
+	}
+
+	// DeviceName must be the lowercase Windows host, not the WSL2 kernel hostname.
+	want := "desktop-abc123"
+	if cfg.DeviceName != want {
+		t.Fatalf("DeviceName = %q, want %q", cfg.DeviceName, want)
+	}
+}
+
+// TestProbeBundle_FirstMatchReturned verifies probeBundle returns the first
+// executable candidate and forwards the model string.
+func TestProbeBundle_FirstMatchReturned(t *testing.T) {
+	dir := t.TempDir()
+	binName := "codex"
+	if runtime.GOOS == "windows" {
+		binName = "codex.exe"
+	}
+	binPath := filepath.Join(dir, binName)
+	if err := os.WriteFile(binPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake binary: %v", err)
+	}
+	// First candidate is missing; second is present.
+	entry, ok := probeBundle([]string{filepath.Join(dir, "missing"), binPath}, "gpt-4o")
+	if !ok {
+		t.Fatal("expected probeBundle to return true for present candidate")
+	}
+	if entry.Path != binPath {
+		t.Fatalf("expected path %q, got %q", binPath, entry.Path)
+	}
+	if entry.Model != "gpt-4o" {
+		t.Fatalf("expected model %q, got %q", "gpt-4o", entry.Model)
+	}
+}
+
+func TestProbeBundle_NoCandidatesReturnsFalse(t *testing.T) {
+	_, ok := probeBundle(nil, "")
+	if ok {
+		t.Fatal("expected false for nil candidates")
+	}
+}
+
+func TestProbeBundle_AllMissingReturnsFalse(t *testing.T) {
+	_, ok := probeBundle([]string{"/no/such/path/codex", "/also/missing"}, "")
+	if ok {
+		t.Fatal("expected false when all candidates are missing")
+	}
+}
+
+// TestCodexDesktopBundleCandidates_AllAbsolute verifies that every candidate
+// path returned for the current platform is absolute.
+func TestCodexDesktopBundleCandidates_AllAbsolute(t *testing.T) {
+	for _, p := range codexDesktopBundleCandidates() {
+		if !filepath.IsAbs(p) {
+			t.Errorf("expected absolute path, got %q", p)
+		}
+	}
+}
+
+// TestLoadConfig_UsesCodexDesktopBundle verifies that when "codex" is not on
+// PATH but a file exists at a known bundle candidate path, LoadConfig picks it
+// up as the codex agent entry.
+func TestLoadConfig_UsesCodexDesktopBundle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+
+	dir := t.TempDir()
+	fakeCodex := filepath.Join(dir, "codex")
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake codex: %v", err)
+	}
+
+	// Ensure codex is NOT on the daemon PATH so the standard probe misses.
+	t.Setenv("PATH", "/usr/bin:/bin")
+	t.Setenv("SHELL", "") // disable shell fallback
+	t.Setenv("MULTICA_CODEX_PATH", "")
+	t.Setenv("MULTICA_DAEMON_ID", "cccccccc-cccc-cccc-cccc-cccccccccccc")
+
+	// Inject the fake binary as a bundle candidate.
+	origCandidates := codexBundleCandidatesForTest
+	t.Cleanup(func() { codexBundleCandidatesForTest = origCandidates })
+	codexBundleCandidatesForTest = []string{fakeCodex}
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Skipf("LoadConfig returned %v (environment not fully set up)", err)
+	}
+
+	if _, ok := cfg.Agents["codex"]; !ok {
+		t.Fatal("expected codex agent to be detected via bundle path")
+	}
+	if cfg.Agents["codex"].Path != fakeCodex {
+		t.Fatalf("expected codex path %q, got %q", fakeCodex, cfg.Agents["codex"].Path)
+	}
+}

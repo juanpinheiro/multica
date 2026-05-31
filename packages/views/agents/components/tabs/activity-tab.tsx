@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Workflow,
   X,
+  Layers2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -32,7 +33,7 @@ import {
 } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
@@ -42,6 +43,15 @@ import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function isNonTerminalStatus(status: string): boolean {
+  return (
+    status === "queued" ||
+    status === "dispatched" ||
+    status === "running" ||
+    status === "waiting_local_directory"
+  );
+}
 // Recent work pagination: small initial cohort to keep the section
 // scannable, then "Show more" reveals 20 at a time. Tasks are already
 // fully cached client-side (one listAgentTasks for the whole agent), so
@@ -68,6 +78,8 @@ interface ActivityTabProps {
  */
 export function ActivityTab({ agent }: ActivityTabProps) {
   const wsId = useWorkspaceId();
+  const workspace = useCurrentWorkspace();
+  const workspaceMode = workspace?.mode;
 
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: agentTasks = [] } = useQuery(agentTasksOptions(wsId, agent.id));
@@ -84,12 +96,7 @@ export function ActivityTab({ agent }: ActivityTabProps) {
 
   const activeTasks = useMemo(() => {
     return snapshot.filter(
-      (t) =>
-        t.agent_id === agent.id &&
-        isWorkflowTask(t) &&
-        (t.status === "running" ||
-          t.status === "queued" ||
-          t.status === "dispatched"),
+      (t) => t.agent_id === agent.id && isWorkflowTask(t) && isNonTerminalStatus(t.status),
     );
   }, [snapshot, agent.id]);
 
@@ -152,7 +159,7 @@ export function ActivityTab({ agent }: ActivityTabProps) {
 
   return (
     <div className="flex flex-col gap-4 p-6">
-      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} />
+      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} workspaceMode={workspaceMode} />
       <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />
       <RecentWorkSection
         tasks={recentTasks}
@@ -172,12 +179,30 @@ function NowSection({
   tasks,
   issueMap,
   agent,
+  workspaceMode,
 }: {
   tasks: AgentTask[];
   issueMap: Map<string, Issue>;
   agent: Agent;
+  workspaceMode?: string;
 }) {
   const { t } = useT("agents");
+  const inPlaceBadge = workspaceMode === "in_place" ? (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            data-testid="exec-mode-inplace-badge"
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium bg-accent text-foreground"
+          >
+            <Layers2 className="h-2.5 w-2.5" />
+            {t(($) => $.tab_body.activity.exec_mode_inplace_badge)}
+          </span>
+        }
+      />
+      <TooltipContent>{t(($) => $.tab_body.activity.exec_mode_inplace_tooltip)}</TooltipContent>
+    </Tooltip>
+  ) : null;
   return (
     <Section
       title={t(($) => $.tab_body.activity.section_now)}
@@ -186,16 +211,12 @@ function NowSection({
           ? t(($) => $.tab_body.activity.subtitle_no_active)
           : t(($) => $.tab_body.activity.subtitle_active, { count: tasks.length })
       }
+      badge={inPlaceBadge}
     >
       {tasks.length === 0 ? (
         <EmptyText>{t(($) => $.tab_body.activity.empty_now)}</EmptyText>
       ) : (
-        <TaskList
-          tasks={tasks}
-          issueMap={issueMap}
-          timeMode="active"
-          agent={agent}
-        />
+        <TaskList tasks={tasks} issueMap={issueMap} timeMode="active" agent={agent} />
       )}
     </Section>
   );
@@ -360,16 +381,14 @@ function TaskRow({
   const hasIssue = task.issue_id !== "";
   const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
   const isRunning = task.status === "running";
-  // Queued tasks have no messages yet — hiding the transcript button avoids
-  // a guaranteed "No execution data recorded." dialog open.
-  const showTranscript = task.status !== "queued";
-  // Cancel only makes sense for the three active states. Terminal rows
-  // (completed / failed / cancelled) hide the button entirely.
+  const isWaiting = task.status === "waiting_local_directory";
+  const showTranscript = task.status !== "queued" && !isWaiting;
   const showCancel =
     timeMode === "active" &&
     (task.status === "queued" ||
       task.status === "dispatched" ||
-      task.status === "running");
+      task.status === "running" ||
+      task.status === "waiting_local_directory");
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -513,6 +532,18 @@ function TaskRow({
               <span className="text-destructive">{failureLabel}</span>
             </>
           )}
+          {isWaiting && task.wait_reason && (
+            <>
+              <Sep />
+              <span
+                data-testid="task-wait-reason"
+                className="truncate max-w-[240px]"
+                title={task.wait_reason}
+              >
+                {t(($) => $.tab_body.activity.wait_reason_label, { reason: task.wait_reason })}
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -569,19 +600,22 @@ function TaskRow({
 function Section({
   title,
   subtitle,
+  badge,
   children,
 }: {
   title: string;
   subtitle: string;
+  badge?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <section className="flex flex-col gap-3 rounded-lg border bg-background p-5">
-      <div className="flex items-baseline gap-2">
+      <div className="flex items-center gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           {title}
         </h3>
         <span className="text-[11px] text-muted-foreground/70">{subtitle}</span>
+        {badge}
       </div>
       {children}
     </section>
@@ -608,6 +642,9 @@ function activeTaskTimeText(task: AgentTask, t: AgentsT, timeAgo: TimeAgoFn): st
   }
   if (task.status === "dispatched" && task.dispatched_at) {
     return t(($) => $.tab_body.activity.dispatched_prefix, { when: timeAgo(task.dispatched_at) });
+  }
+  if (task.status === "waiting_local_directory") {
+    return t(($) => $.tab_body.activity.waiting_prefix, { when: timeAgo(task.created_at) });
   }
   return t(($) => $.tab_body.activity.queued_prefix, { when: timeAgo(task.created_at) });
 }

@@ -169,6 +169,22 @@ make setup-worktree     # Setup using .env.worktree
 make start-worktree     # Start using .env.worktree
 ```
 
+## .multica Directory Layout
+
+The `.multica/` directory at the umbrella root serves two distinct purposes that must never collide:
+
+| Path | Owner | Purpose |
+|---|---|---|
+| `.multica/workspace.toml` | Developer (checked in) | Multi-repo manifest: workspace slug, execution mode, repo list |
+| `.multica/feature/` | Daemon (written at task start) | In-place runtime context: `resources.json` with feature resources |
+
+**Rules:**
+
+- `workspace.toml` is the only file the manifest resolver reads. `manifest.Find` walks up from the agent's working directory looking for this exact file by name — it never scans the `.multica/` directory or reads any other child path.
+- `.multica/feature/resources.json` is written by `execenv.WriteInPlaceContextFiles` (via `writeFeatureResources`) at task dispatch time. The constant `execenv.InPlaceFeatureDir` (`".multica/feature"`) is the single source of truth for this path.
+- The reconciler (`workspace/reconcile`) is a pure function that receives a pre-parsed `Manifest` struct — it reads nothing from disk and is entirely unaffected by the presence of the runtime-context sibling.
+- Never add files directly under `.multica/` (i.e., siblings of `workspace.toml`) without first checking that `manifest.Find` still resolves correctly. The resolver probes `workspace.toml` by exact name only, so any sibling is safe as long as it is not also named `workspace.toml`.
+
 ## Coding Rules
 
 - TypeScript strict mode is enabled; keep types explicit.

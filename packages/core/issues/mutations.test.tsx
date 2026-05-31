@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "./mutations";
+import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus, useUpdateComment } from "./mutations";
 import {
   issueKeys,
   type IssueSortParam,
@@ -20,6 +20,8 @@ import type {
   ListIssuesParams,
   ListGroupedIssuesParams,
   ListIssuesResponse,
+  TimelineEntry,
+  Attachment,
 } from "../types";
 
 vi.mock("../hooks", () => ({
@@ -310,5 +312,117 @@ describe("useLoadMoreByAssigneeGroup", () => {
       "issue-1",
       "issue-2",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useUpdateComment
+// ---------------------------------------------------------------------------
+
+function makeAttachment(id: string): Attachment {
+  return {
+    id,
+    workspace_id: WS_ID,
+    issue_id: "issue-1",
+    comment_id: "comment-1",
+    chat_session_id: null,
+    chat_message_id: null,
+    uploader_type: "member",
+    uploader_id: "user-1",
+    filename: `${id}.txt`,
+    url: `https://cdn.example.com/${id}.txt`,
+    download_url: `https://cdn.example.com/${id}.txt`,
+    content_type: "text/plain",
+    size_bytes: 100,
+    created_at: "2025-01-01T00:00:00Z",
+  };
+}
+
+function makeTimelineEntry(overrides: Partial<TimelineEntry> = {}): TimelineEntry {
+  return {
+    type: "comment",
+    id: "comment-1",
+    actor_type: "member",
+    actor_id: "user-1",
+    created_at: "2025-01-01T00:00:00Z",
+    content: "original content",
+    attachments: [],
+    ...overrides,
+  };
+}
+
+describe("useUpdateComment", () => {
+  const ISSUE_ID = "issue-1";
+  let qc: QueryClient;
+  let updateComment: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    updateComment = vi.fn().mockResolvedValue({
+      id: "comment-1",
+      content: "updated content",
+      attachments: [],
+    });
+    setApiInstance({ updateComment } as unknown as ApiClient);
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("optimistically removes attachments from the timeline cache", async () => {
+    const attachment = makeAttachment("att-1");
+    const entry = makeTimelineEntry({ attachments: [attachment] });
+    qc.setQueryData(issueKeys.timeline(ISSUE_ID), [entry]);
+
+    const { result } = renderHook(() => useUpdateComment(ISSUE_ID), { wrapper: createWrapper(qc) });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        commentId: "comment-1",
+        content: "updated content",
+        removeAttachmentIds: ["att-1"],
+      });
+    });
+
+    const cached = qc.getQueryData<TimelineEntry[]>(issueKeys.timeline(ISSUE_ID));
+    const updatedEntry = cached?.find((e) => e.id === "comment-1");
+    expect(updatedEntry?.attachments).toEqual([]);
+  });
+
+  it("passes removeAttachmentIds to the API client", async () => {
+    qc.setQueryData(issueKeys.timeline(ISSUE_ID), [makeTimelineEntry()]);
+
+    const { result } = renderHook(() => useUpdateComment(ISSUE_ID), { wrapper: createWrapper(qc) });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        commentId: "comment-1",
+        content: "updated content",
+        removeAttachmentIds: ["att-1", "att-2"],
+      });
+    });
+
+    expect(updateComment).toHaveBeenCalledWith("comment-1", "updated content", undefined, ["att-1", "att-2"]);
+  });
+
+  it("keeps attachments not in removeAttachmentIds", async () => {
+    const att1 = makeAttachment("att-1");
+    const att2 = makeAttachment("att-2");
+    const entry = makeTimelineEntry({ attachments: [att1, att2] });
+    qc.setQueryData(issueKeys.timeline(ISSUE_ID), [entry]);
+
+    const { result } = renderHook(() => useUpdateComment(ISSUE_ID), { wrapper: createWrapper(qc) });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        commentId: "comment-1",
+        content: "updated content",
+        removeAttachmentIds: ["att-1"],
+      });
+    });
+
+    expect(updateComment).toHaveBeenCalledTimes(1);
   });
 });

@@ -105,6 +105,13 @@ func buildQuickCreatePrompt(task Task) string {
 	} else {
 		b.WriteString("- **feature**: omit. The platform will route the issue to the workspace default.\n")
 	}
+	// parent — pinned by the modal when the user is creating a sub-issue.
+	// Always pass the UUID so hierarchy is preserved exactly.
+	if task.QuickCreateParentIssueID != "" {
+		fmt.Fprintf(&b, "- **parent**: required for this run. Pass `--parent %q` so the new issue is created as a sub-issue under the parent the user selected in the quick-create modal. Do not omit or infer a different parent from the prompt text — the modal selection is authoritative.\n", task.QuickCreateParentIssueID)
+	} else {
+		b.WriteString("- **parent**: omit. The new issue should be top-level.\n")
+	}
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
 	b.WriteString("- **attachments**: do NOT pass `--attachment`. The flag only accepts LOCAL file paths. Any image URL in the user input is already markdown — keep it inline in `--description` instead.\n\n")
 

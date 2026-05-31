@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/autopilot/eventfilter"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -523,6 +524,38 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// 10.5 Event-filter check. An empty filter list fires on all events
+	//      (backward compatible). A non-empty list must include the event.
+	if !eventfilter.Match(envelope.Event, trigRow.EventFilters) {
+		run, ferr := h.AutopilotService.RecordEventFilterSkip(r.Context(), autopilot, trigRow.ID, envelopeBytes)
+		if ferr != nil {
+			slog.Warn("webhook: failed to record event filter skip",
+				"trigger_id", uuidToString(trigRow.ID),
+				"event", envelope.Event,
+				"error", ferr,
+			)
+			respBody := map[string]any{"error": "failed to record filter skip"}
+			h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusFailed, http.StatusInternalServerError, respBody, ferr.Error())
+			writeJSON(w, http.StatusInternalServerError, respBody)
+			return
+		}
+		if err := h.Queries.TouchAutopilotTriggerFiredAt(r.Context(), trigRow.ID); err != nil {
+			slog.Warn("webhook: failed to touch last_fired_at on filter skip",
+				"trigger_id", uuidToString(trigRow.ID),
+				"error", err,
+			)
+		}
+		respBody := map[string]any{
+			"status":      "skipped",
+			"delivery_id": uuidToString(delivery.ID),
+			"run_id":      uuidToString(run.ID),
+			"reason":      "event_filter_mismatch",
+		}
+		h.finaliseDeliveryWithRun(r, delivery.ID, deliveryStatusDispatched, run.ID, http.StatusOK, respBody)
+		writeJSON(w, http.StatusOK, respBody)
+		return
+	}
+
 	// 11. Dispatch synchronously. DispatchAutopilot publishes WS events,
 	//     persists trigger_payload on autopilot_run, runs the admission
 	//     check (offline runtime → skipped), and bumps last_run_at.
@@ -532,6 +565,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		trigRow.ID,
 		"webhook",
 		envelopeBytes,
+		"",
 	)
 	if err != nil {
 		slog.Warn("webhook dispatch failed",
