@@ -96,6 +96,7 @@ type AgentTaskQueue struct {
 	ForceFreshSession bool               `json:"force_fresh_session"`
 	IsLeaderTask      bool               `json:"is_leader_task"`
 	WaitReason        pgtype.Text        `json:"wait_reason"`
+	LastActivityAt    pgtype.Timestamptz `json:"last_activity_at"`
 }
 
 type Attachment struct {

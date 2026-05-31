@@ -2032,6 +2032,11 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Stamp the agent's last-activity timestamp so the board's live card can
+	// show a heartbeat and detect a quiet (possibly stalled) run. One write
+	// per batch — every message in the batch shares the same "now".
+	h.Queries.StampTaskActivity(r.Context(), parseUUID(taskID))
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
