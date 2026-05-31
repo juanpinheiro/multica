@@ -16,11 +16,28 @@ import {
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useModalStore } from "@multica/core/modals";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
+
+function useLiveIssueCount(wsId: string, issueIds: string[]): number {
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const issueIdSet = useMemo(() => new Set(issueIds), [issueIds]);
+  return useMemo(() => {
+    const live = new Set<string>();
+    for (const t of snapshot) {
+      if (issueIdSet.has(t.issue_id) && (t.status === "running" || t.status === "waiting_local_directory")) {
+        live.add(t.issue_id);
+      }
+    }
+    return live.size;
+  }, [snapshot, issueIdSet]);
+}
 
 // Insertion-position prediction intentionally omitted. The server's
 // ORDER BY uses PostgreSQL's en_US.utf8 collation (glibc), which
@@ -65,6 +82,8 @@ export const BoardColumn = memo(function BoardColumn({
   const { setNodeRef, isOver } = useDroppable({ id: group.id });
   const viewStoreApi = useViewStoreApi();
   const { t } = useT("issues");
+  const wsId = useWorkspaceId();
+  const liveCount = useLiveIssueCount(wsId, issueIds);
 
   // Resolve IDs to Issue objects, preserving parent-provided order
   const resolvedIssues = useMemo(
@@ -79,7 +98,7 @@ export const BoardColumn = memo(function BoardColumn({
   return (
     <div style={{ width: BOARD_COL_WIDTH }} className={`flex shrink-0 flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
       <div className="mb-2 flex items-center justify-between px-1.5">
-        <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} />
+        <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} liveCount={status === "in_progress" ? liveCount : undefined} />
 
         {/* Right: add + menu */}
         <div className="flex items-center gap-1">
@@ -159,12 +178,14 @@ export const BoardColumn = memo(function BoardColumn({
 function BoardGroupHeading({
   group,
   count,
+  liveCount,
 }: {
   group: BoardColumnGroup;
   count: number;
+  liveCount?: number;
 }) {
   if (group.status) {
-    return <StatusHeading status={group.status} count={count} />;
+    return <StatusHeading status={group.status} count={count} liveCount={liveCount} />;
   }
 
   const actorIcon =
