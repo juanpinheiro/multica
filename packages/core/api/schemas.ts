@@ -5,20 +5,27 @@ import type {
   AgentTemplateSummary,
   Attachment,
   CreateAgentFromTemplateResponse,
+  DecisionLogEntry,
+  DodAssertion,
   Feature,
   FeatureIssuesResponse,
   GroupedIssuesResponse,
+  Handoff,
+  ListDecisionLogResponse,
+  ListDodAssertionsResponse,
   ListFeaturesResponse,
+  ListHandoffsResponse,
   ListIssuesResponse,
+  Milestone,
+  ListMilestonesResponse,
   ListWebhookDeliveriesResponse,
-  Squad,
   TimelineEntry,
   User,
   WebhookDelivery,
 } from "../types";
 // ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
-// the issue detail page (timeline, comments, subscribers) and the issues
+// the issue detail page (timeline, comments) and the issues
 // list. These are the surfaces that white-screened in #2143 / #2147 / #2192.
 //
 // These schemas are intentionally LENIENT:
@@ -27,8 +34,8 @@ import type {
 //     the UI, never crash a `safeParse`.
 //   - Optional fields are unioned with `null` and given fallbacks where
 //     existing UI code already coerces them.
-//   - Arrays default to `[]` so a missing `reactions` / `attachments` /
-//     `entries` field doesn't take the page down.
+//   - Arrays default to `[]` so a missing `attachments` / `entries`
+//     field doesn't take the page down.
 //   - Every object schema ends with `.loose()` so unknown server-side
 //     fields pass through unchanged. zod 4's `.object()` defaults to STRIP,
 //     which would silently delete fields the schema didn't explicitly list
@@ -43,15 +50,6 @@ import type {
 // returns the parsed value cast to the caller-supplied `T`, so the strict
 // type still flows out at the call site; the schema only guards shape.
 // ---------------------------------------------------------------------------
-
-const ReactionSchema = z.object({
-  id: z.string(),
-  comment_id: z.string(),
-  actor_type: z.string(),
-  actor_id: z.string(),
-  emoji: z.string(),
-  created_at: z.string(),
-});
 
 // Nested attachments embedded in timeline/comment responses stay lenient on
 // purpose: a single malformed attachment must not knock the whole timeline
@@ -70,8 +68,6 @@ export const AttachmentResponseSchema = z.object({
   url: z.string(),
   download_url: z.string(),
   filename: z.string(),
-  chat_session_id: z.string().nullable().optional(),
-  chat_message_id: z.string().nullable().optional(),
 }).loose();
 
 export const EMPTY_ATTACHMENT: Attachment = {
@@ -79,8 +75,6 @@ export const EMPTY_ATTACHMENT: Attachment = {
   workspace_id: "",
   issue_id: null,
   comment_id: null,
-  chat_session_id: null,
-  chat_message_id: null,
   uploader_type: "",
   uploader_id: "",
   filename: "",
@@ -110,7 +104,6 @@ const TimelineEntrySchema = z.object({
   parent_id: z.string().nullable().optional(),
   updated_at: z.string().optional(),
   comment_type: z.string().optional(),
-  reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
   coalesced_count: z.number().optional(),
 }).loose();
@@ -130,7 +123,6 @@ export const CommentSchema = z.object({
   content: z.string(),
   type: z.string(),
   parent_id: z.string().nullable(),
-  reactions: z.array(ReactionSchema).default([]),
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
@@ -158,11 +150,13 @@ export const IssueSchema = z.object({
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),
   feature_id: z.string().nullable(),
+  // Optional: only the list path emits milestone_id today; grouped/open paths
+  // omit it, so a missing field must not fail validation.
+  milestone_id: z.string().nullable().optional(),
   position: z.number(),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),
   metadata: IssueMetadataSchema,
-  reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -193,16 +187,6 @@ export const GroupedIssuesResponseSchema = z.object({
 export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
   groups: [],
 };
-
-const SubscriberSchema = z.object({
-  issue_id: z.string(),
-  user_type: z.string(),
-  user_id: z.string(),
-  reason: z.string(),
-  created_at: z.string(),
-}).loose();
-
-export const SubscribersListSchema = z.array(SubscriberSchema);
 
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
@@ -397,76 +381,6 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   imported_skill_ids: [],
   reused_skill_ids: [],
 };
-
-// Squad list responses carry lightweight membership previews used by hover
-// cards. The preview fields are additive API fields, so older backends default
-// cleanly to no preview instead of breaking newer frontends.
-const SquadMemberPreviewSchema = z.object({
-  member_type: z.string(),
-  member_id: z.string(),
-  role: z.string().default(""),
-}).loose();
-
-export const SquadSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  name: z.string(),
-  description: z.string().default(""),
-  instructions: z.string().default(""),
-  avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
-  leader_id: z.string(),
-  creator_id: z.string(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  archived_at: z.string().nullable().optional().transform((v) => v ?? null),
-  archived_by: z.string().nullable().optional().transform((v) => v ?? null),
-  member_count: z.number().default(0),
-  member_preview: z.array(SquadMemberPreviewSchema).default([]),
-}).loose();
-
-export const SquadListSchema = z.array(SquadSchema);
-export const EMPTY_SQUAD_LIST: Squad[] = [];
-export const EMPTY_SQUAD: Squad = {
-  id: "",
-  workspace_id: "",
-  name: "",
-  description: "",
-  instructions: "",
-  avatar_url: null,
-  leader_id: "",
-  creator_id: "",
-  created_at: "",
-  updated_at: "",
-  archived_at: null,
-  archived_by: null,
-  member_count: 0,
-  member_preview: [],
-};
-
-// Squad member status — backs the Squad detail page's Members tab. status
-// is `string | null` (not the narrow `SquadMemberStatusValue` union) so a
-// new server-side status doesn't fail the parse; the UI defaults to a
-// neutral pill for unknown values.
-const SquadActiveIssueBriefSchema = z.object({
-  issue_id: z.string(),
-  identifier: z.string(),
-  title: z.string(),
-  issue_status: z.string(),
-}).loose();
-
-const SquadMemberStatusSchema = z.object({
-  member_type: z.string(),
-  member_id: z.string(),
-  status: z.string().nullable().optional().transform((v) => v ?? null),
-  active_issues: z.array(SquadActiveIssueBriefSchema).default([]),
-  last_active_at: z.string().nullable().optional().transform((v) => v ?? null),
-}).loose();
-
-export const SquadMemberStatusListResponseSchema = z.object({
-  members: z.array(SquadMemberStatusSchema).default([]),
-}).loose();
-
-export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 
 // ---------------------------------------------------------------------------
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
@@ -676,6 +590,13 @@ export const FeatureSchema = z.object({
   lead_type: z.string().nullable().optional(),
   lead_id: z.string().nullable().optional(),
   branch_slug: z.string().nullable().optional(),
+  // mode stays lenient (a new server value downgrades rather than crashing);
+  // budgets default to 0 ("no cap") and failure_tolerance to a safe default.
+  mode: z.string().default("hitl"),
+  budget_tokens: z.number().default(0),
+  budget_runs: z.number().default(0),
+  budget_seconds: z.number().default(0),
+  failure_tolerance: z.number().default(3),
   created_at: z.string(),
   updated_at: z.string(),
   issue_count: z.number().default(0),
@@ -689,11 +610,16 @@ export const EMPTY_FEATURE: Feature = {
   title: "",
   description: null,
   icon: null,
-  status: "planned",
+  status: "draft",
   priority: "none",
   lead_type: null,
   lead_id: null,
   branch_slug: null,
+  mode: "hitl",
+  budget_tokens: 0,
+  budget_runs: 0,
+  budget_seconds: 0,
+  failure_tolerance: 3,
   created_at: "",
   updated_at: "",
   issue_count: 0,
@@ -709,4 +635,150 @@ export const ListFeaturesResponseSchema = z.object({
 export const EMPTY_LIST_FEATURES_RESPONSE: ListFeaturesResponse = {
   features: [],
   total: 0,
+};
+
+// Milestone — an ordered checkpoint within an Initiative. validation_status
+// stays lenient (a new server value downgrades rather than crashing the parse).
+export const MilestoneSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  feature_id: z.string(),
+  title: z.string(),
+  position: z.number().default(0),
+  validation_status: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const ListMilestonesResponseSchema = z.object({
+  milestones: z.array(MilestoneSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_MILESTONES_RESPONSE: ListMilestonesResponse = {
+  milestones: [],
+  total: 0,
+};
+
+// Fallback for the single-Milestone create/update responses (control plane).
+export const EMPTY_MILESTONE: Milestone = {
+  id: "",
+  workspace_id: "",
+  feature_id: "",
+  title: "",
+  position: 0,
+  validation_status: "pending",
+  created_at: "",
+  updated_at: "",
+};
+
+// Handoff — the structured output a worker Run records on completion.
+// commands stays lenient (unknown fields pass through unchanged).
+const HandoffCommandResultSchema = z.object({
+  command: z.string(),
+  exit_code: z.number().default(0),
+}).loose();
+
+export const HandoffSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  issue_id: z.string(),
+  run_id: z.string(),
+  done: z.array(z.string()).default([]),
+  left_undone: z.array(z.string()).default([]),
+  commands: z.array(HandoffCommandResultSchema).default([]),
+  discoveries: z.array(z.string()).default([]),
+  created_at: z.string(),
+}).loose();
+
+export const ListHandoffsResponseSchema = z.object({
+  handoffs: z.array(HandoffSchema).default([]),
+}).loose();
+
+export const EMPTY_HANDOFF: Handoff = {
+  id: "",
+  workspace_id: "",
+  issue_id: "",
+  run_id: "",
+  done: [],
+  left_undone: [],
+  commands: [],
+  discoveries: [],
+  created_at: "",
+};
+
+export const EMPTY_LIST_HANDOFFS_RESPONSE: ListHandoffsResponse = {
+  handoffs: [],
+};
+
+// Decision Log entry — one architectural decision a retrospective Run records,
+// linking back to the ADRs and CONTEXT terms it touches. Lenient: ref arrays
+// fall back to [] so a malformed response never crashes the Decision Log view.
+export const DecisionLogEntrySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  feature_id: z.string(),
+  run_id: z.string(),
+  title: z.string(),
+  decision: z.string(),
+  learning: z.string().default(""),
+  adr_refs: z.array(z.string()).default([]),
+  context_terms: z.array(z.string()).default([]),
+  created_at: z.string(),
+}).loose();
+
+export const ListDecisionLogResponseSchema = z.object({
+  decisions: z.array(DecisionLogEntrySchema).default([]),
+}).loose();
+
+export const EMPTY_DECISION_LOG_ENTRY: DecisionLogEntry = {
+  id: "",
+  workspace_id: "",
+  feature_id: "",
+  run_id: "",
+  title: "",
+  decision: "",
+  learning: "",
+  adr_refs: [],
+  context_terms: [],
+  created_at: "",
+};
+
+export const EMPTY_LIST_DECISION_LOG_RESPONSE: ListDecisionLogResponse = {
+  decisions: [],
+};
+
+// DoD assertion — a Definition-of-Done check tagged to a Milestone. status
+// stays lenient (a new server value downgrades to a generic state, never crashes).
+export const DodAssertionSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  feature_id: z.string(),
+  milestone_id: z.string(),
+  text: z.string(),
+  position: z.number().default(0),
+  created_at: z.string(),
+  status: z.string(),
+  detail: z.string().default(""),
+}).loose();
+
+export const ListDodAssertionsResponseSchema = z.object({
+  assertions: z.array(DodAssertionSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_DOD_ASSERTIONS_RESPONSE: ListDodAssertionsResponse = {
+  assertions: [],
+};
+
+// Fallback for the single-assertion create response (control plane).
+export const EMPTY_DOD_ASSERTION: DodAssertion = {
+  id: "",
+  workspace_id: "",
+  feature_id: "",
+  milestone_id: "",
+  text: "",
+  position: 0,
+  created_at: "",
+  status: "pending",
+  detail: "",
 };

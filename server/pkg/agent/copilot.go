@@ -20,6 +20,10 @@ import (
 // own envelope format: { "type": "dotted.event.name", "data": {...}, ... }
 type copilotBackend struct {
 	cfg Config
+	// resultTeardownGrace overrides defaultResultTeardownGrace. Zero means use
+	// the default; tests set a small value to keep the hung-after-result path
+	// fast.
+	resultTeardownGrace time.Duration
 }
 
 // copilotEventState holds mutable state accumulated while processing the JSONL
@@ -247,6 +251,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			seedModel = "copilot"
 		}
 		st := newCopilotEventState(seedModel)
+		resultSeen := false
 
 		go func() {
 			<-runCtx.Done()
@@ -271,6 +276,15 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			for _, m := range handleCopilotEvent(evt, st) {
 				trySend(msgCh, m)
 			}
+
+			// The synthetic "result" event is the authoritative completion
+			// signal. Tear the process down proactively so a CLI that emits it
+			// and then hangs resolves now instead of blocking the reader until
+			// the idle watchdog.
+			if evt.Type == "result" && !resultSeen {
+				resultSeen = true
+				scheduleResultTeardown(runCtx, cancel, resolveResultTeardownGrace(b.resultTeardownGrace))
+			}
 		}
 		if err := scanner.Err(); err != nil {
 			slog.Warn("copilot stdout scanner error", "err", err)
@@ -279,15 +293,20 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
-			st.finalStatus = "timeout"
-			st.finalError = fmt.Sprintf("copilot timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
-			st.finalStatus = "aborted"
-			st.finalError = "execution cancelled"
-		} else if exitErr != nil && st.finalStatus == "completed" {
-			st.finalStatus = "failed"
-			st.finalError = fmt.Sprintf("copilot exited with error: %v", exitErr)
+		// A run that emitted a result has already recorded its real disposition.
+		// Don't let the teardown cancel — or a non-zero exit from the force-kill
+		// that follows it — clobber that into aborted/failed.
+		if !resultSeen {
+			if runCtx.Err() == context.DeadlineExceeded {
+				st.finalStatus = "timeout"
+				st.finalError = fmt.Sprintf("copilot timed out after %s", timeout)
+			} else if runCtx.Err() == context.Canceled {
+				st.finalStatus = "aborted"
+				st.finalError = "execution cancelled"
+			} else if exitErr != nil && st.finalStatus == "completed" {
+				st.finalStatus = "failed"
+				st.finalError = fmt.Sprintf("copilot exited with error: %v", exitErr)
+			}
 		}
 		if st.finalError != "" {
 			st.finalError = withAgentStderr(st.finalError, "copilot", stderrBuf.Tail())

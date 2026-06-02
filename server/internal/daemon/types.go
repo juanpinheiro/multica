@@ -1,6 +1,10 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/multica-ai/multica/server/internal/decisionlog"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
@@ -31,6 +35,14 @@ type FeatureResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// ValidatorAssertionData carries a single DoD assertion injected into a
+// validator Run so the agent knows what to check.
+type ValidatorAssertionData struct {
+	ID       string `json:"id"`
+	Text     string `json:"text"`
+	Position int32  `json:"position"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -39,6 +51,12 @@ type Task struct {
 	RuntimeID   string `json:"runtime_id"`
 	IssueID     string `json:"issue_id"`
 	WorkspaceID string `json:"workspace_id"`
+	// Role discriminates a worker Run from a validator Run ("validator").
+	// Empty on wire means worker.
+	Role string `json:"role,omitempty"`
+	// ValidatorAssertions carries the Milestone's DoD assertions for a
+	// validator Run. Empty for worker Runs.
+	ValidatorAssertions []ValidatorAssertionData `json:"validator_assertions,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -55,19 +73,12 @@ type Task struct {
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
-	ChatMessage             string                `json:"chat_message,omitempty"`              // user message content for chat tasks
-	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot run_only tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this run
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
 	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
 	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt       string                `json:"quick_create_prompt,omitempty"`       // user's natural-language input for quick-create tasks
-	QuickCreateParentIssueID string               `json:"quick_create_parent_issue_id,omitempty"` // parent issue ID for quick-create sub-issues
-	SquadID                 string                `json:"squad_id,omitempty"`                  // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
-	SquadName               string                `json:"squad_name,omitempty"`                // display name for the picker squad, used in prompt text
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has
@@ -86,7 +97,7 @@ type Task struct {
 	// server computes it via feature.Resolve(issue, feature): feature's
 	// target_branch wins, else the issue's metadata.target_branch override,
 	// else the derived 'issue/<identifier>'. Always non-empty for issue tasks;
-	// empty for chat / quick-create / autopilot tasks that have no issue.
+	// empty for autopilot tasks that have no issue.
 	TargetBranch string `json:"target_branch,omitempty"`
 	// IsSharedBranch is true when the resolved branch came from
 	// feature.target_branch — meaning sibling issues of the same feature push
@@ -122,17 +133,6 @@ type CrossRepoSiblingData struct {
 	IssueIdentifier string `json:"issue_identifier"`
 	IssueTitle      string `json:"issue_title"`
 	RepoName        string `json:"repo_name"`
-}
-
-// ChatAttachmentMeta is the structured attachment metadata the daemon
-// hands to the agent for chat tasks. We pass id + filename + content_type
-// so the chat prompt can list them explicitly and instruct the agent to
-// run `multica attachment download <id>` instead of guessing from a
-// signed CDN URL (which expires).
-type ChatAttachmentMeta struct {
-	ID          string `json:"id"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.
@@ -172,15 +172,34 @@ type TaskUsageEntry struct {
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
 }
 
+// HandoffInput is the structured output a worker agent writes when it finishes
+// an Issue. The daemon forwards it to the server inside CompleteTask so it can
+// be persisted in the handoff table.
+type HandoffInput struct {
+	Done        []string              `json:"done,omitempty"`
+	LeftUndone  []string              `json:"left_undone,omitempty"`
+	Commands    []HandoffCommandInput `json:"commands,omitempty"`
+	Discoveries []string              `json:"discoveries,omitempty"`
+}
+
+// HandoffCommandInput records a single command and its exit code.
+type HandoffCommandInput struct {
+	Command  string `json:"command"`
+	ExitCode int    `json:"exit_code"`
+}
+
 // TaskResult is the outcome of executing a task.
 type TaskResult struct {
-	Status        string           `json:"status"`
-	Comment       string           `json:"comment"`
-	BranchName    string           `json:"branch_name,omitempty"`
-	EnvType       string           `json:"env_type,omitempty"`
-	SessionID     string           `json:"session_id,omitempty"` // Claude session ID for future resumption
-	WorkDir       string           `json:"work_dir,omitempty"`   // working directory used during execution
-	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
-	FailureReason string           `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
-	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
+	Status        string              `json:"status"`
+	Comment       string              `json:"comment"`
+	BranchName    string              `json:"branch_name,omitempty"`
+	EnvType       string              `json:"env_type,omitempty"`
+	SessionID     string              `json:"session_id,omitempty"`    // Claude session ID for future resumption
+	WorkDir       string              `json:"work_dir,omitempty"`      // working directory used during execution
+	EnvRoot       string              `json:"-"`                       // env root dir for writing GC metadata (not sent to server)
+	FailureReason string              `json:"-"`                       // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	Usage         []TaskUsageEntry    `json:"usage,omitempty"`         // per-model token usage
+	Handoff       *HandoffInput       `json:"handoff,omitempty"`       // structured handoff written by worker agents
+	Validation    *ValidationOutput   `json:"validation,omitempty"`    // verdicts emitted by validator Runs
+	Retrospective *decisionlog.Output `json:"retrospective,omitempty"` // Decision Log entries from a retrospective Run
 }

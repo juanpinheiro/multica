@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
 )
 
 // gitEnv returns an environment for git subprocesses that contact remotes.
@@ -431,8 +430,14 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
 	}
 
-	// Build branch name: agent/{sanitized-name}/{short-task-id}
+	// A shared Initiative feature branch is tracked and pushed directly so the
+	// whole feature lands as one PR; every other task gets an isolated per-task
+	// agent/* branch and opens its own PR. See isSharedFeatureBranch.
+	shared := isSharedFeatureBranch(params.Ref)
 	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	if shared {
+		branchName = strings.TrimSpace(params.Ref)
+	}
 
 	// Derive directory name from repo URL.
 	dirName := repoNameFromURL(params.RepoURL)
@@ -441,10 +446,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktree(worktreePath, branchName, baseRef)
+		actualBranch, err := updateExistingWorktree(worktreePath, branchName, baseRef, shared)
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
+		trackSharedUpstream(barePath, worktreePath, actualBranch, shared)
 
 		for _, pattern := range agentGitExcludePatterns {
 			_ = excludeFromGit(worktreePath, pattern)
@@ -480,10 +486,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
 	// collisions with stale per-task refs left over from previous runs.
-	actualBranch, err := createWorktree(barePath, worktreePath, branchName, baseRef)
+	actualBranch, err := createWorktree(barePath, worktreePath, branchName, baseRef, shared)
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
+	trackSharedUpstream(barePath, worktreePath, actualBranch, shared)
 
 	// Exclude agent context files from git tracking.
 	for _, pattern := range agentGitExcludePatterns {
@@ -534,6 +541,22 @@ func resolveBaseRef(barePath, requestedRef string) (string, error) {
 			return candidate, nil
 		}
 	}
+
+	// A shared feature branch (the "feature/<slug>" name minted by
+	// feature.Resolve) that does not exist yet is expected on the first Run of
+	// an Initiative: nothing has pushed it. Rather than failing the checkout —
+	// which would force a human to pre-create the branch and break the
+	// flip-to-ready autonomy — base the worktree on the remote's default
+	// branch. The agent creates feature/<slug> when it first pushes, and every
+	// later Run resolves it normally through the candidates above. The fallback
+	// is scoped to the "feature/" convention so an arbitrary missing ref (a
+	// typo, or a review agent's bad commit) still fails loudly below.
+	if strings.HasPrefix(ref, "feature/") {
+		if base := getRemoteDefaultBranch(barePath); base != "" {
+			return base, nil
+		}
+	}
+
 	return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s", ref, barePath)
 }
 
@@ -543,10 +566,23 @@ func gitRefExists(repoPath, ref string) bool {
 	return cmd.Run() == nil
 }
 
-// createWorktree creates a git worktree at the given path with a new branch.
-// Returns the actual branch name used — which may differ from the requested
-// branchName if a collision was resolved by appending a timestamp suffix.
-func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, error) {
+// isSharedFeatureBranch reports whether ref names a shared Initiative feature
+// branch. feature.Resolve mints "feature/<slug>" for every feature-scoped issue
+// (shared=true) and "issue/<identifier>" otherwise, so the "feature/" prefix is
+// the on-the-wire signal that sibling issues converge on this one branch — the
+// same convention resolveBaseRef keys its first-Run fallback on. A worker on a
+// shared branch tracks and pushes it directly so the whole Initiative lands as
+// a single PR; everything else gets an isolated per-task agent/* branch.
+func isSharedFeatureBranch(ref string) bool {
+	return strings.HasPrefix(strings.TrimSpace(ref), "feature/")
+}
+
+// createWorktree creates a git worktree at the given path. For a shared feature
+// branch the worktree is checked out directly on that branch (its name is the
+// feature's identity, so it is never renamed). Otherwise it gets a fresh
+// per-task branch whose name may differ from branchName if a collision was
+// resolved by appending a timestamp suffix. Returns the actual branch name used.
+func createWorktree(gitRoot, worktreePath, branchName, baseRef string, shared bool) (string, error) {
 	// Pre-check: if the worktree path already exists we would get a confusing
 	// "already exists" error from `git worktree add` — which used to be
 	// misclassified as a branch collision, causing the retry to leak branches
@@ -554,6 +590,13 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, 
 	// to route reused workdirs through updateExistingWorktree via isGitWorktree.
 	if _, err := os.Stat(worktreePath); err == nil {
 		return "", fmt.Errorf("worktree path already exists and is not a valid git worktree: %s", worktreePath)
+	}
+
+	if shared {
+		if err := runSharedWorktreeAdd(gitRoot, worktreePath, branchName, baseRef); err != nil {
+			return "", err
+		}
+		return branchName, nil
 	}
 
 	err := runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef)
@@ -575,6 +618,35 @@ func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+// runSharedWorktreeAdd checks the worktree out on the shared feature branch,
+// resetting it to baseRef (-B) and reusing the branch even if a finished
+// sibling task's worktree still references it (--force). The serial-within gate
+// guarantees only one task holds the shared branch at a time, so the force is
+// only ever overriding a stale, completed worktree.
+func runSharedWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
+	cmd := exec.Command("git", "-C", gitRoot, "worktree", "add", "--force", "-B", branchName, worktreePath, baseRef)
+
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add (shared branch): %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// trackSharedUpstream points the worktree's shared feature branch at its origin
+// counterpart so a plain `git push` targets the shared branch directly. No-op
+// for non-shared branches and for the first Run of an Initiative, where the
+// origin branch does not exist yet — the agent's first push creates it.
+func trackSharedUpstream(barePath, worktreePath, branchName string, shared bool) {
+	if !shared {
+		return
+	}
+	if !gitRefExists(barePath, "refs/remotes/origin/"+branchName+"^{commit}") {
+		return
+	}
+	cmd := exec.Command("git", "-C", worktreePath, "branch", "--set-upstream-to=origin/"+branchName, branchName)
+	_ = cmd.Run()
 }
 
 // isBranchCollisionError returns true if err is specifically about a branch
@@ -599,10 +671,12 @@ func isGitWorktree(path string) bool {
 }
 
 // updateExistingWorktree resets the worktree to a clean state and checks out a
-// new branch from the default branch. The caller is responsible for fetching
-// the bare cache beforehand (worktrees share the same object store).
-// Returns the actual branch name used (may differ from input on collision).
-func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, error) {
+// branch from baseRef. The caller is responsible for fetching the bare cache
+// beforehand (worktrees share the same object store). For a shared feature
+// branch the existing branch is reset in place and never renamed; otherwise a
+// fresh per-task branch is created (its name may differ on collision).
+// Returns the actual branch name used.
+func updateExistingWorktree(worktreePath, branchName, baseRef string, shared bool) (string, error) {
 	// Discard any leftover uncommitted changes from the previous task.
 	resetCmd := exec.Command("git", "-C", worktreePath, "reset", "--hard")
 	if out, err := resetCmd.CombinedOutput(); err != nil {
@@ -613,6 +687,15 @@ func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, e
 	cleanCmd := exec.Command("git", "-C", worktreePath, "clean", "-fd")
 	if out, err := cleanCmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git clean -fd: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	if shared {
+		// Reset the shared branch to baseRef in place — never rename it.
+		checkoutCmd := exec.Command("git", "-C", worktreePath, "checkout", "-B", branchName, baseRef)
+		if out, err := checkoutCmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("git checkout -B (shared branch): %s: %w", strings.TrimSpace(string(out)), err)
+		}
+		return branchName, nil
 	}
 
 	// Create a new branch from the resolved default-branch ref and switch to
@@ -683,7 +766,7 @@ func getRemoteDefaultBranch(barePath string) string {
 	// 2) Common default branch names under the origin namespace.
 	for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
 		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", candidate)
-	
+
 		if err := cmd.Run(); err == nil {
 			return candidate
 		}
@@ -698,7 +781,7 @@ func getRemoteDefaultBranch(barePath string) string {
 	if bareRef != "" {
 		originRef := "refs/remotes/origin/" + strings.TrimPrefix(bareRef, "refs/heads/")
 		cmd := exec.Command("git", "-C", barePath, "rev-parse", "--verify", originRef)
-	
+
 		if err := cmd.Run(); err == nil {
 			return originRef
 		}

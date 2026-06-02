@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
-export type IssuesScope = "all" | "members" | "agents";
+export type IssuesScope = "all" | "agents";
 
 interface IssuesScopeState {
   scope: IssuesScope;

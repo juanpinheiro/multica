@@ -3,17 +3,31 @@ import {
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  DecisionLogEntrySchema,
+  DodAssertionSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_DOD_ASSERTION,
+  EMPTY_LIST_DECISION_LOG_RESPONSE,
+  EMPTY_FEATURE,
   EMPTY_FEATURE_ISSUES_RESPONSE,
+  EMPTY_LIST_DOD_ASSERTIONS_RESPONSE,
+  EMPTY_LIST_HANDOFFS_RESPONSE,
+  EMPTY_LIST_MILESTONES_RESPONSE,
+  EMPTY_MILESTONE,
   EMPTY_USER,
   FeatureIssuesResponseSchema,
+  FeatureSchema,
+  HandoffSchema,
+  ListDecisionLogResponseSchema,
+  ListDodAssertionsResponseSchema,
+  ListHandoffsResponseSchema,
   ListIssuesResponseSchema,
+  ListMilestonesResponseSchema,
+  MilestoneSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
-  SquadListSchema,
-  SquadSchema,
   UserSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -168,50 +182,6 @@ describe("UserSchema timezone drift", () => {
   });
 });
 
-describe("SquadListSchema member preview drift", () => {
-  const baseSquad = {
-    id: "squad-1",
-    workspace_id: "ws-1",
-    name: "Frontend Squad",
-    description: "",
-    instructions: "",
-    avatar_url: null,
-    leader_id: "agent-1",
-    creator_id: "user-1",
-    created_at: "2026-05-01T00:00:00Z",
-    updated_at: "2026-05-01T00:00:00Z",
-    archived_at: null,
-    archived_by: null,
-  };
-
-  it("defaults preview fields when an older backend omits them", () => {
-    const parsed = SquadListSchema.parse([baseSquad]);
-    expect(parsed[0]?.member_count).toBe(0);
-    expect(parsed[0]?.member_preview).toEqual([]);
-  });
-
-  it("defaults preview fields on a single squad response", () => {
-    const parsed = SquadSchema.parse(baseSquad);
-    expect(parsed.member_count).toBe(0);
-    expect(parsed.member_preview).toEqual([]);
-  });
-
-  it("preserves lightweight member preview rows", () => {
-    const parsed = SquadListSchema.parse([
-      {
-        ...baseSquad,
-        member_count: 2,
-        member_preview: [
-          { member_type: "agent", member_id: "agent-1", role: "leader" },
-          { member_type: "member", member_id: "user-2", role: "member" },
-        ],
-      },
-    ]);
-    expect(parsed[0]?.member_count).toBe(2);
-    expect(parsed[0]?.member_preview).toHaveLength(2);
-    expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
-  });
-});
 
 // The workspace dashboard and runtime-detail pages were re-pointed at the
 // unified `task_usage_hourly` rollup. Every numeric field drives chart /
@@ -310,5 +280,256 @@ describe("FeatureIssuesResponseSchema", () => {
     };
     const result = parseWithFallback(input, FeatureIssuesResponseSchema, EMPTY_FEATURE_ISSUES_RESPONSE, { endpoint: "test" });
     expect(result.blocked[0]?.blocked_by).toEqual([]);
+  });
+});
+
+describe("FeatureSchema", () => {
+  const baseFeature = {
+    id: "f1",
+    workspace_id: "ws-1",
+    title: "Initiative",
+    status: "running",
+    priority: "none",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("defaults Mode and tripwire fields when the server omits them", () => {
+    const result = parseWithFallback(baseFeature, FeatureSchema, EMPTY_FEATURE, { endpoint: "test" });
+    expect(result.mode).toBe("hitl");
+    expect(result.budget_tokens).toBe(0);
+    expect(result.budget_runs).toBe(0);
+    expect(result.budget_seconds).toBe(0);
+    expect(result.failure_tolerance).toBe(3);
+  });
+
+  it("preserves explicit Mode and budget values", () => {
+    const input = { ...baseFeature, mode: "afk", budget_runs: 50, failure_tolerance: 2 };
+    const result = parseWithFallback(input, FeatureSchema, EMPTY_FEATURE, { endpoint: "test" });
+    expect(result.mode).toBe("afk");
+    expect(result.budget_runs).toBe(50);
+    expect(result.failure_tolerance).toBe(2);
+  });
+
+  it("falls back on null input", () => {
+    const result = parseWithFallback(null, FeatureSchema, EMPTY_FEATURE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_FEATURE);
+  });
+});
+
+describe("ListMilestonesResponseSchema", () => {
+  const baseMilestone = {
+    id: "m1",
+    workspace_id: "ws-1",
+    feature_id: "f1",
+    title: "v1.0",
+    position: 0,
+    validation_status: "pending",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("defaults milestones to [] when the field is absent", () => {
+    const result = parseWithFallback({}, ListMilestonesResponseSchema, EMPTY_LIST_MILESTONES_RESPONSE, { endpoint: "test" });
+    expect(result.milestones).toEqual([]);
+    expect(result.total).toBe(0);
+  });
+
+  it("falls back on null input", () => {
+    const result = parseWithFallback(null, ListMilestonesResponseSchema, EMPTY_LIST_MILESTONES_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_MILESTONES_RESPONSE);
+  });
+
+  it("parses a well-formed response and keeps an unknown validation_status", () => {
+    const input = { milestones: [{ ...baseMilestone, validation_status: "in_review" }], total: 1 };
+    const result = parseWithFallback(input, ListMilestonesResponseSchema, EMPTY_LIST_MILESTONES_RESPONSE, { endpoint: "test" });
+    expect(result.milestones).toHaveLength(1);
+    expect(result.milestones[0]?.validation_status).toBe("in_review");
+  });
+
+  it("falls back when a milestone is missing its required feature_id", () => {
+    const { feature_id: _omit, ...broken } = baseMilestone;
+    const input = { milestones: [broken], total: 1 };
+    const result = parseWithFallback(input, ListMilestonesResponseSchema, EMPTY_LIST_MILESTONES_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_MILESTONES_RESPONSE);
+  });
+
+  // The single-Milestone create/update responses (control plane, issue 14).
+  it("parses a single Milestone create/update response", () => {
+    const result = parseWithFallback(baseMilestone, MilestoneSchema, EMPTY_MILESTONE, { endpoint: "test" });
+    expect(result.id).toBe("m1");
+    expect(result.title).toBe("v1.0");
+  });
+
+  it("falls back to EMPTY_MILESTONE on a malformed single Milestone", () => {
+    const { id: _omit, ...broken } = baseMilestone;
+    const result = parseWithFallback(broken, MilestoneSchema, EMPTY_MILESTONE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_MILESTONE);
+  });
+});
+
+describe("HandoffSchema", () => {
+  const baseHandoff = {
+    id: "hid-1",
+    workspace_id: "ws-1",
+    issue_id: "issue-1",
+    run_id: "run-1",
+    done: ["step A", "step B"],
+    left_undone: ["step C"],
+    commands: [{ command: "go build ./...", exit_code: 0 }],
+    discoveries: ["found bug in upstream"],
+    created_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses a well-formed handoff", () => {
+    const result = HandoffSchema.safeParse(baseHandoff);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.done).toEqual(["step A", "step B"]);
+      expect(result.data.commands).toHaveLength(1);
+    }
+  });
+
+  it("defaults done/left_undone/discoveries to [] when absent", () => {
+    const { done: _d, left_undone: _l, discoveries: _disc, ...partial } = baseHandoff;
+    const result = HandoffSchema.safeParse(partial);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.done).toEqual([]);
+      expect(result.data.left_undone).toEqual([]);
+      expect(result.data.discoveries).toEqual([]);
+    }
+  });
+
+  it("defaults commands to [] when absent", () => {
+    const { commands: _c, ...partial } = baseHandoff;
+    const result = HandoffSchema.safeParse(partial);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.commands).toEqual([]);
+    }
+  });
+
+  it("falls back on null input via parseWithFallback", () => {
+    const result = parseWithFallback(null, ListHandoffsResponseSchema, EMPTY_LIST_HANDOFFS_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_HANDOFFS_RESPONSE);
+  });
+
+  it("defaults handoffs to [] when field is absent", () => {
+    const result = parseWithFallback({}, ListHandoffsResponseSchema, EMPTY_LIST_HANDOFFS_RESPONSE, { endpoint: "test" });
+    expect(result.handoffs).toEqual([]);
+  });
+
+  it("falls back when required id field is missing", () => {
+    const { id: _id, ...broken } = baseHandoff;
+    const input = { handoffs: [broken] };
+    const result = parseWithFallback(input, ListHandoffsResponseSchema, EMPTY_LIST_HANDOFFS_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_HANDOFFS_RESPONSE);
+  });
+});
+
+describe("DecisionLogEntrySchema", () => {
+  const baseEntry = {
+    id: "dl-1",
+    workspace_id: "ws-1",
+    feature_id: "feat-1",
+    run_id: "run-1",
+    title: "Keep the Gate thin",
+    decision: "SQL enforces, Go specifies",
+    learning: "two layers stayed in sync",
+    adr_refs: ["0004"],
+    context_terms: ["Gate"],
+    created_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses a well-formed entry", () => {
+    const result = DecisionLogEntrySchema.safeParse(baseEntry);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.adr_refs).toEqual(["0004"]);
+      expect(result.data.context_terms).toEqual(["Gate"]);
+    }
+  });
+
+  it("defaults learning/adr_refs/context_terms when absent", () => {
+    const { learning: _le, adr_refs: _a, context_terms: _c, ...partial } = baseEntry;
+    const result = DecisionLogEntrySchema.safeParse(partial);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.learning).toBe("");
+      expect(result.data.adr_refs).toEqual([]);
+      expect(result.data.context_terms).toEqual([]);
+    }
+  });
+
+  it("falls back on null input via parseWithFallback", () => {
+    const result = parseWithFallback(null, ListDecisionLogResponseSchema, EMPTY_LIST_DECISION_LOG_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_DECISION_LOG_RESPONSE);
+  });
+
+  it("defaults decisions to [] when field is absent", () => {
+    const result = parseWithFallback({}, ListDecisionLogResponseSchema, EMPTY_LIST_DECISION_LOG_RESPONSE, { endpoint: "test" });
+    expect(result.decisions).toEqual([]);
+  });
+
+  it("falls back when a required field is missing", () => {
+    const { decision: _dec, ...broken } = baseEntry;
+    const input = { decisions: [broken] };
+    const result = parseWithFallback(input, ListDecisionLogResponseSchema, EMPTY_LIST_DECISION_LOG_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_DECISION_LOG_RESPONSE);
+  });
+});
+
+describe("ListDodAssertionsResponseSchema", () => {
+  const baseAssertion = {
+    id: "a1",
+    workspace_id: "ws-1",
+    feature_id: "f1",
+    milestone_id: "m1",
+    text: "tests pass",
+    position: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    status: "passed",
+    detail: "",
+  };
+
+  it("defaults assertions to [] when the field is absent", () => {
+    const result = parseWithFallback({}, ListDodAssertionsResponseSchema, EMPTY_LIST_DOD_ASSERTIONS_RESPONSE, { endpoint: "test" });
+    expect(result.assertions).toEqual([]);
+  });
+
+  it("falls back on null input", () => {
+    const result = parseWithFallback(null, ListDodAssertionsResponseSchema, EMPTY_LIST_DOD_ASSERTIONS_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_DOD_ASSERTIONS_RESPONSE);
+  });
+
+  it("keeps an unknown status and defaults a missing detail", () => {
+    const { detail: _omit, ...partial } = baseAssertion;
+    const result = DodAssertionSchema.safeParse({ ...partial, status: "stale" });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.status).toBe("stale");
+      expect(result.data.detail).toBe("");
+    }
+  });
+
+  it("falls back when an assertion is missing its required milestone_id", () => {
+    const { milestone_id: _omit, ...broken } = baseAssertion;
+    const input = { assertions: [broken] };
+    const result = parseWithFallback(input, ListDodAssertionsResponseSchema, EMPTY_LIST_DOD_ASSERTIONS_RESPONSE, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_LIST_DOD_ASSERTIONS_RESPONSE);
+  });
+
+  // The single-assertion create response (control plane, issue 14).
+  it("parses a single DoD assertion create response", () => {
+    const result = parseWithFallback(baseAssertion, DodAssertionSchema, EMPTY_DOD_ASSERTION, { endpoint: "test" });
+    expect(result.id).toBe("a1");
+    expect(result.text).toBe("tests pass");
+  });
+
+  it("falls back to EMPTY_DOD_ASSERTION on a malformed single assertion", () => {
+    const { milestone_id: _omit, ...broken } = baseAssertion;
+    const result = parseWithFallback(broken, DodAssertionSchema, EMPTY_DOD_ASSERTION, { endpoint: "test" });
+    expect(result).toEqual(EMPTY_DOD_ASSERTION);
   });
 });

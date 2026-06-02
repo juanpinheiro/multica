@@ -6,7 +6,8 @@ import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
-import type { AgentTask, TaskFailureReason } from "@multica/core/types";
+import { handoffListOptions } from "@multica/core/handoff/queries";
+import type { AgentTask, Handoff, TaskFailureReason } from "@multica/core/types";
 import { useTimeAgo } from "../../i18n";
 import {
   Tooltip,
@@ -18,6 +19,7 @@ import { TranscriptButton } from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
+import { RunHandoffPanel } from "./run-handoff-panel";
 
 // Mask gradient that fades the trigger-summary text into transparency at
 // the right edge — gives the row a smooth visual ramp toward the
@@ -80,6 +82,17 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
     refetchOnWindowFocus: true,
   });
 
+  const { data: handoffs = [] } = useQuery(handoffListOptions(issueId));
+
+  // Index handoffs by run_id so each PastRow can look up its own handoff in O(1).
+  const handoffByRunId = useMemo(() => {
+    const map = new Map<string, Handoff>();
+    for (const h of handoffs) {
+      map.set(h.run_id, h);
+    }
+    return map;
+  }, [handoffs]);
+
   const activeTasks = useMemo(
     () =>
       tasks.filter(
@@ -139,7 +152,7 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
       {open && (
         <div className="space-y-0.5 pl-2">
           {activeTasks.map((task) => (
-            <ActiveRow key={task.id} task={task} issueId={issueId} />
+            <ActiveRow key={task.id} task={task} issueId={issueId} role={task.role} />
           ))}
 
           {pastTasks.length > 0 && (
@@ -164,7 +177,13 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
                   {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} issueId={issueId} />
+                    <PastRow
+                      key={task.id}
+                      task={task}
+                      issueId={issueId}
+                      role={task.role}
+                      handoff={handoffByRunId.get(task.id)}
+                    />
                   ))}
                 </div>
               )}
@@ -255,7 +274,17 @@ function useStatusLabel(status: AgentTask["status"]): string {
   }
 }
 
-function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+function RoleBadge({ role }: { role: AgentTask["role"] }) {
+  const { t } = useT("issues");
+  if (role !== "validator") return null;
+  return (
+    <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
+      {t(($) => $.execution_log.role_validator)}
+    </span>
+  );
+}
+
+function ActiveRow({ task, issueId, role }: { task: AgentTask; issueId: string; role?: AgentTask["role"] }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const [cancelling, setCancelling] = useState(false);
@@ -288,6 +317,7 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   return (
     <RowShell task={task}>
       <TriggerText text={trigger} />
+      <RoleBadge role={role} />
       {/* Status + time always visible — actions append on hover, never
           replace. Same pattern as desktop tab bar / sidebar pins. */}
       <span className="shrink-0 whitespace-nowrap text-xs">
@@ -336,7 +366,17 @@ function ActiveRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+function PastRow({
+  task,
+  issueId,
+  role,
+  handoff,
+}: {
+  task: AgentTask;
+  issueId: string;
+  role?: AgentTask["role"];
+  handoff?: Handoff;
+}) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
@@ -355,6 +395,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   // wrong agent would fire on rows whose agent has since been displaced
   // (e.g. reassignment, squad worker, or a one-off @-mention agent).
   const canRetry = task.status === "failed" || task.status === "cancelled";
+  const [handoffExpanded, setHandoffExpanded] = useState(false);
 
   const handleRetry = async () => {
     if (retrying) return;
@@ -372,8 +413,10 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   };
 
   return (
+    <div>
     <RowShell task={task}>
       <TriggerText text={trigger} />
+      <RoleBadge role={role} />
       <span className="shrink-0 whitespace-nowrap text-xs">
         <span className={tone}>{failureLabel ?? label}</span>
         <span className="text-muted-foreground"> · {time}</span>
@@ -404,6 +447,20 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
         )}
       </RowActions>
     </RowShell>
+    {handoff && (
+      <button
+        type="button"
+        onClick={() => setHandoffExpanded((v) => !v)}
+        className="ml-7 flex items-center gap-1 text-[10px] text-muted-foreground/70 transition-colors hover:text-muted-foreground"
+      >
+        <ChevronRight
+          className={`h-2.5 w-2.5 shrink-0 transition-transform ${handoffExpanded ? "rotate-90" : ""}`}
+        />
+        {t(($) => $.execution_log.handoff_toggle)}
+      </button>
+    )}
+    {handoff && handoffExpanded && <RunHandoffPanel handoff={handoff} />}
+    </div>
   );
 }
 

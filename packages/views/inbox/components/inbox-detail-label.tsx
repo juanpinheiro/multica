@@ -30,6 +30,9 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     reaction_added: t(($) => $.types.reaction_added),
     quick_create_done: t(($) => $.types.quick_create_done),
     quick_create_failed: t(($) => $.types.quick_create_failed),
+    initiative_tripwire: t(($) => $.types.initiative_tripwire),
+    feature_ready_for_review: t(($) => $.types.feature_ready_for_review),
+    feature_pr_draft: t(($) => $.types.feature_pr_draft),
   };
 }
 
@@ -72,7 +75,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "issue_assigned": {
       if (details.new_assignee_id) {
-        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(details.new_assignee_type ?? "member", details.new_assignee_id) })}</span>;
+        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(details.new_assignee_type ?? "agent", details.new_assignee_id) })}</span>;
       }
       return <span>{typeLabels[item.type]}</span>;
     }
@@ -80,7 +83,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       return <span>{t(($) => $.labels.removed_assignee)}</span>;
     case "assignee_changed": {
       if (details.new_assignee_id) {
-        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(details.new_assignee_type ?? "member", details.new_assignee_id) })}</span>;
+        return <span>{t(($) => $.labels.assigned_to, { name: getActorName(details.new_assignee_type ?? "agent", details.new_assignee_id) })}</span>;
       }
       return <span>{typeLabels[item.type]}</span>;
     }
@@ -109,6 +112,24 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     case "quick_create_failed": {
       const detail = getQuickCreateFailureDetail(item);
       if (detail) return <span>{t(($) => $.labels.failed_with_detail, { detail })}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
+    case "initiative_tripwire": {
+      const reason = details.reason;
+      if (reason === "failure_tolerance") return <span>{t(($) => $.labels.tripwire_failure_tolerance)}</span>;
+      if (reason === "token_budget") return <span>{t(($) => $.labels.tripwire_token_budget)}</span>;
+      if (reason === "run_budget") return <span>{t(($) => $.labels.tripwire_run_budget)}</span>;
+      if (reason === "time_budget") return <span>{t(($) => $.labels.tripwire_time_budget)}</span>;
+      return <span>{t(($) => $.labels.tripwire_unknown)}</span>;
+    }
+    case "feature_ready_for_review": {
+      const branch = details.branch_slug;
+      if (branch) return <span>{t(($) => $.labels.ready_for_review_branch, { branch })}</span>;
+      return <span>{typeLabels[item.type]}</span>;
+    }
+    case "feature_pr_draft": {
+      const branch = details.branch_slug;
+      if (branch) return <span>{t(($) => $.labels.pr_draft_branch, { branch })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
     default:

@@ -4,8 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
-import type { AutopilotAssigneeType } from "@multica/core/types";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
   PropertyPicker,
@@ -17,7 +16,7 @@ import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
 
 export interface AssigneeSelection {
-  type: AutopilotAssigneeType;
+  type: "agent";
   id: string;
 }
 
@@ -39,28 +38,23 @@ export function AgentPicker({
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
 
   const activeAgents = useMemo(() => agents.filter((a) => !a.archived_at), [agents]);
-  const activeSquads = useMemo(() => squads.filter((s) => !s.archived_at), [squads]);
 
   const selectedAgent =
     assignee?.type === "agent" ? activeAgents.find((a) => a.id === assignee.id) : undefined;
-  const selectedSquad =
-    assignee?.type === "squad" ? activeSquads.find((s) => s.id === assignee.id) : undefined;
-  const selectedName = selectedAgent?.name ?? selectedSquad?.name;
+  const selectedName = selectedAgent?.name;
 
   const query = filter.trim().toLowerCase();
   const matches = (name: string) =>
     !query || name.toLowerCase().includes(query) || matchesPinyin(name, query);
   const filteredAgents = activeAgents.filter((a) => matches(a.name));
-  const filteredSquads = activeSquads.filter((s) => matches(s.name));
 
-  const isSelected = (type: AutopilotAssigneeType, id: string) =>
-    assignee?.type === type && assignee?.id === id;
+  const isSelected = (id: string) =>
+    assignee?.type === "agent" && assignee?.id === id;
 
-  const handlePick = (type: AutopilotAssigneeType, id: string) => {
-    onChange({ type, id });
+  const handlePick = (id: string) => {
+    onChange({ type: "agent", id });
     setOpen(false);
   };
 
@@ -77,13 +71,13 @@ export function AgentPicker({
       trigger={
         customTrigger ?? (
           <>
-            {assignee && (selectedAgent || selectedSquad) ? (
+            {assignee && selectedAgent ? (
               <>
                 <ActorAvatar
                   actorType={assignee.type}
                   actorId={assignee.id}
                   size={16}
-                  showStatusDot={assignee.type === "agent"}
+                  showStatusDot
                 />
                 <span className="truncate">{selectedName}</span>
               </>
@@ -97,39 +91,21 @@ export function AgentPicker({
         )
       }
     >
-      {filteredAgents.length === 0 && filteredSquads.length === 0 ? (
+      {filteredAgents.length === 0 ? (
         <PickerEmpty />
       ) : (
-        <>
-          {filteredAgents.length > 0 && (
-            <PickerSection label={t(($) => $.agent_picker.agents_group)}>
-              {filteredAgents.map((a) => (
-                <PickerItem
-                  key={a.id}
-                  selected={isSelected("agent", a.id)}
-                  onClick={() => handlePick("agent", a.id)}
-                >
-                  <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
-                  <span className="truncate">{a.name}</span>
-                </PickerItem>
-              ))}
-            </PickerSection>
-          )}
-          {filteredSquads.length > 0 && (
-            <PickerSection label={t(($) => $.agent_picker.squads_group)}>
-              {filteredSquads.map((s) => (
-                <PickerItem
-                  key={s.id}
-                  selected={isSelected("squad", s.id)}
-                  onClick={() => handlePick("squad", s.id)}
-                >
-                  <ActorAvatar actorType="squad" actorId={s.id} size={16} />
-                  <span className="truncate">{s.name}</span>
-                </PickerItem>
-              ))}
-            </PickerSection>
-          )}
-        </>
+        <PickerSection label={t(($) => $.agent_picker.agents_group)}>
+          {filteredAgents.map((a) => (
+            <PickerItem
+              key={a.id}
+              selected={isSelected(a.id)}
+              onClick={() => handlePick(a.id)}
+            >
+              <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
+              <span className="truncate">{a.name}</span>
+            </PickerItem>
+          ))}
+        </PickerSection>
       )}
     </PropertyPicker>
   );

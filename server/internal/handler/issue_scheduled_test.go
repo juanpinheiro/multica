@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+func containsIssueID(ids []string, target string) bool {
+	for _, id := range ids {
+		if id == target {
+			return true
+		}
+	}
+	return false
+}
+
 // Backs the Project Gantt view: only issues with at least one of
 // start_date / due_date should come back when scheduled=true, regardless of
 // status or assignee. The unfiltered call must keep returning everything.

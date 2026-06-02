@@ -16,6 +16,10 @@ import (
 // The protocol is similar to Gemini's stream-json format.
 type antigravityBackend struct {
 	cfg Config
+	// resultTeardownGrace overrides defaultResultTeardownGrace. Zero means use
+	// the default; tests set a small value to keep the hung-after-result path
+	// fast.
+	resultTeardownGrace time.Duration
 }
 
 func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -76,6 +80,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		resultSeen := false
 		usage := make(map[string]TokenUsage)
 
 		scanner := bufio.NewScanner(stdout)
@@ -140,21 +145,34 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 				if evt.Stats != nil {
 					b.accumulateUsage(usage, evt.Stats)
 				}
+				// The result is the authoritative completion signal. Tear the
+				// process down proactively so a CLI that emits its result and
+				// then hangs resolves now instead of blocking the reader until
+				// the idle watchdog.
+				if !resultSeen {
+					resultSeen = true
+					scheduleResultTeardown(runCtx, cancel, resolveResultTeardownGrace(b.resultTeardownGrace))
+				}
 			}
 		}
 
 		waitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("antigravity timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		} else if waitErr != nil && finalStatus == "completed" {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("antigravity exited with error: %v", waitErr)
+		// A run that emitted a result has already recorded its real disposition.
+		// Don't let the teardown cancel — or a non-zero exit from the force-kill
+		// that follows it — clobber that into aborted/failed.
+		if !resultSeen {
+			if runCtx.Err() == context.DeadlineExceeded {
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("antigravity timed out after %s", timeout)
+			} else if runCtx.Err() == context.Canceled {
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			} else if waitErr != nil && finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("antigravity exited with error: %v", waitErr)
+			}
 		}
 
 		b.cfg.Logger.Info("antigravity finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())

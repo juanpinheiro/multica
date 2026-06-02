@@ -174,7 +174,7 @@ describe("useIssueActions", () => {
     );
   });
 
-  it("openSetParent / openAddChild / openDeleteConfirm / openCreateSubIssue open the correct modal with payload", () => {
+  it("openSetParent / openAddChild / openDeleteConfirm open the correct modal with payload", () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
 
     act(() => {
@@ -189,14 +189,6 @@ describe("useIssueActions", () => {
     });
     expect(mockOpenModal).toHaveBeenLastCalledWith("issue-add-child", {
       issueId: "issue-1",
-    });
-
-    act(() => {
-      result.current.openCreateSubIssue();
-    });
-    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
-      parent_issue_id: "issue-1",
-      parent_issue_identifier: "TES-1",
     });
 
     act(() => {

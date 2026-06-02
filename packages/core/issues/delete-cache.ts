@@ -53,12 +53,6 @@ export function collectDeletedIssueCacheMetadata(
     collectParentFromListCache(parentIssueIds, data, issueId);
   }
 
-  for (const [, data] of qc.getQueriesData<ListIssuesCache>({
-    queryKey: issueKeys.myAll(wsId),
-  })) {
-    collectParentFromListCache(parentIssueIds, data, issueId);
-  }
-
   for (const [key, data] of qc.getQueriesData<Issue[]>({
     queryKey: [...issueKeys.all(wsId), "children"],
   })) {
@@ -84,13 +78,6 @@ export function pruneDeletedIssueFromListCaches(
     );
   }
 
-  for (const [key] of qc.getQueriesData<ListIssuesCache>({
-    queryKey: issueKeys.myAll(wsId),
-  })) {
-    qc.setQueryData<ListIssuesCache>(key, (old) =>
-      old ? removeIssueFromBuckets(old, issueId) : old,
-    );
-  }
 }
 
 export function pruneDeletedIssueFromParentChildrenCaches(
@@ -134,8 +121,6 @@ export function invalidateIssueScopedCaches(
   issueId: string,
 ) {
   qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
-  qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
   qc.invalidateQueries({ queryKey: issueKeys.usage(issueId) });
   qc.invalidateQueries({ queryKey: issueKeys.attachments(issueId) });
   qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
@@ -155,8 +140,6 @@ export function cleanupDeletedIssueCaches(
 
   qc.removeQueries({ queryKey: issueKeys.detail(wsId, issueId) });
   qc.removeQueries({ queryKey: issueKeys.timeline(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.reactions(issueId) });
-  qc.removeQueries({ queryKey: issueKeys.subscribers(issueId) });
   qc.removeQueries({ queryKey: issueKeys.usage(issueId) });
   qc.removeQueries({ queryKey: issueKeys.attachments(issueId) });
   qc.removeQueries({ queryKey: issueKeys.tasks(issueId) });
@@ -165,8 +148,7 @@ export function cleanupDeletedIssueCaches(
 
   qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
-  // Feature Gantt cache lives outside `myAll`, so it needs an explicit
+  // Feature Gantt cache needs an explicit
   // refresh when an issue is removed — the deleted row may have been a
   // scheduled bar visible right now.
   qc.invalidateQueries({ queryKey: issueKeys.featureGanttAll(wsId) });

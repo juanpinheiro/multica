@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/initiative"
 	"github.com/multica-ai/multica/server/internal/mention"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -203,7 +204,7 @@ func (s *TaskService) willRetryTask(task db.AgentTaskQueue) bool {
 	if task.AutopilotRunID.Valid {
 		return false
 	}
-	return task.IssueID.Valid || task.ChatSessionID.Valid
+	return task.IssueID.Valid
 }
 
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
@@ -280,16 +281,6 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, false)
 }
 
-// EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
-// The resulting task carries is_leader_task=true so that downstream
-// self-trigger guards can distinguish a comment posted while the agent was
-// acting as the squad's leader (skip) from one posted while it was acting
-// as a worker (do not skip). This matters for agents that are simultaneously
-// the leader and a worker of the same squad — see migration 090.
-func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, false)
-}
-
 func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, forceFreshSession bool) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
@@ -327,142 +318,77 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 	return task, nil
 }
 
-// QuickCreateContext is the JSON payload stored on a quick-create task's
-// context column. The daemon detects this variant via Type == "quick_create"
-// and switches to the quick-create prompt template; the completion path
-// uses RequesterID + WorkspaceID to write the inbox notification.
-//
-// FeatureID is the optional feature the user picked in the modal. When
-// non-empty the daemon claim handler resolves the project's title +
-// resources, and the prompt template instructs the agent to pass
-// `--project <uuid>` so the new issue lands in that project.
-//
-// SquadID is non-empty when the user picked a squad (rather than an agent)
-// in the modal. The task is still enqueued against the squad's leader
-// agent (Queries.CreateQuickCreateTask is agent-scoped); SquadID is the
-// hint the daemon claim handler uses to layer the squad-leader briefing
-// onto the agent's Instructions, matching the behavior of issue-bound
-// tasks assigned to the squad.
-type QuickCreateContext struct {
-	Type          string `json:"type"`
-	Prompt        string `json:"prompt"`
-	RequesterID   string `json:"requester_id"`
-	WorkspaceID   string `json:"workspace_id"`
-	FeatureID     string `json:"feature_id,omitempty"`
-	SquadID       string `json:"squad_id,omitempty"`
-	ParentIssueID string `json:"parent_issue_id,omitempty"`
-}
-
-// QuickCreateContextType marks a task as a quick-create job.
-const QuickCreateContextType = "quick_create"
-
-// EnqueueQuickCreateTask creates a queued task that has no issue / chat /
-// autopilot link — the user's natural-language prompt is stored in the
-// task's context JSONB and the agent is expected to translate it into a
-// `multica issue create` call. Pre-validates that the agent is reachable
-// (not archived, has a runtime) so the API can reject up-front rather than
-// queue a task no one will ever claim.
-//
-// projectID is optional (zero-valued pgtype.UUID when the user didn't pick
-// one). The handler is responsible for validating it belongs to the same
-// workspace before passing it in.
-//
-// squadID is non-empty (Valid) when the user picked a squad as the actor.
-// The handler has already resolved it to the squad's leader agent for
-// agentID; the squadID hint is stamped into the task context so the daemon
-// claim handler can inject the squad-leader briefing on dispatch.
-//
-// parentIssueID is optional (zero-valued pgtype.UUID when no parent was
-// selected). The handler is responsible for validating it belongs to the same
-// workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID pgtype.UUID, parentIssueID pgtype.UUID) (db.AgentTaskQueue, error) {
-	agent, err := s.Queries.GetAgent(ctx, agentID)
+// DispatchValidatorRun enqueues a validator Run (role=validator, fresh session)
+// for a Milestone's Issue at the Milestone boundary. The validator checks the
+// Milestone's accumulated work against its DoD with clean context, separate from
+// the worker. validatorAgentID is resolved by the caller (a distinct agent when
+// one exists, else the worker agent itself for a fresh-session re-read).
+func (s *TaskService) DispatchValidatorRun(ctx context.Context, issue db.Issue, validatorAgentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, validatorAgentID)
 	if err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load validator agent: %w", err)
 	}
 	if agent.ArchivedAt.Valid {
-		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+		return db.AgentTaskQueue{}, fmt.Errorf("validator agent is archived")
 	}
 	if !agent.RuntimeID.Valid {
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+		return db.AgentTaskQueue{}, fmt.Errorf("validator agent has no runtime")
 	}
 
-	payload := QuickCreateContext{
-		Type:        QuickCreateContextType,
-		Prompt:      prompt,
-		RequesterID: util.UUIDToString(requesterID),
-		WorkspaceID: util.UUIDToString(workspaceID),
-	}
-	if projectID.Valid {
-		payload.FeatureID = util.UUIDToString(projectID)
-	}
-	if squadID.Valid {
-		payload.SquadID = util.UUIDToString(squadID)
-	}
-	if parentIssueID.Valid {
-		payload.ParentIssueID = util.UUIDToString(parentIssueID)
-	}
-	contextJSON, err := json.Marshal(payload)
-	if err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("marshal quick-create context: %w", err)
-	}
-
-	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
-		AgentID:   agentID,
+	task, err := s.Queries.CreateValidatorTask(ctx, db.CreateValidatorTaskParams{
+		AgentID:   validatorAgentID,
 		RuntimeID: agent.RuntimeID,
-		Priority:  priorityToInt("high"),
-		Context:   contextJSON,
+		IssueID:   issue.ID,
+		Priority:  priorityToInt(issue.Priority),
 	})
 	if err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task: %w", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create validator task: %w", err)
 	}
 
-	slog.Info("quick-create task enqueued",
+	slog.Info("validator run dispatched",
 		"task_id", util.UUIDToString(task.ID),
-		"agent_id", util.UUIDToString(agentID),
-		"squad_id", payload.SquadID,
-		"requester_id", util.UUIDToString(requesterID),
-		"workspace_id", util.UUIDToString(workspaceID),
-		"feature_id", payload.FeatureID,
-		"parent_issue_id", payload.ParentIssueID,
+		"issue_id", util.UUIDToString(issue.ID),
+		"agent_id", util.UUIDToString(validatorAgentID),
 	)
-	// Match every other Enqueue* path: kick the daemon WS so the task
-	// gets claimed promptly instead of waiting for the next 30 s poll
-	// cycle. Without this the user perceives "quick create never
-	// triggered" because the modal closes immediately and the task
-	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
+	// See EnqueueTaskForIssue for the broadcast-then-notify ordering rationale.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
 }
 
-// EnqueueChatTask creates a queued task for a chat session.
-// Unlike issue tasks, chat tasks have no issue_id.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession) (db.AgentTaskQueue, error) {
-	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
+// DispatchRetrospectiveRun enqueues a retrospective Run (role=retrospective,
+// fresh session) for an Initiative's Issue at the Initiative boundary. The
+// retrospective reviews the finished work with clean context and records the
+// Decision Log, updating the architecture docs. retrospectiveAgentID is resolved
+// by the caller.
+func (s *TaskService) DispatchRetrospectiveRun(ctx context.Context, issue db.Issue, retrospectiveAgentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, retrospectiveAgentID)
 	if err != nil {
-		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
-		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("load retrospective agent: %w", err)
 	}
 	if agent.ArchivedAt.Valid {
-		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+		return db.AgentTaskQueue{}, fmt.Errorf("retrospective agent is archived")
 	}
 	if !agent.RuntimeID.Valid {
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+		return db.AgentTaskQueue{}, fmt.Errorf("retrospective agent has no runtime")
 	}
 
-	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
-		AgentID:       chatSession.AgentID,
-		RuntimeID:     agent.RuntimeID,
-		Priority:      2, // medium priority for chat
-		ChatSessionID: chatSession.ID,
+	task, err := s.Queries.CreateRetrospectiveTask(ctx, db.CreateRetrospectiveTaskParams{
+		AgentID:   retrospectiveAgentID,
+		RuntimeID: agent.RuntimeID,
+		IssueID:   issue.ID,
+		Priority:  priorityToInt(issue.Priority),
 	})
 	if err != nil {
-		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
-		return db.AgentTaskQueue{}, fmt.Errorf("create chat task: %w", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create retrospective task: %w", err)
 	}
 
-	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
-	// See EnqueueTaskForIssue for ordering rationale.
+	slog.Info("retrospective run dispatched",
+		"task_id", util.UUIDToString(task.ID),
+		"issue_id", util.UUIDToString(issue.ID),
+		"agent_id", util.UUIDToString(retrospectiveAgentID),
+	)
+	// See EnqueueTaskForIssue for the broadcast-then-notify ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
@@ -624,6 +550,7 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(task.ID), "agent_id", util.UUIDToString(agentID))
 	s.captureTaskDispatched(ctx, task)
+	s.advanceInitiativeToRunning(ctx, task)
 
 	// Refresh agent status from active tasks. This avoids a stale unconditional
 	// working write racing after a just-cancelled claim.
@@ -631,9 +558,7 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 	s.ReconcileAgentStatus(ctx, agentID)
 	updateStatusMs = time.Since(t0).Milliseconds()
 
-	// Broadcast task:dispatch. ResolveTaskWorkspaceID inside this path can
-	// re-query issue/chat_session/autopilot_run, so it can also be a real
-	// contributor to claim latency.
+	// Broadcast task:dispatch.
 	t0 = time.Now()
 	s.broadcastTaskDispatch(ctx, task)
 	dispatchMs = time.Since(t0).Milliseconds()
@@ -734,6 +659,108 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	return claimed, nil
 }
 
+// advanceInitiativeToRunning flips a task's Initiative (feature) from 'ready'
+// to 'running' the first time one of its Runs is claimed, so the board reflects
+// that execution has begun. Best-effort: a failure here must not fail the claim,
+// and a no-op (no feature, or already running) is the common case.
+func (s *TaskService) advanceInitiativeToRunning(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid {
+		return
+	}
+	row, err := s.Queries.GetIssueFeatureStatus(ctx, task.IssueID)
+	if err != nil {
+		return // no Initiative for this issue, or load failed
+	}
+	// Only the first claim of a *ready* Initiative advances it to running. A Run
+	// claimed while the Initiative is already running, or in_review (the
+	// retrospective Run is dispatched at the in_review boundary and is claimable
+	// there), must not pull it back — in_review→running is a legal control-plane
+	// reopen, not a claim side effect. Guarding on ready also keeps the PR-draft
+	// notification firing exactly once, on the genuine ready→running edge.
+	if initiative.Status(row.Status) != initiative.StatusReady {
+		return
+	}
+	if _, err := s.Queries.SetFeatureStatus(ctx, db.SetFeatureStatusParams{
+		ID:     row.FeatureID,
+		Status: string(initiative.StatusRunning),
+	}); err != nil {
+		slog.Warn("advance initiative to running failed",
+			"error", err, "feature_id", util.UUIDToString(row.FeatureID))
+		return
+	}
+	s.notifyInitiativePRDraft(ctx, row.FeatureID)
+}
+
+// notifyInitiativePRDraft fires a best-effort inbox notification when an
+// Initiative first transitions to running, prompting the human to open a draft
+// PR so progress is visible while agents work. Fires only for shared-branch
+// features (branch_slug set).
+func (s *TaskService) notifyInitiativePRDraft(ctx context.Context, featureID pgtype.UUID) {
+	feature, err := s.Queries.GetFeature(ctx, featureID)
+	if err != nil {
+		return
+	}
+	if !feature.BranchSlug.Valid || feature.BranchSlug.String == "" {
+		return
+	}
+
+	members, err := s.Queries.ListMembers(ctx, feature.WorkspaceID)
+	if err != nil || len(members) == 0 {
+		return
+	}
+
+	details, _ := json.Marshal(map[string]any{
+		"feature_id":  util.UUIDToString(feature.ID),
+		"branch_slug": feature.BranchSlug.String,
+	})
+
+	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		WorkspaceID:   feature.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   members[0].ID,
+		Type:          "feature_pr_draft",
+		Severity:      "info",
+		Title:         fmt.Sprintf("Initiative '%s' is running — open a draft PR", feature.Title),
+		Body: pgtype.Text{
+			String: fmt.Sprintf("Create a draft PR for branch `%s` so progress is visible while agents work.", feature.BranchSlug.String),
+			Valid:  true,
+		},
+		ActorType: pgtype.Text{String: "system", Valid: true},
+		ActorID:   pgtype.UUID{},
+		Details:   details,
+	})
+	if err != nil {
+		slog.Warn("initiative pr draft notification failed",
+			"feature_id", util.UUIDToString(featureID), "error", err)
+		return
+	}
+
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: util.UUIDToString(feature.WorkspaceID),
+		ActorType:   "system",
+		ActorID:     "",
+		Payload: map[string]any{
+			"item": map[string]any{
+				"id":             util.UUIDToString(item.ID),
+				"workspace_id":   util.UUIDToString(item.WorkspaceID),
+				"recipient_type": item.RecipientType,
+				"recipient_id":   util.UUIDToString(item.RecipientID),
+				"type":           item.Type,
+				"severity":       item.Severity,
+				"title":          item.Title,
+				"body":           util.TextToPtr(item.Body),
+				"read":           item.Read,
+				"archived":       item.Archived,
+				"created_at":     util.TimestampToString(item.CreatedAt),
+				"actor_type":     util.TextToPtr(item.ActorType),
+				"actor_id":       util.UUIDToPtr(item.ActorID),
+				"details":        json.RawMessage(item.Details),
+			},
+		},
+	})
+}
+
 // maybeLogClaimSlow emits one structured log per ClaimTask call when its total
 // latency exceeds 300ms, so the prod tail can be diagnosed without flooding
 // logs at normal poll rates. Called via defer so it captures the full path
@@ -800,12 +827,6 @@ func (s *TaskService) WaitTaskForLocalDirectory(ctx context.Context, taskID pgty
 
 // CompleteTask marks a task as completed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
-//
-// For chat tasks, CompleteAgentTask and the chat_session resume-pointer
-// update run in a single transaction. This closes a race where the next
-// queued chat message could be claimed in the window between the task
-// flipping to 'completed' and chat_session.session_id being refreshed,
-// causing the new task to resume against a stale (or NULL) session.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
@@ -820,26 +841,6 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 		task = t
 
-		if t.ChatSessionID.Valid {
-			// Pin the chat_session's runtime_id alongside the session_id so the
-			// next claim can apply the runtime-guard. Both fields move together:
-			// when there's no session_id to record, leave runtime_id untouched
-			// (NULL → COALESCE keeps the existing value).
-			var sessionRuntimeID pgtype.UUID
-			if sessionID != "" {
-				sessionRuntimeID = t.RuntimeID
-			}
-			// COALESCE in SQL guarantees empty inputs don't wipe the
-			// existing resume pointer; we still surface DB errors.
-			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
-				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
-				RuntimeID: sessionRuntimeID,
-			}); err != nil {
-				return fmt.Errorf("update chat session resume pointer: %w", err)
-			}
-		}
 		return nil
 	}); err != nil {
 		// When parallel agents race, a task may already be completed,
@@ -859,7 +860,6 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,
 				"issue_id", util.UUIDToString(existing.IssueID),
-				"chat_session_id", util.UUIDToString(existing.ChatSessionID),
 				"agent_id", util.UUIDToString(existing.AgentID),
 				"error", err,
 			)
@@ -884,21 +884,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// for assignment-triggered tasks it is NULL and the fallback is top-level.
 	// Chat tasks have no IssueID and are handled separately below.
 	if task.IssueID.Valid {
-		suppressNoActionComment, err := HasSquadLeaderNoActionEvaluationForTask(ctx, s.Queries, task)
-		if err != nil {
-			slog.Warn("checking squad leader no_action evaluation failed",
-				"task_id", util.UUIDToString(task.ID),
-				"issue_id", util.UUIDToString(task.IssueID),
-				"agent_id", util.UUIDToString(task.AgentID),
-				"error", err,
-			)
-		}
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
 			AuthorID: task.AgentID,
 			Since:    task.StartedAt,
 		})
-		if !suppressNoActionComment && !agentCommented {
+		if !agentCommented {
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
 				if payload.Output != "" {
@@ -921,49 +912,6 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 	}
 
-	// Quick-create tasks: locate the issue the agent just created and push
-	// an inbox confirmation to the requester. The agent has no issue / chat
-	// link, so the regular completion paths above don't apply. We find the
-	// new issue by querying for the most recent issue this agent created in
-	// the requester's workspace since the task started — more robust than
-	// parsing the agent's stdout for an identifier.
-	if qc, ok := s.parseQuickCreateContext(task); ok {
-		s.notifyQuickCreateCompleted(ctx, task, qc)
-	}
-
-	// For chat tasks, save assistant reply and broadcast chat:done. The
-	// resume pointer was already persisted inside the transaction above.
-	if task.ChatSessionID.Valid {
-		var assistantMsg *db.ChatMessage
-		var payload protocol.TaskCompletedPayload
-		if err := json.Unmarshal(result, &payload); err == nil && payload.Output != "" {
-			// Same unescape as the issue-comment path above: literal `\n` from
-			// agent stdout becomes a real newline so the chat panel renders
-			// paragraph breaks instead of one wall of prose.
-			body := util.UnescapeBackslashEscapes(payload.Output)
-			row, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
-				ChatSessionID: task.ChatSessionID,
-				Role:          "assistant",
-				Content:       redact.Text(body),
-				TaskID:        task.ID,
-				ElapsedMs:     computeChatElapsedMs(task),
-			})
-			if err != nil {
-				slog.Error("failed to save assistant chat message", "task_id", util.UUIDToString(task.ID), "error", err)
-			} else {
-				assistantMsg = &row
-				// Event-driven unread: stamp unread_since on the first unread
-				// assistant message. No-op if the session already has unread.
-				// If the user is actively viewing the session, the frontend's
-				// auto-mark-read effect will clear this within a tick.
-				if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-					slog.Warn("failed to set unread_since", "chat_session_id", util.UUIDToString(task.ChatSessionID), "error", err)
-				}
-			}
-		}
-		s.broadcastChatDone(ctx, task, assistantMsg)
-	}
-
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -975,13 +923,6 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 // FailTask marks a task as failed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
-//
-// sessionID/workDir are optional: when the agent established a real session
-// before failing (e.g. crashed mid-conversation, was cancelled, or hit a
-// tool error), the daemon should pass them so we can preserve the resume
-// pointer on both the task row and the chat_session — otherwise the next
-// chat turn would silently start a brand-new session and lose memory.
-//
 // failureReason is a coarse classifier consumed by the auto-retry path.
 // Pass "" when unknown (treated as 'agent_error').
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
@@ -999,26 +940,6 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}
 		task = t
 
-		// Keep resume-unsafe sessions on the task row for observability, but
-		// do not promote them to the chat-level resume pointer.
-		if t.ChatSessionID.Valid && !resumeUnsafeFailureReason(failureReason) {
-			// Pin the chat_session's runtime_id alongside the session_id so the
-			// next claim can apply the runtime-guard. Both fields move together:
-			// when there's no session_id to record, leave runtime_id untouched
-			// (NULL → COALESCE keeps the existing value).
-			var sessionRuntimeID pgtype.UUID
-			if sessionID != "" {
-				sessionRuntimeID = t.RuntimeID
-			}
-			if err := qtx.UpdateChatSessionSession(ctx, db.UpdateChatSessionSessionParams{
-				ID:        t.ChatSessionID,
-				SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-				WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
-				RuntimeID: sessionRuntimeID,
-			}); err != nil {
-				return fmt.Errorf("update chat session resume pointer: %w", err)
-			}
-		}
 		return nil
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
@@ -1034,7 +955,6 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				"task_id", util.UUIDToString(taskID),
 				"current_status", existing.Status,
 				"issue_id", util.UUIDToString(existing.IssueID),
-				"chat_session_id", util.UUIDToString(existing.ChatSessionID),
 				"agent_id", util.UUIDToString(existing.AgentID),
 				"error", err,
 			)
@@ -1063,40 +983,6 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID)
 	}
 
-	// Mirror the issue fallback for chat tasks: write an assistant
-	// chat_message tagged with the daemon-reported failure_reason so the
-	// conversation history shows what happened. Skip when auto-retry is
-	// pending (the new attempt will write its own outcome) — same guard as
-	// the issue path above.
-	if task.ChatSessionID.Valid && retried == nil {
-		if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
-			ChatSessionID: task.ChatSessionID,
-			Role:          "assistant",
-			Content:       redact.Text(errMsg),
-			TaskID:        pgtype.UUID{Bytes: task.ID.Bytes, Valid: true},
-			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			ElapsedMs:     computeChatElapsedMs(task),
-		}); err != nil {
-			slog.Error("failed to save failure chat message",
-				"task_id", util.UUIDToString(task.ID),
-				"chat_session_id", util.UUIDToString(task.ChatSessionID),
-				"error", err)
-		} else if err := s.Queries.SetUnreadSinceIfNull(ctx, task.ChatSessionID); err != nil {
-			slog.Warn("failed to set unread_since on failure",
-				"chat_session_id", util.UUIDToString(task.ChatSessionID),
-				"error", err)
-		}
-	}
-
-	// Quick-create tasks: push a failure inbox notification to the
-	// requester so they can either retry or fall back to the advanced form
-	// without losing their original prompt. Skipped when an auto-retry is
-	// pending — the new attempt will write its own outcome.
-	if retried == nil {
-		if qc, ok := s.parseQuickCreateContext(task); ok {
-			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
-		}
-	}
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
@@ -1119,8 +1005,7 @@ var retryableReasons = map[string]bool{
 
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
-	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
-	// CreateRetryTask's fresh-session CASE WHEN.
+	// Keep in sync with GetLastTaskSession and CreateRetryTask's fresh-session CASE WHEN.
 	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
 		return true
 	default:
@@ -1131,10 +1016,7 @@ func resumeUnsafeFailureReason(reason string) bool {
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
-// max_attempts budget. The child task inherits agent/runtime/issue/chat
-// links and, for resume-safe failures, the parent's session_id/work_dir so
-// the agent can resume the conversation when the backend supports it. Returns
-// the new task, or nil when no retry was created.
+// max_attempts budget. Returns the new task, or nil when no retry was created.
 //
 // Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
 // its own re-run cadence and we don't want to double-fire it.
@@ -1161,7 +1043,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		// Autopilot has its own retry semantics; do not double-trigger.
 		return nil, nil
 	}
-	if !parent.IssueID.Valid && !parent.ChatSessionID.Valid {
+	if !parent.IssueID.Valid {
 		return nil, nil
 	}
 
@@ -1193,18 +1075,13 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // the manual rerun endpoint.
 //
 // Target agent resolution:
-//   - sourceTaskID Valid: rerun the agent that ran that task (and reuse its
-//     leader/worker role). This is what the execution log retry button uses
-//     so a per-row retry survives a subsequent assignee change and correctly
-//     re-fires the squad worker or mention agent whose row was clicked. The
-//     source task's trigger_comment_id is also inherited (when the caller
-//     didn't pass one) so a per-row rerun of a comment- or mention-triggered
-//     task stays comment-triggered — the daemon's buildCommentPrompt path
-//     keys on TriggerCommentID, and losing it would degrade the rerun into
-//     a generic issue run that no longer carries the original comment.
-//   - sourceTaskID empty: fall back to the issue's current assignee (agent
-//     or squad leader). This preserves the CLI / API contract for callers
-//     that have an issue ID but no specific task to target.
+//   - sourceTaskID Valid: rerun the agent that ran that task. The source task's
+//     trigger_comment_id is also inherited (when the caller didn't pass one) so
+//     a per-row rerun of a comment- or mention-triggered task stays
+//     comment-triggered — the daemon's buildCommentPrompt path keys on
+//     TriggerCommentID, and losing it would degrade the rerun into a generic
+//     issue run that no longer carries the original comment.
+//   - sourceTaskID empty: fall back to the issue's current assignee agent.
 //
 // The new task is flagged force_fresh_session=true so the daemon starts a
 // clean agent session instead of resuming the prior (agent_id, issue_id)
@@ -1249,18 +1126,10 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 			triggerCommentID = sourceTask.TriggerCommentID
 		}
 	} else {
-		switch {
-		case issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid:
+		if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
 			agentID = issue.AssigneeID
-		case issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid:
-			squad, err := s.Queries.GetSquad(ctx, issue.AssigneeID)
-			if err != nil {
-				return nil, fmt.Errorf("issue is assigned to a squad but squad not found")
-			}
-			agentID = squad.LeaderID
-			isLeader = true
-		default:
-			return nil, fmt.Errorf("issue is not assigned to an agent or squad")
+		} else {
+			return nil, fmt.Errorf("issue is not assigned to an agent")
 		}
 	}
 
@@ -1300,8 +1169,8 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // enqueueRerunTask enqueues a fresh task for the given agent on the issue.
 // When the target agent is the issue's single-agent assignee we use the
 // assignee-driven path (enqueueIssueTask) so the issue-assignee bookkeeping
-// stays in sync; otherwise (squad member, prior assignee that has since been
-// reassigned, mention agent) we use the mention path with the same
+// stays in sync; otherwise (prior assignee that has since been reassigned,
+// mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
@@ -1503,23 +1372,6 @@ type AgentSkillFileData struct {
 	Content string `json:"content"`
 }
 
-// computeChatElapsedMs returns the wall-clock duration from task creation
-// (user hit send) to terminal state (completed/failed). Stored on the
-// assistant chat_message so the UI can render "Replied in 38s" /
-// "Failed after 12s". Uses created_at — not started_at — because users
-// experience total wait time, including queue + dispatch, not just the
-// daemon's actual run time.
-func computeChatElapsedMs(task db.AgentTaskQueue) pgtype.Int8 {
-	if !task.CompletedAt.Valid || !task.CreatedAt.Valid {
-		return pgtype.Int8{}
-	}
-	ms := task.CompletedAt.Time.Sub(task.CreatedAt.Time).Milliseconds()
-	if ms < 0 {
-		ms = 0
-	}
-	return pgtype.Int8{Int64: ms, Valid: true}
-}
-
 func priorityToInt(p string) int32 {
 	switch p {
 	case "urgent":
@@ -1575,12 +1427,6 @@ func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTa
 	payload["runtime_id"] = util.UUIDToString(task.RuntimeID)
 	payload["issue_id"] = util.UUIDToString(task.IssueID)
 	payload["agent_id"] = util.UUIDToString(task.AgentID)
-	// chat_session_id is the routing key the chat window uses to writethrough
-	// `chatKeys.pendingTask` to status="running" the moment the daemon claims
-	// the task. Without it the pill stays stuck at "Queued" until completion.
-	if task.ChatSessionID.Valid {
-		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
-	}
 
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
@@ -1606,9 +1452,6 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 		"issue_id": util.UUIDToString(task.IssueID),
 		"status":   task.Status,
 	}
-	if task.ChatSessionID.Valid {
-		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
-	}
 	s.Bus.Publish(events.Event{
 		Type:        eventType,
 		WorkspaceID: workspaceID,
@@ -1619,18 +1462,11 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 }
 
 // ResolveTaskWorkspaceID determines the workspace ID for a task.
-// For issue tasks, it comes from the issue. For chat tasks, from the chat session.
-// For autopilot tasks, from the autopilot via its run.
-// Returns "" when none of the links resolve — callers treat that as "not found".
+// Returns "" when the task has no resolvable workspace.
 func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentTaskQueue) string {
 	if task.IssueID.Valid {
 		if issue, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
 			return util.UUIDToString(issue.WorkspaceID)
-		}
-	}
-	if task.ChatSessionID.Valid {
-		if cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
-			return util.UUIDToString(cs.WorkspaceID)
 		}
 	}
 	if task.AutopilotRunID.Valid {
@@ -1640,44 +1476,7 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 			}
 		}
 	}
-	// Quick-create tasks have no issue / chat / autopilot link — workspace
-	// lives in the context JSONB. Returning "" here is what blocked
-	// requireDaemonTaskAccess (404 on /start, /progress, /complete, /fail
-	// for the daemon) and silently dropped task:dispatch / task:completed
-	// broadcasts, which is why quick-create tasks appeared stuck queued.
-	if qc, ok := s.parseQuickCreateContext(task); ok {
-		return qc.WorkspaceID
-	}
 	return ""
-}
-
-func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage) {
-	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
-	if workspaceID == "" {
-		return
-	}
-	payload := protocol.ChatDonePayload{
-		ChatSessionID: util.UUIDToString(task.ChatSessionID),
-		TaskID:        util.UUIDToString(task.ID),
-	}
-	if msg != nil {
-		payload.MessageID = util.UUIDToString(msg.ID)
-		payload.Content = msg.Content
-		if msg.CreatedAt.Valid {
-			payload.CreatedAt = msg.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
-		}
-		if msg.ElapsedMs.Valid {
-			payload.ElapsedMs = msg.ElapsedMs.Int64
-		}
-	}
-	s.Bus.Publish(events.Event{
-		Type:          protocol.EventChatDone,
-		WorkspaceID:   workspaceID,
-		ActorType:     "system",
-		ActorID:       "",
-		ChatSessionID: util.UUIDToString(task.ChatSessionID),
-		Payload:       payload,
-	})
 }
 
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue) {
@@ -1822,213 +1621,6 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"created_at":      util.TimestampToString(issue.CreatedAt),
 		"updated_at":      util.TimestampToString(issue.UpdatedAt),
 	}
-}
-
-// parseQuickCreateContext returns the quick-create payload if the task's
-// context JSONB contains type == "quick_create"; otherwise the bool is
-// false so callers can short-circuit. Tasks linked to an issue / chat /
-// autopilot are never quick-create even if they happen to carry a
-// context blob, so those are filtered up front.
-func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCreateContext, bool) {
-	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
-		return QuickCreateContext{}, false
-	}
-	if len(task.Context) == 0 {
-		return QuickCreateContext{}, false
-	}
-	var qc QuickCreateContext
-	if err := json.Unmarshal(task.Context, &qc); err != nil {
-		return QuickCreateContext{}, false
-	}
-	if qc.Type != QuickCreateContextType {
-		return QuickCreateContext{}, false
-	}
-	return qc, true
-}
-
-// notifyQuickCreateCompleted writes a success inbox notification to the
-// requester pointing at the issue the agent just created. The issue is
-// stamped with origin_type=quick_create + origin_id=<task_id> by the
-// daemon-injected MULTICA_QUICK_CREATE_TASK_ID env var, so this lookup is
-// deterministic — robust against the same agent creating other issues in
-// parallel (e.g. assignment task running while max_concurrent_tasks > 1
-// permits another quick-create alongside it).
-func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext) {
-	requesterID, err := util.ParseUUID(qc.RequesterID)
-	if err != nil {
-		slog.Warn("quick-create completion: invalid requester id", "task_id", util.UUIDToString(task.ID), "error", err)
-		return
-	}
-	workspaceID, err := util.ParseUUID(qc.WorkspaceID)
-	if err != nil {
-		slog.Warn("quick-create completion: invalid workspace id", "task_id", util.UUIDToString(task.ID), "error", err)
-		return
-	}
-	issue, err := s.Queries.GetIssueByOrigin(ctx, db.GetIssueByOriginParams{
-		WorkspaceID: workspaceID,
-		OriginType:  pgtype.Text{String: "quick_create", Valid: true},
-		OriginID:    task.ID,
-	})
-	if err != nil {
-		// No issue created — agent ran to completion but the CLI call must
-		// have failed. Surface as a failure inbox so the user sees something.
-		slog.Warn("quick-create completion: no issue found, writing failure inbox",
-			"task_id", util.UUIDToString(task.ID),
-			"agent_id", util.UUIDToString(task.AgentID),
-			"workspace_id", qc.WorkspaceID,
-		)
-		s.notifyQuickCreateFailed(ctx, task, qc, "agent finished without creating an issue")
-		return
-	}
-
-	// Link the new issue back to this task so subsequent reads of the task
-	// (Activity tab, Recent work, etc.) render it as a normal issue task
-	// (kind = "direct") instead of staying on the "Creating issue" active-
-	// wording label. Best-effort: a write failure here doesn't block the
-	// inbox notification, which is the more important signal to the user.
-	if err := s.Queries.LinkTaskToIssue(ctx, db.LinkTaskToIssueParams{
-		ID:      task.ID,
-		IssueID: issue.ID,
-	}); err != nil {
-		slog.Warn("quick-create completion: link task→issue failed",
-			"task_id", util.UUIDToString(task.ID),
-			"issue_id", util.UUIDToString(issue.ID),
-			"error", err,
-		)
-	}
-
-	// Subscribe the requester so they receive notifications for follow-up
-	// comments and updates. The DB row's creator_type/creator_id is the
-	// agent (it ran the CLI), but the human who triggered the quick-create
-	// is the semantic creator from a UX perspective — without this they
-	// only see the one-shot completion inbox and miss everything after.
-	// Best-effort: log on failure but don't block the inbox notification.
-	if err := s.Queries.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
-		IssueID:  issue.ID,
-		UserType: "member",
-		UserID:   requesterID,
-		Reason:   "creator",
-	}); err != nil {
-		slog.Warn("quick-create completion: subscribe requester failed",
-			"task_id", util.UUIDToString(task.ID),
-			"issue_id", util.UUIDToString(issue.ID),
-			"requester_id", qc.RequesterID,
-			"error", err,
-		)
-	} else {
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventSubscriberAdded,
-			WorkspaceID: qc.WorkspaceID,
-			ActorType:   "agent",
-			ActorID:     util.UUIDToString(task.AgentID),
-			Payload: map[string]any{
-				"issue_id":  util.UUIDToString(issue.ID),
-				"user_type": "member",
-				"user_id":   qc.RequesterID,
-				"reason":    "creator",
-			},
-		})
-	}
-	prefix := s.getIssuePrefix(workspaceID)
-	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
-	details, _ := json.Marshal(map[string]any{
-		"task_id":         util.UUIDToString(task.ID),
-		"agent_id":        util.UUIDToString(task.AgentID),
-		"issue_id":        util.UUIDToString(issue.ID),
-		"identifier":      identifier,
-		"original_prompt": qc.Prompt,
-	})
-	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   workspaceID,
-		RecipientType: "member",
-		RecipientID:   requesterID,
-		Type:          "quick_create_done",
-		Severity:      "info",
-		IssueID:       issue.ID,
-		Title:         issue.Title,
-		Body:          pgtype.Text{},
-		ActorType:     pgtype.Text{String: "agent", Valid: true},
-		ActorID:       task.AgentID,
-		Details:       details,
-	})
-	if err != nil {
-		slog.Error("quick-create completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
-		return
-	}
-	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), issue.Status)
-}
-
-// notifyQuickCreateFailed writes a failure inbox notification carrying the
-// original prompt + agent ID so the frontend can render an "Edit as
-// advanced form" entry that pre-fills the legacy create-issue modal
-// without asking the user to retype.
-func (s *TaskService) notifyQuickCreateFailed(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext, errMsg string) {
-	requesterID, err := util.ParseUUID(qc.RequesterID)
-	if err != nil {
-		return
-	}
-	workspaceID, err := util.ParseUUID(qc.WorkspaceID)
-	if err != nil {
-		return
-	}
-	if errMsg == "" {
-		errMsg = "Quick create did not finish successfully"
-	}
-	details, _ := json.Marshal(map[string]any{
-		"task_id":         util.UUIDToString(task.ID),
-		"agent_id":        util.UUIDToString(task.AgentID),
-		"original_prompt": qc.Prompt,
-		"error":           redact.Text(errMsg),
-	})
-	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   workspaceID,
-		RecipientType: "member",
-		RecipientID:   requesterID,
-		Type:          "quick_create_failed",
-		Severity:      "action_required",
-		IssueID:       pgtype.UUID{},
-		Title:         "Quick create failed",
-		Body:          pgtype.Text{String: redact.Text(errMsg), Valid: true},
-		ActorType:     pgtype.Text{String: "agent", Valid: true},
-		ActorID:       task.AgentID,
-		Details:       details,
-	})
-	if err != nil {
-		slog.Error("quick-create failure: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
-		return
-	}
-	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), "")
-}
-
-// publishQuickCreateInbox emits the WS event so the requester's inbox list
-// updates immediately. Mirrors the payload shape used by the other inbox
-// listeners (notification_listeners.go).
-func (s *TaskService) publishQuickCreateInbox(item db.InboxItem, workspaceID, agentID, issueStatus string) {
-	resp := map[string]any{
-		"id":             util.UUIDToString(item.ID),
-		"workspace_id":   util.UUIDToString(item.WorkspaceID),
-		"recipient_type": item.RecipientType,
-		"recipient_id":   util.UUIDToString(item.RecipientID),
-		"type":           item.Type,
-		"severity":       item.Severity,
-		"issue_id":       util.UUIDToPtr(item.IssueID),
-		"title":          item.Title,
-		"body":           util.TextToPtr(item.Body),
-		"read":           item.Read,
-		"archived":       item.Archived,
-		"created_at":     util.TimestampToString(item.CreatedAt),
-		"actor_type":     util.TextToPtr(item.ActorType),
-		"actor_id":       util.UUIDToPtr(item.ActorID),
-		"details":        json.RawMessage(item.Details),
-		"issue_status":   issueStatus,
-	}
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventInboxNew,
-		WorkspaceID: workspaceID,
-		ActorType:   "agent",
-		ActorID:     agentID,
-		Payload:     map[string]any{"item": resp},
-	})
 }
 
 // agentToMap builds a simple map for broadcasting agent status updates.

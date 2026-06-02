@@ -66,10 +66,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
     queryFn: () => Promise.resolve([]),
   }),
-  squadListOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "squads"],
-    queryFn: () => Promise.resolve([]),
-  }),
   assigneeFrequencyOptions: () => ({
     queryKey: ["workspaces", "ws-1", "assignee-frequency"],
     queryFn: () => Promise.resolve([]),
@@ -218,21 +214,13 @@ const mockApiObj = vi.hoisted(() => ({
   deleteComment: vi.fn(),
   deleteIssue: vi.fn(),
   updateIssue: vi.fn(),
-  listIssueSubscribers: vi.fn().mockResolvedValue([]),
-  subscribeToIssue: vi.fn().mockResolvedValue(undefined),
-  unsubscribeFromIssue: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
   uploadFile: vi.fn(),
-  listIssueReactions: vi.fn().mockResolvedValue([]),
-  addIssueReaction: vi.fn(),
-  removeIssueReaction: vi.fn(),
   listAttachments: vi.fn().mockResolvedValue([]),
-  addCommentReaction: vi.fn(),
-  removeCommentReaction: vi.fn(),
   listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
   listAgents: vi.fn().mockResolvedValue([]),
   getFeature: vi.fn(),
@@ -407,8 +395,8 @@ const mockIssue: Issue = {
   description: "Add JWT auth to the backend",
   status: "in_progress",
   priority: "high",
-  assignee_type: "member",
-  assignee_id: "user-1",
+  assignee_type: "agent",
+  assignee_id: "agent-1",
   creator_type: "member",
   creator_id: "user-1",
   parent_issue_id: null,
@@ -512,8 +500,6 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
     // /timeline returns the entries flat in chronological order (oldest first).
     mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
-    mockApiObj.listIssueReactions.mockResolvedValue([]);
-    mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });

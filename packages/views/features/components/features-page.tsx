@@ -1,17 +1,15 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Plus, FolderKanban, Rows3, LayoutGrid, Search } from "lucide-react";
+import { FolderKanban, Rows3, LayoutGrid, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { featureListOptions } from "@multica/core/features/queries";
 import { useUpdateFeature } from "@multica/core/features/mutations";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
 import { AppLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
 import type { Feature, UpdateFeatureRequest } from "@multica/core/types";
@@ -187,8 +185,6 @@ export function FeaturesPage() {
   const setViewMode = useFeatureViewStore((s) => s.setViewMode);
   const isCompact = viewMode === "compact";
   const { data: features = [], isLoading } = useQuery(featureListOptions(wsId));
-  const openCreateFeature = () => useModalStore.getState().open("create-feature");
-
   const [search, setSearch] = useState("");
   const filteredProjects = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -208,10 +204,6 @@ export function FeaturesPage() {
             <span className="text-xs text-muted-foreground tabular-nums">{features.length}</span>
           )}
         </div>
-        <Button size="sm" variant="outline" onClick={openCreateFeature}>
-          <Plus className="h-3.5 w-3.5 mr-1" />
-          {t(($) => $.page.new_feature)}
-        </Button>
       </PageHeader>
 
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
@@ -300,9 +292,6 @@ export function FeaturesPage() {
             <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">
               <FolderKanban className="h-10 w-10 mb-3 opacity-30" />
               <p className="text-sm">{t(($) => $.page.empty)}</p>
-              <Button size="sm" variant="outline" className="mt-3" onClick={openCreateFeature}>
-                {t(($) => $.page.create_first)}
-              </Button>
             </div>
           ) : filteredProjects.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 text-muted-foreground">

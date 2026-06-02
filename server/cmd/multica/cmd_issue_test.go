@@ -835,11 +835,6 @@ func TestNormalizeAssigneeLookupInput(t *testing.T) {
 		{"bare at name", "@Super Human", "Super Human"},
 		{"fullwidth at name", "＠独立团", "独立团"},
 		{"spaced at name", "  @  Super Human  ", "Super Human"},
-		{
-			name: "mention link",
-			in:   "[@Super Human](mention://squad/ccccccc1-2222-3333-4444-555555555555)",
-			want: "ccccccc1-2222-3333-4444-555555555555",
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -110,8 +110,8 @@ func systemCommentOn(t *testing.T, issueID string) (content, authorIDStr string,
 // parent. The comment must reference the child by its workspace-specific
 // identifier (NOT a hardcoded `MUL-` prefix — that was the bug PR #2918
 // review called out). When the parent has no assignee, the body must NOT
-// carry any agent/member/squad mention either; the assignee-mention is the
-// only mention we ever inject (see MUL-2538 Option C — covered separately
+// carry any agent/member mention either; the assignee-mention is the only
+// mention we ever inject (see MUL-2538 Option C — covered separately
 // in TestChildDoneMentionsParentAssignee_* below).
 func TestChildDoneNotifiesParent(t *testing.T) {
 	fx := newChildDoneFixture(t, "in_progress")
@@ -147,7 +147,7 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 	if !strings.Contains(content, "mention://issue/"+fx.child.ID) {
 		t.Errorf("expected mention://issue/<child-id> link in comment, got: %s", content)
 	}
-	for _, banned := range []string{"mention://agent/", "mention://member/", "mention://squad/"} {
+	for _, banned := range []string{"mention://agent/", "mention://member/"} {
 		if strings.Contains(content, banned) {
 			t.Errorf("parent has no assignee but comment included %q mention, got: %s", banned, content)
 		}
@@ -326,67 +326,7 @@ func TestChildDoneMentionsParentAssignee_Agent(t *testing.T) {
 	}
 }
 
-// TestChildDoneSkippedWhenParentMember verifies the MUL-2538 follow-up: a
-// human parent assignee should NOT receive the platform-generated system
-// comment at all. Humans read their own timeline manually; the automated
-// notification is pure noise and skipping it also removes the question of
-// whether to mention/inbox-row the member.
-//
-// The assignee row uses `user_id` (NOT `member.id`) — that is the
-// production invariant validated by validateAssigneePair for member
-// assignees (see server/internal/handler/issue.go), so the fixture must
-// match or it would be exercising a state that cannot occur for real.
-func TestChildDoneSkippedWhenParentMember(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
 
-	var userID string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT user_id FROM member WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&userID); err != nil {
-		t.Fatalf("locate workspace member: %v", err)
-	}
-	setIssueAssigneeDirect(t, fx.parent.ID, "member", userID)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM inbox_item WHERE issue_id = $1`, fx.parent.ID)
-	})
-
-	updateChildStatus(t, fx.child.ID, "done")
-
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 0 {
-		t.Errorf("parent with member assignee should not receive a system comment, got %d", got)
-	}
-	if got := countInboxItems(t, userID, fx.parent.ID); got != 0 {
-		t.Errorf("parent with member assignee should not receive an inbox row, got %d", got)
-	}
-}
-
-// TestChildDoneMentionsParentAssignee_Squad verifies the squad branch: the
-// system comment carries a `mention://squad/<id>` link and the squad
-// leader receives a leader-role task. Reuses the squad fixture helper from
-// squad_comment_trigger_test.go.
-func TestChildDoneMentionsParentAssignee_Squad(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
-	sq := newSquadCommentTriggerFixture(t)
-
-	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
-	})
-
-	updateChildStatus(t, fx.child.ID, "done")
-
-	content := parentSystemCommentContent(t, fx.parent.ID)
-	wantMention := "mention://squad/" + sq.SquadID
-	if !strings.Contains(content, wantMention) {
-		t.Errorf("expected %q in system comment, got: %s", wantMention, content)
-	}
-	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
-		t.Errorf("expected 1 pending leader task for parent squad, got %d", got)
-	}
-}
 
 // TestChildDoneSelfTriggerGuard_SameAgent — when the parent assignee is
 // the same agent that owns the child, the comment still records the
@@ -428,77 +368,3 @@ func TestChildDoneSelfTriggerGuard_SameAgent(t *testing.T) {
 	}
 }
 
-// TestChildDoneSelfTriggerGuard_AgentParentSquadChildSameLeader — the
-// cross-type loop case Elon called out. Parent is assigned to agent A
-// directly; child is assigned to a squad whose leader is also agent A.
-// Without `effectiveChildAgentOwner`, the parent-agent path only checked
-// the child's direct assignee and would happily enqueue agent A on the
-// parent, restarting the loop through the squad. The system comment is
-// still created (timeline parity); only the task enqueue is suppressed.
-func TestChildDoneSelfTriggerGuard_AgentParentSquadChildSameLeader(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
-	sq := newSquadCommentTriggerFixture(t)
-
-	// Parent agent == squad leader, child assigned to the squad.
-	setIssueAssigneeDirect(t, fx.parent.ID, "agent", sq.LeaderID)
-	setIssueAssigneeDirect(t, fx.child.ID, "squad", sq.SquadID)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`,
-			fx.parent.ID, fx.child.ID)
-	})
-
-	updateChildStatus(t, fx.child.ID, "done")
-
-	content := parentSystemCommentContent(t, fx.parent.ID)
-	if !strings.Contains(content, "mention://agent/"+sq.LeaderID) {
-		t.Errorf("expected parent-agent mention in system comment, got: %s", content)
-	}
-	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 0 {
-		t.Errorf("expected 0 pending tasks on parent (shared-leader guard), got %d", got)
-	}
-}
-
-// TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader — the
-// cross-squad shared-leader loop. Parent is squad A, child is squad B,
-// both squads have the same leader agent. The previous guard only blocked
-// `parent.squad == child.squad`, so two distinct squads sharing a leader
-// would still wake the same agent. effectiveChildAgentOwner reduces both
-// sides to "leader agent" and blocks the enqueue.
-func TestChildDoneSelfTriggerGuard_SquadParentDifferentSquadSameLeader(t *testing.T) {
-	fx := newChildDoneFixture(t, "in_progress")
-	parentSquad := newSquadCommentTriggerFixture(t)
-
-	// Spin up a SECOND squad that reuses the same leader as parentSquad.
-	ctx := context.Background()
-	var childSquadID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
-		VALUES ($1, $2, '', $3, $4)
-		RETURNING id
-	`, testWorkspaceID, "Child Done Shared Leader Squad", parentSquad.LeaderID, testUserID).
-		Scan(&childSquadID); err != nil {
-		t.Fatalf("create second squad: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, childSquadID)
-	})
-
-	setIssueAssigneeDirect(t, fx.parent.ID, "squad", parentSquad.SquadID)
-	setIssueAssigneeDirect(t, fx.child.ID, "squad", childSquadID)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(),
-			`DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`,
-			fx.parent.ID, fx.child.ID)
-	})
-
-	updateChildStatus(t, fx.child.ID, "done")
-
-	content := parentSystemCommentContent(t, fx.parent.ID)
-	if !strings.Contains(content, "mention://squad/"+parentSquad.SquadID) {
-		t.Errorf("expected parent-squad mention in system comment, got: %s", content)
-	}
-	if got := countPendingTasksForAgent(t, fx.parent.ID, parentSquad.LeaderID); got != 0 {
-		t.Errorf("expected 0 pending leader tasks on parent (cross-squad shared-leader guard), got %d", got)
-	}
-}

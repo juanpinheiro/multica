@@ -25,7 +25,8 @@
     "empty": "Your inbox is empty",
     "original_input": "Original input",
     "edit_advanced": "Edit as advanced form",
-    "archive": "Archive"
+    "archive": "Archive",
+    "review_pr": "Review PR"
   },
   "types": {
     "issue_assigned": "Assigned",
@@ -44,7 +45,10 @@
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
-    "quick_create_failed": "Create with agent failed"
+    "quick_create_failed": "Create with agent failed",
+    "initiative_tripwire": "Initiative paused",
+    "feature_ready_for_review": "Ready for review",
+    "feature_pr_draft": "Open a draft PR"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -57,7 +61,15 @@
     "removed_due_date": "Removed due date",
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
     "created_with_agent": "Created with agent: {{identifier}}",
-    "failed_with_detail": "Failed: {{detail}}"
+    "failed_with_detail": "Failed: {{detail}}",
+    "tripwire_failure_tolerance": "DoD failure tolerance exceeded",
+    "tripwire_token_budget": "Token budget reached",
+    "tripwire_run_budget": "Run budget reached",
+    "tripwire_time_budget": "Time budget reached",
+    "tripwire_unknown": "Safety limit reached",
+    "ready_for_review_branch": "Branch: {{branch}}",
+    "pr_draft_branch": "Branch: {{branch}}",
+    "view_initiative": "View initiative"
   },
   "errors": {
     "mark_read_failed": "Failed to mark as read",

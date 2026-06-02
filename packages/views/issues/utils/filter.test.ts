@@ -40,10 +40,10 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
 }
 
 const issues: Issue[] = [
-  makeIssue({ id: "1", status: "todo", priority: "high", assignee_type: "member", assignee_id: "u-1", creator_type: "member", creator_id: "u-1", feature_id: "p-1" }),
+  makeIssue({ id: "1", status: "todo", priority: "high", assignee_type: "agent", assignee_id: "a-2", creator_type: "member", creator_id: "u-1", feature_id: "p-1" }),
   makeIssue({ id: "2", status: "in_progress", priority: "medium", assignee_type: "agent", assignee_id: "a-1", creator_type: "agent", creator_id: "a-1", feature_id: "p-2" }),
   makeIssue({ id: "3", status: "done", priority: "low", assignee_type: null, assignee_id: null, creator_type: "member", creator_id: "u-2", feature_id: null }),
-  makeIssue({ id: "4", status: "todo", priority: "urgent", assignee_type: "member", assignee_id: "u-2", creator_type: "member", creator_id: "u-1", feature_id: "p-1" }),
+  makeIssue({ id: "4", status: "todo", priority: "urgent", assignee_type: "agent", assignee_id: "a-3", creator_type: "member", creator_id: "u-1", feature_id: "p-1" }),
 ];
 
 describe("filterIssues", () => {
@@ -67,7 +67,7 @@ describe("filterIssues", () => {
   it("filters by specific assignee", () => {
     const result = filterIssues(issues, {
       ...NO_FILTER,
-      assigneeFilters: [{ type: "member", id: "u-1" }],
+      assigneeFilters: [{ type: "agent", id: "a-2" }],
     });
     expect(result.map((i) => i.id)).toEqual(["1"]);
   });
@@ -105,19 +105,18 @@ describe("filterIssues", () => {
     const result = filterIssues(issues, {
       ...NO_FILTER,
       statusFilters: ["todo"],
-      assigneeFilters: [{ type: "member", id: "u-1" }],
+      assigneeFilters: [{ type: "agent", id: "a-2" }],
     });
     expect(result.map((i) => i.id)).toEqual(["1"]);
   });
 
-  it("applies status + priority + creator filters together", () => {
+  it("applies status + creator filters together", () => {
     const result = filterIssues(issues, {
       ...NO_FILTER,
-      statusFilters: ["todo"],
-      priorityFilters: ["urgent"],
-      creatorFilters: [{ type: "member", id: "u-1" }],
+      statusFilters: ["in_progress"],
+      creatorFilters: [{ type: "agent", id: "a-1" }],
     });
-    expect(result.map((i) => i.id)).toEqual(["4"]);
+    expect(result.map((i) => i.id)).toEqual(["2"]);
   });
 
   // --- Feature ---

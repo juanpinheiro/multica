@@ -28,7 +28,7 @@ func newFeatureDoneFixture(t *testing.T, branchSlug string) featureDoneFixture {
 	var featureID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO feature (workspace_id, title, status, branch_slug)
-		VALUES ($1, $2, 'in_progress', NULLIF($3, ''))
+		VALUES ($1, $2, 'running', NULLIF($3, ''))
 		RETURNING id::text
 	`, testWorkspaceID, fmt.Sprintf("feat-done-%d", time.Now().UnixNano()), branchSlug).Scan(&featureID); err != nil {
 		t.Fatalf("create feature: %v", err)

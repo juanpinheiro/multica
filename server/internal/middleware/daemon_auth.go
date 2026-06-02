@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -95,6 +96,38 @@ func DaemonAuth(queries *db.Queries) func(http.Handler) http.Handler {
 
 			slog.Warn("daemon_auth: unsupported token type", "path", r.URL.Path)
 			writeError(w, http.StatusUnauthorized, "invalid daemon token")
+		})
+	}
+}
+
+// DaemonOrUserAuth authenticates the /api/daemon routes by daemon token when one
+// is presented, and otherwise falls back to standard user auth (loopback
+// singleton on personal deployments, mat_ task tokens, or a MULTICA_TOKEN
+// bearer for non-loopback clients).
+//
+// The daemon route handlers never require a daemon-token context: every access
+// check (requireDaemonWorkspaceAccess / requireDaemonRuntimeAccess /
+// requireDaemonTaskAccess) resolves the workspace from the runtime or task and
+// falls back to a workspace-membership check when no daemon-token context is
+// present. That makes member-authed callers first-class on the daemon API.
+//
+// This restores daemon connectivity on the single-user fork, where the mdt_
+// daemon-token provisioning flow (previously tied to the multi-tenant
+// "connect daemon" surface) was removed: a loopback daemon can now register and
+// claim work as the singleton user without a provisioned daemon token, while a
+// real mdt_ token still authenticates with its original workspace-scoped
+// semantics.
+func DaemonOrUserAuth(queries *db.Queries, trustedProxies []netip.Prefix) func(http.Handler) http.Handler {
+	daemon := DaemonAuth(queries)
+	user := Auth(queries, trustedProxies)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token, _ := extractToken(r)
+			if strings.HasPrefix(token, "mdt_") {
+				daemon(next).ServeHTTP(w, r)
+				return
+			}
+			user(next).ServeHTTP(w, r)
 		})
 	}
 }

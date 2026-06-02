@@ -2,10 +2,15 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 )
+
+// errMissingIssueID is returned when the create-issue API response lacks an id,
+// so the follow-up model-metadata write cannot target the new Issue.
+var errMissingIssueID = errors.New("create response had no issue id")
 
 func registerIssueTools(s *Server) {
 	s.mcp.AddTool(createIssueTool(), s.handleCreateIssue)
@@ -20,9 +25,9 @@ func registerIssueTools(s *Server) {
 
 func createIssueTool() mcp.Tool {
 	return mcp.NewTool("create_issue",
-		mcp.WithDescription("Create a new issue under a feature. feature_id is required — orphan issues are not supported via MCP."),
+		mcp.WithDescription("Create a new Issue under an Initiative. feature_id is required — orphan issues are not supported via MCP."),
 		mcp.WithString("feature_id",
-			mcp.Description("UUID of the parent feature."),
+			mcp.Description("UUID of the parent Initiative."),
 			mcp.Required(),
 		),
 		mcp.WithString("title",
@@ -35,11 +40,17 @@ func createIssueTool() mcp.Tool {
 		mcp.WithString("priority",
 			mcp.Description("Priority: urgent, high, medium, low, or none."),
 		),
+		mcp.WithString("milestone_id",
+			mcp.Description("UUID of the Milestone this Issue belongs to. The Milestone must be in the same Initiative."),
+		),
+		mcp.WithString("model",
+			mcp.Description("Model preference for this Issue (e.g. 'opus', 'sonnet'). Recorded as issue metadata so heavy Issues can use a stronger model."),
+		),
 		mcp.WithString("assignee_id",
-			mcp.Description("UUID of the agent or member to assign."),
+			mcp.Description("UUID of the agent to assign."),
 		),
 		mcp.WithString("assignee_type",
-			mcp.Description("Assignee type: agent or member."),
+			mcp.Description("Assignee type: agent."),
 		),
 		mcp.WithString("repo",
 			mcp.Description("Repository name or UUID to attach this issue to. Omit for a coordination issue with no code target."),
@@ -67,6 +78,9 @@ func (s *Server) handleCreateIssue(ctx context.Context, req mcp.CallToolRequest)
 	if v := req.GetString("priority", ""); v != "" {
 		body["priority"] = v
 	}
+	if v := req.GetString("milestone_id", ""); v != "" {
+		body["milestone_id"] = v
+	}
 	if v := req.GetString("assignee_id", ""); v != "" {
 		body["assignee_id"] = v
 	}
@@ -81,9 +95,22 @@ func (s *Server) handleCreateIssue(ctx context.Context, req mcp.CallToolRequest)
 		body["repo_id"] = repoID
 	}
 
-	var out any
+	var out map[string]any
 	if err := s.client.PostJSON(ctx, "/api/issues", body, &out); err != nil {
 		return toolError("create_issue failed", err), nil
+	}
+
+	// The Model preference is stored as issue metadata (there is no model
+	// column on the issue) so it survives as a planning record on the Issue.
+	if model := req.GetString("model", ""); model != "" {
+		issueID, _ := out["id"].(string)
+		if issueID == "" {
+			return toolError("create_issue: missing id in response", errMissingIssueID), nil
+		}
+		var ignored any
+		if err := s.client.PutJSON(ctx, "/api/issues/"+issueID+"/metadata/model", map[string]any{"value": model}, &ignored); err != nil {
+			return toolError("create_issue: issue created but setting model failed", err), nil
+		}
 	}
 	return jsonResult(out)
 }

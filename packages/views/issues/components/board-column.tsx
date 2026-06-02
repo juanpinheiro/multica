@@ -1,8 +1,7 @@
 "use client";
 
 import { memo, useMemo, type ReactNode } from "react";
-import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { EyeOff, MoreHorizontal, UserMinus } from "lucide-react";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { Issue, IssueAssigneeType, IssueStatus } from "@multica/core/types";
@@ -14,7 +13,6 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
-import { useModalStore } from "@multica/core/modals";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useQuery } from "@tanstack/react-query";
@@ -64,7 +62,6 @@ export const BoardColumn = memo(function BoardColumn({
   childProgressMap,
   totalCount,
   footer,
-  featureId,
   sortLabel,
 }: {
   group: BoardColumnGroup;
@@ -73,8 +70,6 @@ export const BoardColumn = memo(function BoardColumn({
   childProgressMap?: Map<string, ChildProgress>;
   totalCount?: number;
   footer?: ReactNode;
-  /** When set, the per-column "+" pre-fills the project on the create form. */
-  featureId?: string;
   sortLabel?: string | null;
 }) {
   const status = group.status;
@@ -100,47 +95,23 @@ export const BoardColumn = memo(function BoardColumn({
       <div className="mb-2 flex items-center justify-between px-1.5">
         <BoardGroupHeading group={group} count={totalCount ?? issueIds.length} liveCount={status === "in_progress" ? liveCount : undefined} />
 
-        {/* Right: add + menu */}
-        <div className="flex items-center gap-1">
-          {status && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
-                    <MoreHorizontal className="size-3.5" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
-                  <EyeOff className="size-3.5" />
-                  {t(($) => $.board.hide_column)}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          <Tooltip>
-            <TooltipTrigger
+        {status && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
               render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground"
-                  onClick={() => {
-                    const data = {
-                      ...(group.createData ?? {}),
-                      ...(featureId ? { feature_id: featureId } : {}),
-                    };
-                    useModalStore.getState().open("create-issue", data);
-                  }}
-                >
-                  <Plus className="size-3.5" />
+                <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
+                  <MoreHorizontal className="size-3.5" />
                 </Button>
               }
             />
-            <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
-          </Tooltip>
-        </div>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
+                <EyeOff className="size-3.5" />
+                {t(($) => $.board.hide_column)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
       <div
         ref={setNodeRef}

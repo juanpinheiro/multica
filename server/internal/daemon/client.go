@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/decisionlog"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -189,7 +190,7 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string) error {
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, h *HandoffInput, v *ValidationOutput, retro *decisionlog.Output) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -199,6 +200,15 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	}
 	if workDir != "" {
 		body["work_dir"] = workDir
+	}
+	if h != nil {
+		body["handoff"] = h
+	}
+	if v != nil {
+		body["validation"] = v
+	}
+	if retro != nil {
+		body["retrospective"] = retro
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil)
 }
@@ -275,8 +285,8 @@ type (
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":             runtimeID,
-		"supports_batch_import":  true,
+		"runtime_id":            runtimeID,
+		"supports_batch_import": true,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -333,24 +343,6 @@ func (c *Client) GetIssueGCCheck(ctx context.Context, issueID string) (*IssueGCS
 	return &resp, nil
 }
 
-// ChatSessionGCStatus mirrors IssueGCStatus for chat sessions.
-type ChatSessionGCStatus struct {
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// GetChatSessionGCCheck returns the status of a chat session for GC decisions.
-// A 404 from this endpoint indicates the session row was hard-deleted (the
-// user explicitly removed it), which the caller treats as an immediate-clean
-// signal.
-func (c *Client) GetChatSessionGCCheck(ctx context.Context, sessionID string) (*ChatSessionGCStatus, error) {
-	var resp ChatSessionGCStatus
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/chat-sessions/%s/gc-check", sessionID), &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
 // AutopilotRunGCStatus carries the status of an autopilot run. CompletedAt
 // is the run's terminal timestamp (zero for non-terminal runs); the GC loop
 // uses it as the TTL anchor instead of UpdatedAt because autopilot_run rows
@@ -369,9 +361,7 @@ func (c *Client) GetAutopilotRunGCCheck(ctx context.Context, runID string) (*Aut
 	return &resp, nil
 }
 
-// TaskGCStatus carries the agent_task_queue status for quick-create cleanup.
-// Quick-create tasks have no separate parent record, so GC keys directly on
-// the task itself.
+// TaskGCStatus carries the agent_task_queue status for GC cleanup.
 type TaskGCStatus struct {
 	Status      string    `json:"status"`
 	CompletedAt time.Time `json:"completed_at"`

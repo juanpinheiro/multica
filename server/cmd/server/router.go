@@ -84,7 +84,8 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
 func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus) chi.Router {
-	return NewRouterWithOptions(pool, hub, bus, RouterOptions{})
+	r, _ := NewRouterWithOptions(pool, hub, bus, RouterOptions{})
+	return r
 }
 
 type RouterOptions struct {
@@ -98,7 +99,7 @@ type RouterOptions struct {
 	HeartbeatScheduler handler.HeartbeatScheduler
 }
 
-func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, opts RouterOptions) chi.Router {
+func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, opts RouterOptions) (chi.Router, *handler.Handler) {
 	queries := db.New(pool)
 	daemonHub := opts.DaemonHub
 	if daemonHub == nil {
@@ -125,6 +126,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	if opts.DaemonWakeup != nil {
 		h.TaskService.Wakeup = opts.DaemonWakeup
 	}
+	// Wake the Orchestrator on task:completed so an in-flight Initiative is
+	// reconciled toward review without human input (ADR-0004).
+	h.RegisterOrchestrator(bus)
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -199,7 +203,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries))
+		r.Use(middleware.DaemonOrUserAuth(queries, parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES"))))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -225,7 +229,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
-		r.Get("/chat-sessions/{sessionId}/gc-check", h.GetChatSessionGCCheck)
 		r.Get("/autopilot-runs/{runId}/gc-check", h.GetAutopilotRunGCCheck)
 		r.Get("/tasks/{taskId}/gc-check", h.GetTaskGCCheck)
 
@@ -274,7 +277,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/grouped", h.ListGroupedIssues)
 				r.Get("/", h.ListIssues)
 				r.Post("/", h.CreateIssue)
-				r.Post("/quick-create", h.QuickCreateIssue)
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
@@ -286,16 +288,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/dependencies", h.CreateIssueDependency)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
-					r.Get("/subscribers", h.ListIssueSubscribers)
-					r.Post("/subscribe", h.SubscribeToIssue)
-					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
-					r.Post("/reactions", h.AddIssueReaction)
-					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
 					r.Get("/children", h.ListChildIssues)
 					r.Get("/labels", h.ListLabelsForIssue)
@@ -305,6 +302,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/metadata/{key}", h.SetIssueMetadataKey)
 					r.Delete("/metadata/{key}", h.DeleteIssueMetadataKey)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
+					r.Get("/handoffs", h.ListHandoffs)
+					r.Get("/dod", h.ListIssueDoD)
 				})
 			})
 
@@ -330,11 +329,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetFeature)
 					r.Put("/", h.UpdateFeature)
+					r.Patch("/", h.UpdateFeature)
 					r.Delete("/", h.DeleteFeature)
 					r.Get("/issues", h.GetFeatureIssues)
 					r.Get("/resources", h.ListFeatureResources)
 					r.Post("/resources", h.CreateFeatureResource)
 					r.Delete("/resources/{resourceId}", h.DeleteFeatureResource)
+					r.Get("/decisions", h.ListDecisionLog)
+				})
+			})
+
+			// Milestones — control plane (MCP / UI) creates and edits; the
+			// execution plane owns validation_status separately (issue 09).
+			r.Route("/api/milestones", func(r chi.Router) {
+				r.Get("/", h.ListMilestones)
+				r.Post("/", h.CreateMilestone)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateMilestone)
+					r.Get("/dod", h.ListMilestoneDoD)
+					r.Post("/dod", h.CreateDodAssertion)
 				})
 			})
 
@@ -347,25 +360,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", h.DeleteRepo)
 				})
 			})
-
-			// Squads
-			r.Route("/api/squads", func(r chi.Router) {
-				r.Get("/", h.ListSquads)
-				r.Post("/", h.CreateSquad)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetSquad)
-					r.Put("/", h.UpdateSquad)
-					r.Delete("/", h.DeleteSquad)
-					r.Get("/members", h.ListSquadMembers)
-					r.Get("/members/status", h.ListSquadMemberStatus)
-					r.Post("/members", h.AddSquadMember)
-					r.Delete("/members", h.RemoveSquadMember)
-					r.Patch("/members/role", h.UpdateSquadMemberRole)
-				})
-			})
-
-			// Squad leader evaluation (writes to activity_log)
-			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
@@ -410,8 +404,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/", h.DeleteComment)
 				r.Post("/resolve", h.ResolveComment)
 				r.Delete("/resolve", h.UnresolveComment)
-				r.Post("/reactions", h.AddReaction)
-				r.Delete("/reactions", h.RemoveReaction)
 			})
 
 			// Agents
@@ -502,9 +494,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Tasks (user-facing, with ownership check)
-			r.Post("/api/tasks/{taskId}/cancel", h.CancelTaskByUser)
-
 			// Workspace-wide agent task snapshot for presence derivation:
 			// every active task + each agent's most recent terminal task.
 			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
@@ -516,21 +505,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Workspace-wide 30-day run counts per agent for the Agents-list RUNS column.
 			r.Get("/api/agent-run-counts", h.GetWorkspaceAgentRunCounts)
-
-			r.Route("/api/chat/sessions", func(r chi.Router) {
-				r.Post("/", h.CreateChatSession)
-				r.Get("/", h.ListChatSessions)
-				r.Route("/{sessionId}", func(r chi.Router) {
-					r.Get("/", h.GetChatSession)
-					r.Patch("/", h.UpdateChatSession)
-					r.Delete("/", h.DeleteChatSession)
-					r.Post("/messages", h.SendChatMessage)
-					r.Get("/messages", h.ListChatMessages)
-					r.Get("/pending-task", h.GetPendingChatTask)
-					r.Post("/read", h.MarkChatSessionRead)
-				})
-			})
-			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
@@ -544,15 +518,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/archive", h.ArchiveInboxItem)
 			})
 
-			// Notification preferences
-			r.Route("/api/notification-preferences", func(r chi.Router) {
-				r.Get("/", h.GetNotificationPreferences)
-				r.Put("/", h.UpdateNotificationPreferences)
-			})
 		})
 	})
 
-	return r
+	return r, h
 }
 
 // membershipChecker implements realtime.MembershipChecker using database queries.

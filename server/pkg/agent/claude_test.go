@@ -641,6 +641,173 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 	}
 }
 
+func TestClaudeExecuteCompletesWhenProcessHangsAfterResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Fake claude: emits a system message and its authoritative result, then
+	// hangs (sleep) without ever closing stdout — the exact hang that froze
+	// serial Initiatives until the 30-minute idle watchdog and then mislabelled
+	// the successful run as blocked. Completion-driven teardown must resolve it
+	// as completed within the short grace window, never aborted/idle.
+	// `exec sleep` replaces the shell so the spawned process itself hangs with
+	// the stdout pipe still open — the CLI-hang-in-stream-json case. Cancelling
+	// the run on result closes the pipe and the scanner unblocks, so the result
+	// lands within the grace window rather than after the 30-minute watchdog.
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-hang\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-hang\",\"result\":\"all done\"}'\n" +
+		"exec sleep 30\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend := &claudeBackend{
+		cfg:                 Config{ExecutablePath: fakePath, Logger: slog.Default()},
+		resultTeardownGrace: 200 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 15 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	start := time.Now()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "all done" {
+			t.Fatalf("expected output 'all done', got %q", result.Output)
+		}
+		if result.SessionID != "sess-hang" {
+			t.Fatalf("expected session sess-hang, got %q", result.SessionID)
+		}
+		// Without teardown this would block until the 15s test timeout; with it
+		// the result lands shortly after the 200ms grace, far under the watchdog.
+		if elapsed := time.Since(start); elapsed > 5*time.Second {
+			t.Fatalf("result took %s; teardown must fire well under the idle watchdog", elapsed)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("timeout waiting for result — process hang was not torn down")
+	}
+}
+
+func TestClaudeExecuteFailsWhenErrorResultThenHangs(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// An is_error result followed by a hang must resolve as failed with the
+	// result's message — not be reclassified to aborted by the teardown cancel.
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"error\",\"is_error\":true,\"session_id\":\"sess-err\",\"result\":\"boom\"}'\n" +
+		"exec sleep 30\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend := &claudeBackend{
+		cfg:                 Config{ExecutablePath: fakePath, Logger: slog.Default()},
+		resultTeardownGrace: 200 * time.Millisecond,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 15 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "boom") {
+			t.Fatalf("expected error to include result message 'boom', got %q", result.Error)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("timeout waiting for result — process hang was not torn down")
+	}
+}
+
+func TestClaudeExecuteCompletesOnPromptExitAfterResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Companion fast path: the process exits promptly after the result. The
+	// completion-driven teardown must not regress this — output, session, and
+	// status all stay intact.
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"cat >/dev/null\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-fast\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-fast\",\"result\":\"quick\"}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend := &claudeBackend{
+		cfg:                 Config{ExecutablePath: fakePath, Logger: slog.Default()},
+		resultTeardownGrace: 5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	start := time.Now()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "quick" {
+			t.Fatalf("expected output 'quick', got %q", result.Output)
+		}
+		if result.SessionID != "sess-fast" {
+			t.Fatalf("expected session sess-fast, got %q", result.SessionID)
+		}
+		// The fast path must not wait out the grace window.
+		if elapsed := time.Since(start); elapsed > 3*time.Second {
+			t.Fatalf("prompt-exit fast path took %s; should not wait the grace window", elapsed)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 func mustMarshal(t *testing.T, v any) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(v)

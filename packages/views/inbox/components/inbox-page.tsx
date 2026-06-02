@@ -5,8 +5,6 @@ import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
   deduplicateInboxItems,
@@ -33,6 +31,8 @@ import {
   BookCheck,
   ListChecks,
   ArrowLeft,
+  ExternalLink,
+  FolderKanban,
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -55,6 +55,14 @@ import { InboxListItem, useTimeAgo } from "./inbox-list-item";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
+
+function isInitiativeItem(item: InboxItem): boolean {
+  return (
+    item.type === "initiative_tripwire" ||
+    item.type === "feature_ready_for_review" ||
+    item.type === "feature_pr_draft"
+  );
+}
 
 export function InboxPage() {
   const { t } = useT("inbox");
@@ -286,6 +294,13 @@ export function InboxPage() {
     </div>
   );
 
+  const selectedInitiativeFeatureId = selected && isInitiativeItem(selected)
+    ? (selected.details?.feature_id ?? null)
+    : null;
+  const selectedPrUrl = selected?.type === "feature_ready_for_review"
+    ? (selected.details?.pr_url ?? null)
+    : null;
+
   const detailContent = selected?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
@@ -329,28 +344,27 @@ export function InboxPage() {
           <p className="mt-1 whitespace-pre-wrap text-sm">{selected.details.original_prompt}</p>
         </div>
       )}
-      <div className="mt-4 flex gap-2">
-        {selected.type === "quick_create_failed" && (
+      <div className="mt-4 flex flex-wrap gap-2">
+        {selectedInitiativeFeatureId && (
           <Button
+            variant="secondary"
             size="sm"
-            onClick={() => {
-              // Seed the legacy advanced form with the original prompt so the
-              // user can recover their input in the full editor instead of
-              // retyping. The agent picker hint becomes the assignee
-              // candidate (still editable).
-              const prompt = selected.details?.original_prompt ?? "";
-              const agentId = selected.details?.agent_id;
-              useIssueDraftStore.getState().setDraft({
-                description: prompt,
-                ...(agentId
-                  ? { assigneeType: "agent" as const, assigneeId: agentId }
-                  : {}),
-              });
-              useModalStore.getState().open("create-issue");
-            }}
+            onClick={() => replace(wsPaths.featureDetail(selectedInitiativeFeatureId))}
           >
-            {t(($) => $.detail.edit_advanced)}
+            <FolderKanban className="mr-1.5 h-3.5 w-3.5" />
+            {t(($) => $.labels.view_initiative)}
           </Button>
+        )}
+        {selectedPrUrl && (
+          <a
+            href={selectedPrUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-7 items-center gap-1 rounded-[min(var(--radius-md),12px)] bg-secondary px-2.5 text-[0.8rem] font-medium text-secondary-foreground hover:bg-secondary/80"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            {t(($) => $.detail.review_pr)}
+          </a>
         )}
         <Button
           variant="outline"

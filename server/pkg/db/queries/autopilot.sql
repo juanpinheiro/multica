@@ -165,15 +165,10 @@ RETURNING *;
 -- =====================
 
 -- name: CreateAutopilotRun :one
--- squad_id is an attribution hook: set to the assignee squad when the
--- parent autopilot has assignee_type='squad', NULL otherwise. The executing
--- agent_id on agent_task_queue still records who actually ran the work
--- (the squad leader); squad_id lets reports group by squad without a join.
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload, squad_id
+    autopilot_id, trigger_id, source, status, trigger_payload
 ) VALUES (
-    $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
-    sqlc.narg('squad_id')
+    $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload')
 ) RETURNING *;
 
 -- name: GetAutopilotRun :one

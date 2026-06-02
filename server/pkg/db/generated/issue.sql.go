@@ -55,7 +55,6 @@ SELECT
 FROM issue
 WHERE workspace_id = $1
   AND creator_id = $2
-  AND creator_type = 'member'
   AND assignee_type IS NOT NULL
   AND assignee_id IS NOT NULL
 GROUP BY assignee_type, assignee_id
@@ -72,7 +71,7 @@ type CountCreatedIssueAssigneesRow struct {
 	Frequency    int64       `json:"frequency"`
 }
 
-// Count assignees on issues created by a specific user.
+// Count agent assignees on issues in this workspace.
 func (q *Queries) CountCreatedIssueAssignees(ctx context.Context, arg CountCreatedIssueAssigneesParams) ([]CountCreatedIssueAssigneesRow, error) {
 	rows, err := q.db.Query(ctx, countCreatedIssueAssignees, arg.WorkspaceID, arg.CreatorID)
 	if err != nil {
@@ -104,38 +103,6 @@ WHERE i.workspace_id = $1
   AND ($7::uuid IS NULL OR i.feature_id = $7)
   AND ($8::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($9::jsonb IS NULL OR i.metadata @> $9::jsonb)
-  AND (
-    $10::uuid IS NULL
-    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
-           WHERE a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = $10::uuid
-          UNION
-          SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
-           WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
-          UNION
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
-             AND a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
-    ))
-  )
 `
 
 type CountIssuesParams struct {
@@ -148,10 +115,8 @@ type CountIssuesParams struct {
 	FeatureID      pgtype.UUID   `json:"feature_id"`
 	Scheduled      pgtype.Bool   `json:"scheduled"`
 	MetadataFilter []byte        `json:"metadata_filter"`
-	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
 }
 
-// See ListIssues for the semantics of involves_user_id.
 func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssues,
 		arg.WorkspaceID,
@@ -163,61 +128,64 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 		arg.FeatureID,
 		arg.Scheduled,
 		arg.MetadataFilter,
-		arg.InvolvesUserID,
 	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
 }
 
-const createIssue = `-- name: CreateIssue :one
-INSERT INTO issue (
-    workspace_id, title, description, status, priority,
-    assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, feature_id,
-    repo_id
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata
+const countNonDoneMilestoneSiblings = `-- name: CountNonDoneMilestoneSiblings :one
+SELECT count(*)::bigint FROM issue
+WHERE milestone_id = $1 AND id != $2 AND status != 'done'
 `
 
-type CreateIssueParams struct {
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	Title         string             `json:"title"`
-	Description   pgtype.Text        `json:"description"`
-	Status        string             `json:"status"`
-	Priority      string             `json:"priority"`
-	AssigneeType  pgtype.Text        `json:"assignee_type"`
-	AssigneeID    pgtype.UUID        `json:"assignee_id"`
-	CreatorType   string             `json:"creator_type"`
-	CreatorID     pgtype.UUID        `json:"creator_id"`
-	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
-	Position      float64            `json:"position"`
-	StartDate     pgtype.Timestamptz `json:"start_date"`
-	DueDate       pgtype.Timestamptz `json:"due_date"`
-	Number        int32              `json:"number"`
-	FeatureID     pgtype.UUID        `json:"feature_id"`
-	RepoID        pgtype.UUID        `json:"repo_id"`
+type CountNonDoneMilestoneSiblingsParams struct {
+	MilestoneID pgtype.UUID `json:"milestone_id"`
+	ID          pgtype.UUID `json:"id"`
 }
 
-func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, createIssue,
+// Counts issues in the same Milestone that have not yet reached `done`,
+// excluding the issue that just transitioned. Returns 0 when the Milestone's
+// work is complete and the validator Run may be dispatched.
+func (q *Queries) CountNonDoneMilestoneSiblings(ctx context.Context, arg CountNonDoneMilestoneSiblingsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNonDoneMilestoneSiblings, arg.MilestoneID, arg.ID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const createDodFollowUpIssue = `-- name: CreateDodFollowUpIssue :one
+INSERT INTO issue (
+    workspace_id, feature_id, milestone_id, title, description, status, priority,
+    assignee_type, assignee_id, creator_type, creator_id, number, position
+) VALUES (
+    $1, $2, $3, $4, $5, 'backlog', 'high',
+    'agent', $6, 'agent', $6, $7, 0
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
+`
+
+type CreateDodFollowUpIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	FeatureID   pgtype.UUID `json:"feature_id"`
+	MilestoneID pgtype.UUID `json:"milestone_id"`
+	Title       string      `json:"title"`
+	Description pgtype.Text `json:"description"`
+	AssigneeID  pgtype.UUID `json:"assignee_id"`
+	Number      int32       `json:"number"`
+}
+
+// A worker Issue created inside a Milestone when its DoD validation fails, so
+// the Initiative self-heals. Assigned to the agent that owns the work; status
+// 'backlog' keeps the Milestone non-done until the follow-up is resolved.
+func (q *Queries) CreateDodFollowUpIssue(ctx context.Context, arg CreateDodFollowUpIssueParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, createDodFollowUpIssue,
 		arg.WorkspaceID,
+		arg.FeatureID,
+		arg.MilestoneID,
 		arg.Title,
 		arg.Description,
-		arg.Status,
-		arg.Priority,
-		arg.AssigneeType,
 		arg.AssigneeID,
-		arg.CreatorType,
-		arg.CreatorID,
-		arg.ParentIssueID,
-		arg.Position,
-		arg.StartDate,
-		arg.DueDate,
 		arg.Number,
-		arg.FeatureID,
-		arg.RepoID,
 	)
 	var i Issue
 	err := row.Scan(
@@ -246,6 +214,90 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
+	)
+	return i, err
+}
+
+const createIssue = `-- name: CreateIssue :one
+INSERT INTO issue (
+    workspace_id, title, description, status, priority,
+    assignee_type, assignee_id, creator_type, creator_id,
+    parent_issue_id, position, start_date, due_date, number, feature_id,
+    repo_id, milestone_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
+`
+
+type CreateIssueParams struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Title         string             `json:"title"`
+	Description   pgtype.Text        `json:"description"`
+	Status        string             `json:"status"`
+	Priority      string             `json:"priority"`
+	AssigneeType  pgtype.Text        `json:"assignee_type"`
+	AssigneeID    pgtype.UUID        `json:"assignee_id"`
+	CreatorType   string             `json:"creator_type"`
+	CreatorID     pgtype.UUID        `json:"creator_id"`
+	ParentIssueID pgtype.UUID        `json:"parent_issue_id"`
+	Position      float64            `json:"position"`
+	StartDate     pgtype.Timestamptz `json:"start_date"`
+	DueDate       pgtype.Timestamptz `json:"due_date"`
+	Number        int32              `json:"number"`
+	FeatureID     pgtype.UUID        `json:"feature_id"`
+	RepoID        pgtype.UUID        `json:"repo_id"`
+	MilestoneID   pgtype.UUID        `json:"milestone_id"`
+}
+
+func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, createIssue,
+		arg.WorkspaceID,
+		arg.Title,
+		arg.Description,
+		arg.Status,
+		arg.Priority,
+		arg.AssigneeType,
+		arg.AssigneeID,
+		arg.CreatorType,
+		arg.CreatorID,
+		arg.ParentIssueID,
+		arg.Position,
+		arg.StartDate,
+		arg.DueDate,
+		arg.Number,
+		arg.FeatureID,
+		arg.RepoID,
+		arg.MilestoneID,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.FeatureID,
+		&i.RepoID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
@@ -259,7 +311,7 @@ INSERT INTO issue (
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata
+) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
 `
 
 type CreateIssueWithOriginParams struct {
@@ -331,6 +383,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
@@ -359,7 +412,7 @@ UPDATE issue SET
     metadata = metadata - $1::text,
     updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
 `
 
 type DeleteIssueMetadataKeyParams struct {
@@ -399,12 +452,13 @@ func (q *Queries) DeleteIssueMetadataKey(ctx context.Context, arg DeleteIssueMet
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id FROM issue
 WHERE workspace_id = $1
   AND status NOT IN ('done', 'cancelled')
   AND feature_id IS NOT DISTINCT FROM $2::uuid
@@ -455,12 +509,13 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id FROM issue
 WHERE id = $1
 `
 
@@ -493,12 +548,13 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -536,12 +592,13 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
 
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = $3
@@ -588,12 +645,13 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -631,12 +689,13 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id FROM issue
 WHERE parent_issue_id = $1
 ORDER BY position ASC, created_at DESC
 `
@@ -676,6 +735,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.FirstExecutedAt,
 			&i.StartDate,
 			&i.Metadata,
+			&i.MilestoneID,
 		); err != nil {
 			return nil, err
 		}
@@ -690,7 +750,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 const listIssues = `-- name: ListIssues :many
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id, i.milestone_id, i.metadata
 FROM issue i
 WHERE i.workspace_id = $1
   AND ($4::text IS NULL OR i.status = $4)
@@ -701,46 +761,6 @@ WHERE i.workspace_id = $1
   AND ($9::uuid IS NULL OR i.feature_id = $9)
   AND ($10::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
-  AND (
-    $12::uuid IS NULL
-    -- (1) assignee is an agent owned by the user
-    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
-           WHERE a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
-    ))
-    -- (2)(3)(4) assignee is a squad related to the user — three relations
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          -- (2) the user is a human member of the squad
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = $12::uuid
-          UNION
-          -- (3) the squad's canonical leader is an agent owned by the user.
-          -- We read squad.leader_id directly rather than relying on a
-          -- squad_member row, because the leader copy in squad_member is
-          -- best-effort (see squad.go AddSquadMember error handling).
-          SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
-           WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
-          UNION
-          -- (4) the squad has an agent member owned by the user
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
-             AND a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
-    ))
-  )
 ORDER BY i.position ASC, i.created_at DESC
 LIMIT $2 OFFSET $3
 `
@@ -757,7 +777,6 @@ type ListIssuesParams struct {
 	FeatureID      pgtype.UUID   `json:"feature_id"`
 	Scheduled      pgtype.Bool   `json:"scheduled"`
 	MetadataFilter []byte        `json:"metadata_filter"`
-	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
 }
 
 type ListIssuesRow struct {
@@ -779,15 +798,10 @@ type ListIssuesRow struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	Number        int32              `json:"number"`
 	FeatureID     pgtype.UUID        `json:"feature_id"`
+	MilestoneID   pgtype.UUID        `json:"milestone_id"`
 	Metadata      []byte             `json:"metadata"`
 }
 
-// involves_user_id widens the assignee filter to surface issues where the user
-// is *indirectly* the assignee — via an owned agent or a squad they belong to /
-// lead / have an agent inside. The semantics intentionally exclude direct
-// member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
-// because that is already the meaning of the `assignee_id` filter (tab 1
-// "Assigned to me"), and the two filters must produce disjoint result sets.
 func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listIssues,
 		arg.WorkspaceID,
@@ -801,7 +815,6 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.FeatureID,
 		arg.Scheduled,
 		arg.MetadataFilter,
-		arg.InvolvesUserID,
 	)
 	if err != nil {
 		return nil, err
@@ -829,6 +842,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 			&i.UpdatedAt,
 			&i.Number,
 			&i.FeatureID,
+			&i.MilestoneID,
 			&i.Metadata,
 		); err != nil {
 			return nil, err
@@ -854,38 +868,6 @@ WHERE i.workspace_id = $1
   AND ($5::uuid IS NULL OR i.creator_id = $5)
   AND ($6::uuid IS NULL OR i.feature_id = $6)
   AND ($7::jsonb IS NULL OR i.metadata @> $7::jsonb)
-  AND (
-    $8::uuid IS NULL
-    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
-           WHERE a.workspace_id = $1
-             AND a.owner_id     = $8::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = $8::uuid
-          UNION
-          SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
-           WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = $8::uuid
-          UNION
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
-             AND a.workspace_id = $1
-             AND a.owner_id     = $8::uuid
-    ))
-  )
 ORDER BY i.position ASC, i.created_at DESC
 `
 
@@ -897,7 +879,6 @@ type ListOpenIssuesParams struct {
 	CreatorID      pgtype.UUID   `json:"creator_id"`
 	FeatureID      pgtype.UUID   `json:"feature_id"`
 	MetadataFilter []byte        `json:"metadata_filter"`
-	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
 }
 
 type ListOpenIssuesRow struct {
@@ -922,8 +903,6 @@ type ListOpenIssuesRow struct {
 	Metadata      []byte             `json:"metadata"`
 }
 
-// See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
-// filter; member-direct assignment is intentionally excluded).
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
@@ -933,7 +912,6 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 		arg.CreatorID,
 		arg.FeatureID,
 		arg.MetadataFilter,
-		arg.InvolvesUserID,
 	)
 	if err != nil {
 		return nil, err
@@ -1020,7 +998,7 @@ UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[$1::text], $2::jsonb),
     updated_at = now()
 WHERE id = $3 AND workspace_id = $4
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
 `
 
 type SetIssueMetadataKeyParams struct {
@@ -1068,6 +1046,7 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
@@ -1088,7 +1067,7 @@ UPDATE issue SET
     repo_id = $13,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
 `
 
 type UpdateIssueParams struct {
@@ -1150,6 +1129,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }
@@ -1159,7 +1139,7 @@ UPDATE issue SET
     status = $2,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, feature_id, repo_id, origin_type, origin_id, first_executed_at, start_date, metadata, milestone_id
 `
 
 type UpdateIssueStatusParams struct {
@@ -1198,6 +1178,7 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.FirstExecutedAt,
 		&i.StartDate,
 		&i.Metadata,
+		&i.MilestoneID,
 	)
 	return i, err
 }

@@ -14,11 +14,19 @@ SELECT * FROM feature
 WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateFeature :one
+-- Mode and the budget/failure-tolerance fields are optional: omit them and the
+-- DB defaults apply (hitl, no caps, tolerance 3) via the COALESCE fallbacks.
 INSERT INTO feature (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, branch_slug
+    lead_type, lead_id, priority, branch_slug,
+    mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    COALESCE(sqlc.narg('mode')::text, 'hitl'),
+    COALESCE(sqlc.narg('budget_tokens')::bigint, 0),
+    COALESCE(sqlc.narg('budget_runs')::int, 0),
+    COALESCE(sqlc.narg('budget_seconds')::bigint, 0),
+    COALESCE(sqlc.narg('failure_tolerance')::int, 3)
 ) RETURNING *;
 
 -- name: UpdateFeature :one
@@ -31,7 +39,28 @@ UPDATE feature SET
     lead_type = sqlc.narg('lead_type'),
     lead_id = sqlc.narg('lead_id'),
     branch_slug = sqlc.narg('branch_slug'),
+    mode = COALESCE(sqlc.narg('mode')::text, mode),
+    budget_tokens = COALESCE(sqlc.narg('budget_tokens')::bigint, budget_tokens),
+    budget_runs = COALESCE(sqlc.narg('budget_runs')::int, budget_runs),
+    budget_seconds = COALESCE(sqlc.narg('budget_seconds')::bigint, budget_seconds),
+    failure_tolerance = COALESCE(sqlc.narg('failure_tolerance')::int, failure_tolerance),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: GetIssueFeatureStatus :one
+-- Returns the Initiative (feature) id and status for an issue, when the issue
+-- belongs to one. Used by the execution plane to advance Initiative status as
+-- its Runs claim and complete.
+SELECT f.id AS feature_id, f.status
+FROM issue i
+JOIN feature f ON i.feature_id = f.id
+WHERE i.id = $1;
+
+-- name: SetFeatureStatus :one
+-- Focused status write for the Initiative status state machine. Callers must
+-- validate the transition via internal/initiative before calling.
+UPDATE feature SET status = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -80,3 +109,15 @@ FROM issue i
 LEFT JOIN repo r ON r.id = i.repo_id AND r.workspace_id = i.workspace_id
 WHERE i.feature_id = $1
 ORDER BY i.number ASC;
+
+-- name: ListInReviewIssuesWithMergedPRs :many
+-- Returns issues belonging to in_review Initiatives that have at least one
+-- merged linked PR. Used by the PR-merge poller to advance stale Initiatives
+-- that were not caught by the GitHub webhook (local dev without webhook endpoint).
+SELECT DISTINCT i.*
+FROM issue i
+JOIN feature f ON f.id = i.feature_id
+JOIN issue_pull_request ipr ON ipr.issue_id = i.id
+JOIN github_pull_request gpr ON gpr.id = ipr.pull_request_id
+WHERE f.status = 'in_review'
+  AND gpr.state = 'merged';

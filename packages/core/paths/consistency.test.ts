@@ -22,12 +22,10 @@ describe("paths.workspace() shape", () => {
         "features",
         "autopilots",
         "agents",
-        "squads",
         "inbox",
         "myIssues",
         "runtimes",
         "skills",
-        "squads",
         "settings",
       ]),
     );
@@ -35,20 +33,16 @@ describe("paths.workspace() shape", () => {
 
   it("each parameterless route emits /{slug}/{segment}", () => {
     const ws = paths.workspace("acme");
-    // Check that none of the parameterless paths embed a leaked literal
-    // and that their second URL segment matches the method name's kebab-case.
     const expectedSegments: Array<[string, string]> = [
       ["usage", "usage"],
       ["issues", "issues"],
       ["features", "features"],
       ["autopilots", "autopilots"],
       ["agents", "agents"],
-      ["squads", "squads"],
       ["inbox", "inbox"],
       ["myIssues", "my-issues"],
       ["runtimes", "runtimes"],
       ["skills", "skills"],
-      ["squads", "squads"],
       ["settings", "settings"],
     ];
     const wsAsAny = ws as unknown as Record<string, () => string>;

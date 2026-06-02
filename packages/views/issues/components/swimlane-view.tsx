@@ -17,7 +17,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil, Plus } from "lucide-react";
+import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   Issue,
@@ -33,7 +33,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { featureListOptions } from "@multica/core/features/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
+import type { IssueSortParam } from "@multica/core/issues/queries";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -42,7 +42,6 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
 import { BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
-import { useModalStore } from "@multica/core/modals";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -404,8 +403,8 @@ function buildAssigneeLanes(
     });
   }
 
-  // Sort by actor type (members before agents before squads) then by name.
-  const typeOrder: Record<string, number> = { member: 0, agent: 1, squad: 2 };
+  // Sort by actor type (members before agents) then by name.
+  const typeOrder: Record<string, number> = { member: 0, agent: 1 };
   const orderIndex = new Map<string, number>();
   storedOrder.forEach((id, idx) => orderIndex.set(`assignee:${id}`, idx));
   const ordered = Array.from(seen.values()).sort((a, b) => {
@@ -445,10 +444,7 @@ export function SwimLaneView({
   hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
-  myIssuesScope,
-  myIssuesFilter,
   sort,
-  featureId,
 }: {
   issues: Issue[];
   /**
@@ -464,12 +460,8 @@ export function SwimLaneView({
   hiddenStatuses?: IssueStatus[];
   onMoveIssue: (issueId: string, updates: SwimLaneMoveUpdates) => void;
   childProgressMap?: Map<string, ChildProgress>;
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
   /** Must match the sort the page queried with — embedded in the cache key. */
   sort?: IssueSortParam;
-  /** Pre-fills `feature_id` on the create form for the in-cell "+" button. */
-  featureId?: string;
 }) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
@@ -488,14 +480,6 @@ export function SwimLaneView({
   const { getActorName } = useActorName();
 
   const laneSourceIssues = unfilteredIssues ?? issues;
-
-  const myIssuesOpts = useMemo(
-    () =>
-      myIssuesScope
-        ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-        : undefined,
-    [myIssuesScope, myIssuesFilter],
-  );
 
   const sortedStatuses = useMemo(
     () => BOARD_STATUSES.filter((s) => visibleStatuses.includes(s)),
@@ -987,7 +971,6 @@ export function SwimLaneView({
                 childProgressMap={childProgressMap}
                 gridStyle={gridStyle}
                 paths={paths}
-                featureId={featureId}
               />
             ))}
           <SortableContext
@@ -1011,7 +994,6 @@ export function SwimLaneView({
                   childProgressMap={childProgressMap}
                   gridStyle={gridStyle}
                   paths={paths}
-                  featureId={featureId}
                 />
               ))}
           </SortableContext>
@@ -1020,7 +1002,6 @@ export function SwimLaneView({
           <SwimLaneLoadMoreRow
             sortedStatuses={sortedStatuses}
             gridStyle={gridStyle}
-            myIssuesOpts={myIssuesOpts}
             sort={sort}
           />
         </div>
@@ -1070,7 +1051,6 @@ function DraggableSwimLane({
   childProgressMap,
   gridStyle,
   paths,
-  featureId,
 }: {
   lane: LaneGroup;
   grouping: SwimlaneGrouping;
@@ -1082,7 +1062,6 @@ function DraggableSwimLane({
   childProgressMap: Map<string, ChildProgress>;
   gridStyle: React.CSSProperties;
   paths: ReturnType<typeof useWorkspacePaths>;
-  featureId?: string;
 }) {
   const { t } = useT("issues");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -1178,8 +1157,6 @@ function DraggableSwimLane({
                 issueMap={issueMap}
                 childProgressMap={childProgressMap}
                 status={status}
-                lane={lane}
-                featureId={featureId}
                 readOnly={lane.isOrphan}
               />
             );
@@ -1196,8 +1173,6 @@ function SwimLaneCell({
   issueMap,
   childProgressMap,
   status,
-  lane,
-  featureId,
   readOnly = false,
 }: {
   cellId: string;
@@ -1205,13 +1180,10 @@ function SwimLaneCell({
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   status: IssueStatus;
-  lane: LaneGroup;
-  featureId?: string;
   /**
-   * Display-only cell — the create affordance is suppressed and drag-end
-   * upstream refuses to honour drops that would re-anchor a card to this
-   * lane. Used by the parent-grouping orphan fallback whose contents
-   * belong to parents we don't have loaded.
+   * Display-only cell — drag-end upstream refuses to honour drops that would
+   * re-anchor a card to this lane. Used by the parent-grouping orphan fallback
+   * whose contents belong to parents we don't have loaded.
    */
   readOnly?: boolean;
 }) {
@@ -1223,7 +1195,6 @@ function SwimLaneCell({
   // Never show the hover highlight on a readOnly cell — the guards will
   // reject the drop, so visual confirmation would be misleading.
   const isOver = readOnly ? false : droppableIsOver;
-  const { t } = useT("issues");
   const cfg = STATUS_CONFIG[status];
 
   const resolvedIssues = useMemo(
@@ -1234,14 +1205,6 @@ function SwimLaneCell({
       }),
     [issueIds, issueMap],
   );
-
-  const handleAdd = useCallback(() => {
-    const data: Record<string, unknown> = { status, ...lane.moveUpdates };
-    // Per-page project override takes precedence (e.g. Feature Detail
-    // pre-fills its own project id regardless of grouping).
-    if (featureId) data.feature_id = featureId;
-    useModalStore.getState().open("create-issue", data);
-  }, [status, lane, featureId]);
 
   return (
     <div className={`flex min-h-[120px] flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
@@ -1266,25 +1229,6 @@ function SwimLaneCell({
           </p>
         )}
       </div>
-      {!readOnly && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t(($) => $.board.add_issue_tooltip)}
-                className="mt-1 w-full rounded-md text-muted-foreground hover:text-foreground"
-                onClick={handleAdd}
-              >
-                <Plus className="size-3.5" />
-              </Button>
-            }
-          />
-          <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
-        </Tooltip>
-      )}
     </div>
   );
 }
@@ -1313,12 +1257,10 @@ function SwimLaneHiddenColumnsPanel({
 function SwimLaneLoadMoreRow({
   sortedStatuses,
   gridStyle,
-  myIssuesOpts,
   sort,
 }: {
   sortedStatuses: IssueStatus[];
   gridStyle: React.CSSProperties;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
 }) {
   return (
@@ -1327,7 +1269,6 @@ function SwimLaneLoadMoreRow({
         <SwimLaneLoadMoreCell
           key={status}
           status={status}
-          myIssuesOpts={myIssuesOpts}
           sort={sort}
         />
       ))}
@@ -1337,14 +1278,12 @@ function SwimLaneLoadMoreRow({
 
 function SwimLaneLoadMoreCell({
   status,
-  myIssuesOpts,
   sort,
 }: {
   status: IssueStatus;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
 }) {
-  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, sort);
   if (!hasMore) return <div />;
   return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
 }

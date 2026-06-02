@@ -75,7 +75,7 @@ func TestMCPCreateFeatureCallsPOST(t *testing.T) {
 	}
 }
 
-func TestMCPCreateFeatureForcesPlannedStatus(t *testing.T) {
+func TestMCPCreateFeatureForcesDraftStatus(t *testing.T) {
 	t.Parallel()
 	cb := newCapturingBackend(t, http.StatusCreated, map[string]any{"id": "feat-1"})
 	sess := newFeatureSession(t, cb)
@@ -84,8 +84,8 @@ func TestMCPCreateFeatureForcesPlannedStatus(t *testing.T) {
 		"title":       "My Feature",
 		"description": "desc",
 	})
-	if cb.lastBody["status"] != "planned" {
-		t.Errorf("status = %v, want planned", cb.lastBody["status"])
+	if cb.lastBody["status"] != "draft" {
+		t.Errorf("status = %v, want draft", cb.lastBody["status"])
 	}
 }
 
@@ -201,9 +201,9 @@ func TestMCPUpdateFeatureClearsBranchSlug(t *testing.T) {
 
 // ── approve_feature ────────────────────────────────────────────────────────────
 
-func TestMCPApproveFeatureSetsInProgress(t *testing.T) {
+func TestMCPApproveFeatureFlipsToReady(t *testing.T) {
 	t.Parallel()
-	cb := newCapturingBackend(t, http.StatusOK, map[string]any{"id": "feat-1", "status": "in_progress"})
+	cb := newCapturingBackend(t, http.StatusOK, map[string]any{"id": "feat-1", "status": "ready"})
 	sess := newFeatureSession(t, cb)
 
 	resp := callTool(t, sess, "approve_feature", map[string]any{"feature_id": "feat-1"})
@@ -217,8 +217,34 @@ func TestMCPApproveFeatureSetsInProgress(t *testing.T) {
 	if cb.lastPath != "/api/features/feat-1" {
 		t.Errorf("path = %q, want /api/features/feat-1", cb.lastPath)
 	}
-	if cb.lastBody["status"] != "in_progress" {
-		t.Errorf("body.status = %v, want in_progress", cb.lastBody["status"])
+	if cb.lastBody["status"] != "ready" {
+		t.Errorf("body.status = %v, want ready", cb.lastBody["status"])
+	}
+}
+
+func TestMCPCreateFeatureIncludesModeAndBudget(t *testing.T) {
+	t.Parallel()
+	cb := newCapturingBackend(t, http.StatusCreated, map[string]any{"id": "feat-1"})
+	sess := newFeatureSession(t, cb)
+
+	callTool(t, sess, "create_feature", map[string]any{
+		"title":             "My Initiative",
+		"description":       "desc",
+		"mode":              "afk",
+		"budget_tokens":     1000000,
+		"failure_tolerance": 2,
+	})
+	if cb.lastBody["mode"] != "afk" {
+		t.Errorf("mode = %v, want afk", cb.lastBody["mode"])
+	}
+	if cb.lastBody["budget_tokens"] != float64(1000000) {
+		t.Errorf("budget_tokens = %v, want 1000000", cb.lastBody["budget_tokens"])
+	}
+	if cb.lastBody["failure_tolerance"] != float64(2) {
+		t.Errorf("failure_tolerance = %v, want 2", cb.lastBody["failure_tolerance"])
+	}
+	if _, ok := cb.lastBody["budget_runs"]; ok {
+		t.Errorf("budget_runs should be omitted when not provided")
 	}
 }
 
@@ -266,5 +292,73 @@ func TestMCPSetFeatureStatusBackendRejectsInvalidStatus(t *testing.T) {
 	text, isError := toolResult(t, resp)
 	if !isError {
 		t.Errorf("expected tool error for invalid status, got success: %s", text)
+	}
+}
+
+// ── branch_slug validation ─────────────────────────────────────────────────────
+
+func TestMCPCreateFeatureRejectsInvalidBranchSlug(t *testing.T) {
+	cases := []struct {
+		slug    string
+		wantSub string
+	}{
+		{"feature/x", "feature/"},
+		{"feat/x", "/"},
+		{"auth~v2", "invalid"},
+		{"auth^v2", "invalid"},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run("slug="+tc.slug, func(t *testing.T) {
+			t.Parallel()
+			cb := newCapturingBackend(t, http.StatusCreated, map[string]any{"id": "feat-1"})
+			sess := newFeatureSession(t, cb)
+
+			resp := callTool(t, sess, "create_feature", map[string]any{
+				"title":       "My Feature",
+				"description": "desc",
+				"branch_slug": tc.slug,
+			})
+			text, isError := toolResult(t, resp)
+			if !isError {
+				t.Errorf("expected error for slug %q, got success: %s", tc.slug, text)
+			}
+			if cb.lastMethod != "" {
+				t.Errorf("backend should not be called for invalid slug %q", tc.slug)
+			}
+		})
+	}
+}
+
+func TestMCPUpdateFeatureRejectsInvalidBranchSlug(t *testing.T) {
+	t.Parallel()
+	cb := newCapturingBackend(t, http.StatusOK, map[string]any{"id": "feat-1"})
+	sess := newFeatureSession(t, cb)
+
+	resp := callTool(t, sess, "update_feature", map[string]any{
+		"feature_id":  "feat-1",
+		"branch_slug": "feature/bad",
+	})
+	_, isError := toolResult(t, resp)
+	if !isError {
+		t.Errorf("expected error for invalid branch_slug in update_feature")
+	}
+	if cb.lastMethod != "" {
+		t.Errorf("backend should not be called for invalid branch_slug")
+	}
+}
+
+func TestMCPUpdateFeatureAllowsEmptyBranchSlug(t *testing.T) {
+	t.Parallel()
+	cb := newCapturingBackend(t, http.StatusOK, map[string]any{"id": "feat-1"})
+	sess := newFeatureSession(t, cb)
+
+	resp := callTool(t, sess, "update_feature", map[string]any{
+		"feature_id":  "feat-1",
+		"branch_slug": "",
+	})
+	_, isError := toolResult(t, resp)
+	if isError {
+		t.Errorf("empty branch_slug should be allowed (clears the field)")
 	}
 }

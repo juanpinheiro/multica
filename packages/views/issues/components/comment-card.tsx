@@ -25,8 +25,6 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { QuickEmojiPicker } from "@multica/ui/components/common/quick-emoji-picker";
 import { cn } from "@multica/ui/lib/utils";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
@@ -66,7 +64,6 @@ interface CommentCardProps {
   onReply: (parentId: string, content: string, attachmentIds?: string[]) => Promise<void>;
   onEdit: (commentId: string, content: string, attachmentIds?: string[], removeAttachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
-  onToggleReaction: (commentId: string, emoji: string) => void;
   /** Toggle the resolved state on the thread root. Only invoked for root entries. */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   /**
@@ -210,7 +207,6 @@ function CommentRow({
   canModerate = false,
   onEdit,
   onDelete,
-  onToggleReaction,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -218,7 +214,6 @@ function CommentRow({
   canModerate?: boolean;
   onEdit: (commentId: string, content: string, attachmentIds?: string[], removeAttachmentIds?: string[]) => Promise<void>;
   onDelete: (commentId: string) => void;
-  onToggleReaction: (commentId: string, emoji: string) => void;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -315,10 +310,6 @@ function CommentRow({
     }
   };
 
-  const reactions = entry.reactions ?? [];
-  const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
-
   return (
     <div className={`py-3${isTemp ? " opacity-60" : ""}`}>
       <div className="flex items-center gap-2.5">
@@ -341,10 +332,6 @@ function CommentRow({
 
         {!isTemp && (
           <div className="ml-auto flex items-center gap-0.5">
-            <QuickEmojiPicker
-              onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-              align="end"
-            />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -438,16 +425,6 @@ function CommentRow({
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-8" />
-          {!isTemp && (
-            <ReactionBar
-              reactions={reactions}
-              currentUserId={currentUserId}
-              onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-              getActorName={getActorName}
-              hideAddButton={!isLongContent}
-              className="mt-1.5 pl-8"
-            />
-          )}
         </>
       )}
     </div>
@@ -467,7 +444,6 @@ function CommentCardImpl({
   onReply,
   onEdit,
   onDelete,
-  onToggleReaction,
   onResolveToggle,
   onCollapseResolved,
   highlightedCommentId,
@@ -571,9 +547,6 @@ function CommentCardImpl({
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
-  const reactions = entry.reactions ?? [];
-  const contentText = entry.content ?? "";
-  const isLongContent = contentText.length > 500 || contentText.split("\n").length > 8;
 
   const isHighlighted = highlightedCommentId === entry.id;
 
@@ -630,10 +603,6 @@ function CommentCardImpl({
 
             {open && !isTemp && (
               <div className="ml-auto flex items-center gap-0.5">
-                <QuickEmojiPicker
-                  onSelect={(emoji) => onToggleReaction(entry.id, emoji)}
-                  align="end"
-                />
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
@@ -751,16 +720,6 @@ function CommentCardImpl({
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10" />
-                {!isTemp && (
-                  <ReactionBar
-                    reactions={reactions}
-                    currentUserId={currentUserId}
-                    onToggle={(emoji) => onToggleReaction(entry.id, emoji)}
-                    getActorName={getActorName}
-                    hideAddButton={!isLongContent}
-                    className="mt-1.5 pl-10"
-                  />
-                )}
               </>
             )}
           </div>
@@ -775,7 +734,6 @@ function CommentCardImpl({
                 canModerate={canModerate}
                 onEdit={onEdit}
                 onDelete={onDelete}
-                onToggleReaction={onToggleReaction}
               />
             </div>
           ))}

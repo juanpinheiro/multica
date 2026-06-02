@@ -86,6 +86,51 @@ func TestMCPCreateIssueIncludesOptionalFields(t *testing.T) {
 	}
 }
 
+func TestMCPCreateIssueSendsMilestoneID(t *testing.T) {
+	t.Parallel()
+	cb := newCapturingBackend(t, http.StatusCreated, map[string]any{"id": "issue-1"})
+	sess := newIssueSession(t, cb)
+
+	callTool(t, sess, "create_issue", map[string]any{
+		"feature_id":   "feat-1",
+		"title":        "Issue",
+		"milestone_id": "ms-1",
+	})
+	if cb.lastPath != "/api/issues" {
+		t.Fatalf("path = %q, want /api/issues", cb.lastPath)
+	}
+	if cb.lastBody["milestone_id"] != "ms-1" {
+		t.Errorf("body.milestone_id = %v, want ms-1", cb.lastBody["milestone_id"])
+	}
+}
+
+func TestMCPCreateIssueSetsModelMetadata(t *testing.T) {
+	t.Parallel()
+	cb := newCapturingBackend(t, http.StatusCreated, map[string]any{"id": "issue-1"})
+	sess := newIssueSession(t, cb)
+
+	resp := callTool(t, sess, "create_issue", map[string]any{
+		"feature_id": "feat-1",
+		"title":      "Issue",
+		"model":      "opus",
+	})
+	text, isError := toolResult(t, resp)
+	if isError {
+		t.Fatalf("expected success, got error: %s", text)
+	}
+	// The model is recorded via a follow-up metadata write, so it is the last
+	// request the backend sees.
+	if cb.lastMethod != http.MethodPut {
+		t.Errorf("method = %q, want PUT", cb.lastMethod)
+	}
+	if cb.lastPath != "/api/issues/issue-1/metadata/model" {
+		t.Errorf("path = %q, want /api/issues/issue-1/metadata/model", cb.lastPath)
+	}
+	if cb.lastBody["value"] != "opus" {
+		t.Errorf("body.value = %v, want opus", cb.lastBody["value"])
+	}
+}
+
 func TestMCPCreateIssueWithRepo(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

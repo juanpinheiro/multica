@@ -86,7 +86,7 @@ var featureResourceRemoveCmd = &cobra.Command{
 }
 
 var validFeatureStatuses = []string{
-	"planned", "in_progress", "paused", "completed", "cancelled",
+	"draft", "ready", "running", "in_review", "done", "blocked", "cancelled",
 }
 
 func init() {

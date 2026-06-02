@@ -18,6 +18,10 @@ import (
 // with --output-format stream-json.
 type claudeBackend struct {
 	cfg Config
+	// resultTeardownGrace overrides defaultResultTeardownGrace. Zero means use
+	// the default; tests set a small value to keep the hung-after-result path
+	// fast.
+	resultTeardownGrace time.Duration
 }
 
 func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -132,6 +136,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		resultSeen := false
 		usage := make(map[string]TokenUsage)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
@@ -178,6 +183,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "failed"
 					finalError = msg.ResultText
 				}
+				// The result is the authoritative completion signal. Tear the
+				// process down proactively so a CLI that emits its result and
+				// then hangs (stream-json never closes stdout) resolves now
+				// instead of blocking the reader until the idle watchdog.
+				if !resultSeen {
+					resultSeen = true
+					scheduleResultTeardown(runCtx, cancel, resolveResultTeardownGrace(b.resultTeardownGrace))
+				}
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -193,15 +206,22 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("claude timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+		// A run that emitted a result has already recorded its real disposition
+		// (completed/failed). Don't let the teardown cancel — or a non-zero
+		// exit from the force-kill that follows it — clobber that into
+		// aborted/failed. The idle watchdog stays the safety net only for runs
+		// that never emit a result.
+		if !resultSeen {
+			if runCtx.Err() == context.DeadlineExceeded {
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("claude timed out after %s", timeout)
+			} else if runCtx.Err() == context.Canceled {
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			} else if exitErr != nil && finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+			}
 		}
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has

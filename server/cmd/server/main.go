@@ -68,10 +68,6 @@ func main() {
 
 	queries := db.New(pool)
 	hub.SetAuthorizer(newScopeAuthorizer(queries))
-	// Order matters: subscriber listeners must register BEFORE notification listeners.
-	// The notification listener queries the subscriber table to determine recipients,
-	// so subscribers must be written first within the same synchronous event dispatch.
-	registerSubscriberListeners(bus, queries)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
@@ -102,7 +98,7 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
-	r := NewRouterWithOptions(pool, hub, bus, RouterOptions{
+	r, appHandler := NewRouterWithOptions(pool, hub, bus, RouterOptions{
 		HTTPMetrics:        httpMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
@@ -116,6 +112,7 @@ func main() {
 
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
+	prMergePoller := handler.NewPRMergePoller(queries, appHandler)
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
@@ -126,6 +123,7 @@ func main() {
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
+	go prMergePoller.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)

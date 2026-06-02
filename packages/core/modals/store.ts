@@ -3,11 +3,6 @@
 import { create } from "zustand";
 
 type ModalType =
-  | "create-workspace"
-  | "create-issue"
-  | "quick-create-issue"
-  | "create-feature"
-  | "create-squad"
   | "issue-set-parent"
   | "issue-add-child"
   | "issue-delete-confirm"

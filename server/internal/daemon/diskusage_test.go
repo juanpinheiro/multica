@@ -49,10 +49,10 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	taskA2 := filepath.Join(root, wsA, "bbbbbbbb")
 	writeFile(t, filepath.Join(taskA2, "workdir/notes.md"), 500)
 	mustWriteMeta(t, taskA2, execenv.GCMeta{
-		Kind:          execenv.GCKindChat,
-		ChatSessionID: "chat-1",
-		WorkspaceID:   wsA,
-		CompletedAt:   time.Now().Add(-1 * time.Hour),
+		Kind:           execenv.GCKindAutopilotRun,
+		AutopilotRunID: "run-1",
+		WorkspaceID:    wsA,
+		CompletedAt:    time.Now().Add(-1 * time.Hour),
 	})
 
 	taskB1 := filepath.Join(root, wsB, "cccccccc")
@@ -100,8 +100,8 @@ func TestScanDiskUsage_AggregatesAndCategorizes(t *testing.T) {
 	}
 
 	a2 := byShort["bbbbbbbb"]
-	if a2.Kind != string(execenv.GCKindChat) {
-		t.Errorf("task a2 kind = %q, want chat", a2.Kind)
+	if a2.Kind != string(execenv.GCKindAutopilotRun) {
+		t.Errorf("task a2 kind = %q, want autopilot_run", a2.Kind)
 	}
 	if a2.SizeBytes < 500 || a2.SizeBytes > 500+1024 {
 		t.Errorf("task a2 size = %d, want in [500, 1524]", a2.SizeBytes)

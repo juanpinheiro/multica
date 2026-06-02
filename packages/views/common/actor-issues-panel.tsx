@@ -8,8 +8,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import {
   childIssueProgressOptions,
-  myIssueListOptions,
-  type MyIssuesFilter,
+  actorIssueListOptions,
+  type ActorIssueFilter,
 } from "@multica/core/issues/queries";
 import {
   actorIssuesViewStore,
@@ -68,7 +68,7 @@ export function ActorIssuesPanel({
     useIssueSelectionStore.getState().clear();
   }, [scope, actorType, actorId]);
 
-  const queryFilter: MyIssuesFilter = useMemo(
+  const queryFilter: ActorIssueFilter = useMemo(
     () =>
       scope === "assigned"
         ? { assignee_id: actorId }
@@ -77,7 +77,7 @@ export function ActorIssuesPanel({
   );
   const queryScope = `${actorType}:${actorId}:${scope}`;
 
-  const rawIssuesQuery = useQuery(myIssueListOptions(wsId, queryScope, queryFilter));
+  const rawIssuesQuery = useQuery(actorIssueListOptions(wsId, queryScope, queryFilter));
   const rawIssues = useMemo(
     () => rawIssuesQuery.data ?? [],
     [rawIssuesQuery.data],
@@ -211,8 +211,6 @@ export function ActorIssuesPanel({
               issues={issues}
               visibleStatuses={visibleStatuses}
               childProgressMap={childProgressMap}
-              myIssuesScope={queryScope}
-              myIssuesFilter={queryFilter}
             />
           </div>
         )}

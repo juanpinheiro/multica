@@ -25,8 +25,6 @@
   "scope": {
     "all_label": "All",
     "all_description": "All issues in this workspace",
-    "members_label": "Members",
-    "members_description": "Issues assigned to team members",
     "agents_label": "Agents",
     "agents_description": "Issues assigned to AI agents"
   },
@@ -43,9 +41,7 @@
     "section_creator": "Creator",
     "section_feature": "Feature",
     "section_label": "Label",
-    "members_group": "Members",
     "agents_group": "Agents",
-    "squads_group": "Squads",
     "issue_count_one": "{{count}} issue",
     "issue_count_other": "{{count}} issues",
     "reset": "Reset all filters",
@@ -160,6 +156,7 @@
     "section_metadata": "Metadata",
     "section_details": "Details",
     "section_token_usage": "Token usage",
+    "section_acceptance_criteria": "Acceptance criteria",
     "pull_requests_loading": "Loading…",
     "pull_requests_empty": "No linked pull requests yet. Reference this issue's identifier in a PR's branch name, title, or body to auto-link it.",
     "pull_request_state_open": "Open",
@@ -201,12 +198,6 @@
     "prop_cache_value": "{{read}} read / {{write}} write",
     "prop_runs": "Runs",
     "activity_section": "Activity",
-    "subscribe": "Subscribe",
-    "unsubscribe": "Unsubscribe",
-    "no_subscribers_results": "No results found",
-    "change_subscribers_placeholder": "Change subscribers...",
-    "members_group": "Members",
-    "agents_group": "Agents",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
     "pin_tooltip": "Pin to sidebar",
@@ -342,7 +333,16 @@
     "status_completed": "Completed",
     "status_failed": "Failed",
     "status_cancelled": "Cancelled",
-    "status_waiting_local_directory": "Waiting"
+    "status_waiting_local_directory": "Waiting",
+    "role_worker": "Worker",
+    "role_validator": "Validator",
+    "handoff_done": "Done",
+    "handoff_left_undone": "Left undone",
+    "handoff_commands": "Commands",
+    "handoff_discoveries": "Discoveries",
+    "handoff_exit_ok": "exit 0",
+    "handoff_exit_fail": "exit {{code}}",
+    "handoff_toggle": "Handoff"
   },
   "terminate_dialog": {
     "title": "Stop this task?",
@@ -405,9 +405,7 @@
     "assignee": {
       "trigger_unassigned": "Unassigned",
       "search_placeholder": "Assign to...",
-      "members_group": "Members",
-      "agents_group": "Agents",
-      "squads_group": "Squads"
+      "agents_group": "Agents"
     },
     "start_date": {
       "trigger_label": "Start date",

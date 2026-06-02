@@ -12,7 +12,6 @@ import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
-import { SquadProfileCard } from "../squads/components/squad-profile-card";
 import { availabilityConfig } from "../agents/presence";
 import { useNavigation } from "../navigation";
 
@@ -23,8 +22,7 @@ import { useNavigation } from "../navigation";
  *   owner). Used by 20+ "who is this agent?" surfaces (comment authors,
  *   pickers, list rows).
  * - `"live"` — live activity peek (workload, current issue, last activity).
- *   Used where the user already knows the identity and wants the live state,
- *   e.g. the squad members tab.
+ *   Used where the user already knows the identity and wants the live state.
  *
  * Has no effect for non-agent actors (members always render the member card).
  */
@@ -86,7 +84,6 @@ export function ActorAvatar({
       avatarUrl={getActorAvatarUrl(actorType, actorId)}
       isAgent={actorType === "agent"}
       isSystem={actorType === "system"}
-      isSquad={actorType === "squad"}
       size={size}
       className={className}
     />
@@ -107,13 +104,9 @@ export function ActorAvatar({
   );
   const shouldLinkToProfile =
     profileLink ??
-    (actorType === "agent" || actorType === "squad");
-  const profileHref = shouldLinkToProfile
-    ? actorType === "agent"
-      ? paths.agentDetail(actorId)
-      : actorType === "squad"
-        ? paths.squadDetail(actorId)
-        : null
+    actorType === "agent";
+  const profileHref = shouldLinkToProfile && actorType === "agent"
+    ? paths.agentDetail(actorId)
     : null;
   const content = profileHref ? (
     <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
@@ -130,9 +123,6 @@ export function ActorAvatar({
         {content}
       </AgentAvatarHoverCard>
     );
-  }
-  if (actorType === "squad") {
-    return <SquadAvatarHoverCard squadId={actorId}>{content}</SquadAvatarHoverCard>;
   }
   return content;
 }
@@ -227,20 +217,6 @@ function AgentAvatarHoverCard({
     );
   return (
     <ActorAvatarHoverCardShell content={content}>
-      {children}
-    </ActorAvatarHoverCardShell>
-  );
-}
-
-function SquadAvatarHoverCard({
-  squadId,
-  children,
-}: {
-  squadId: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <ActorAvatarHoverCardShell content={<SquadProfileCard squadId={squadId} />}>
       {children}
     </ActorAvatarHoverCardShell>
   );

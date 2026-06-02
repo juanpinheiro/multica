@@ -18,9 +18,7 @@ export function onIssueCreated(
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
   }
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   // Refresh every Feature Gantt cache that might be observing this issue.
   // We invalidate the whole prefix rather than the issue's own project
   // because a fresh issue isn't necessarily scheduled yet; the active Gantt
@@ -58,9 +56,7 @@ export function onIssueUpdated(
   if (issue.position !== undefined) {
     qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
   }
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   // Any field change can shift Gantt membership — start_date / due_date may
   // have moved in or out of the `scheduled` set, feature_id may have
   // changed, or the row that is in the cache may need to mirror updated
@@ -132,9 +128,7 @@ export function onIssueLabelsChanged(
     );
     qc.setQueryData<Issue[]>(key, next);
   }
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
 }
 
 /**
@@ -158,7 +152,6 @@ export function onIssueMetadataChanged(
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
   );
-  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
 
 export function onIssueDeleted(
@@ -168,5 +161,4 @@ export function onIssueDeleted(
 ) {
   cleanupDeletedIssueCaches(qc, wsId, issueId);
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
 }

@@ -89,8 +89,6 @@ const attachment: Attachment = {
   workspace_id: WS_ID,
   issue_id: ISSUE_ID,
   comment_id: null,
-  chat_session_id: null,
-  chat_message_id: null,
   uploader_type: "member",
   uploader_id: "member-1",
   filename: "evidence.png",
@@ -199,21 +197,11 @@ describe("useDeleteIssue", () => {
     vi.clearAllMocks();
   });
 
-  it("cleans list, my-list, issue-scoped, and dependent agent caches after a successful single delete", async () => {
+  it("cleans list, issue-scoped, and dependent agent caches after a successful single delete", async () => {
     const { qc, deleteIssue, wrapper } = setup();
-    const assignedFilter = { assignee_id: AGENT_ID };
-    const createdFilter = { creator_id: "member-1" };
     qc.setQueryData<ListIssuesCache>(
       issueKeys.list(WS_ID),
       makeListCache(baseIssue, otherIssue),
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", assignedFilter),
-      makeListCache(baseIssue, otherIssue),
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "created", createdFilter),
-      makeListCache(baseIssue),
     );
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
     qc.setQueryData<Issue[]>(
@@ -238,12 +226,6 @@ describe("useDeleteIssue", () => {
     expect(ids(qc.getQueryData(issueKeys.list(WS_ID)))).toEqual([
       OTHER_ISSUE_ID,
     ]);
-    expect(
-      ids(qc.getQueryData(issueKeys.myList(WS_ID, "assigned", assignedFilter))),
-    ).toEqual([OTHER_ISSUE_ID]);
-    expect(
-      ids(qc.getQueryData(issueKeys.myList(WS_ID, "created", createdFilter))),
-    ).toEqual([]);
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.usage(ISSUE_ID))).toBeUndefined();
     expect(
@@ -316,15 +298,9 @@ describe("useDeleteIssue", () => {
   it("restores optimistic snapshots when a single delete fails", async () => {
     const error = new Error("delete failed");
     const { qc, wrapper } = setup(vi.fn().mockRejectedValue(error));
-    const assignedFilter = { assignee_id: AGENT_ID };
     const list = makeListCache(baseIssue, otherIssue);
-    const myList = makeListCache(baseIssue);
     const children = [baseIssue, otherIssue];
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), list);
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", assignedFilter),
-      myList,
-    );
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
     qc.setQueryData<Issue[]>(
       issueKeys.children(WS_ID, PARENT_ISSUE_ID),
@@ -341,9 +317,6 @@ describe("useDeleteIssue", () => {
     ).rejects.toThrow("delete failed");
 
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toEqual(list);
-    expect(
-      qc.getQueryData(issueKeys.myList(WS_ID, "assigned", assignedFilter)),
-    ).toEqual(myList);
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toEqual(
       baseIssue,
     );
@@ -359,24 +332,14 @@ describe("useBatchDeleteIssues", () => {
     vi.clearAllMocks();
   });
 
-  it("cleans list, my-list, issue-scoped, parent, and dependent agent caches after a fully successful batch delete", async () => {
+  it("cleans list, issue-scoped, parent, and dependent agent caches after a fully successful batch delete", async () => {
     const batchDeleteIssues = vi.fn().mockResolvedValue({ deleted: 2 });
     const { qc, wrapper } = setup(undefined, batchDeleteIssues);
-    const assignedFilter = { assignee_id: AGENT_ID };
-    const createdFilter = { creator_id: "member-1" };
     const idsToDelete = [ISSUE_ID, OTHER_ISSUE_ID];
     const childIssue = { ...otherIssue, parent_issue_id: PARENT_ISSUE_ID };
     qc.setQueryData<ListIssuesCache>(
       issueKeys.list(WS_ID),
       makeListCache(baseIssue, childIssue),
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", assignedFilter),
-      makeListCache(baseIssue, childIssue),
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "created", createdFilter),
-      makeListCache(baseIssue),
     );
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, OTHER_ISSUE_ID), childIssue);
@@ -409,12 +372,6 @@ describe("useBatchDeleteIssues", () => {
 
     expect(batchDeleteIssues).toHaveBeenCalledWith(idsToDelete);
     expect(ids(qc.getQueryData(issueKeys.list(WS_ID)))).toEqual([]);
-    expect(
-      ids(qc.getQueryData(issueKeys.myList(WS_ID, "assigned", assignedFilter))),
-    ).toEqual([]);
-    expect(
-      ids(qc.getQueryData(issueKeys.myList(WS_ID, "created", createdFilter))),
-    ).toEqual([]);
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(
       qc.getQueryData(issueKeys.detail(WS_ID, OTHER_ISSUE_ID)),
@@ -460,25 +417,13 @@ describe("useBatchDeleteIssues", () => {
   it("restores optimistic list snapshots on partial batch delete before invalidating caches", async () => {
     const batchDeleteIssues = vi.fn().mockResolvedValue({ deleted: 1 });
     const { qc, wrapper } = setup(undefined, batchDeleteIssues);
-    const assignedFilter = { assignee_id: AGENT_ID };
-    const createdFilter = { creator_id: "member-1" };
     const idsToDelete = [ISSUE_ID, OTHER_ISSUE_ID];
     const childIssue = { ...otherIssue, parent_issue_id: PARENT_ISSUE_ID };
     const list = makeListCache(baseIssue, childIssue);
-    const assignedMyList = makeListCache(baseIssue, childIssue);
-    const createdMyList = makeListCache(baseIssue);
     const children = [baseIssue, childIssue];
     qc.setQueryData<ListIssuesCache>(
       issueKeys.list(WS_ID),
       list,
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", assignedFilter),
-      assignedMyList,
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "created", createdFilter),
-      createdMyList,
     );
     qc.setQueryData<Issue[]>(
       issueKeys.children(WS_ID, PARENT_ISSUE_ID),
@@ -534,12 +479,6 @@ describe("useBatchDeleteIssues", () => {
       expect(batchDeleteIssues).toHaveBeenCalledWith(idsToDelete);
       expect(qc.getQueryData(issueKeys.list(WS_ID))).toEqual(list);
       expect(
-        qc.getQueryData(issueKeys.myList(WS_ID, "assigned", assignedFilter)),
-      ).toEqual(assignedMyList);
-      expect(
-        qc.getQueryData(issueKeys.myList(WS_ID, "created", createdFilter)),
-      ).toEqual(createdMyList);
-      expect(
         qc.getQueryData(issueKeys.children(WS_ID, PARENT_ISSUE_ID)),
       ).toEqual(children);
       expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toEqual(
@@ -584,24 +523,12 @@ describe("useBatchDeleteIssues", () => {
     }
   });
 
-  it("restores optimistic workspace, my-list, and parent children snapshots when a batch delete fails", async () => {
+  it("restores optimistic workspace and parent children snapshots when a batch delete fails", async () => {
     const pendingDelete = deferred<{ deleted: number }>();
     const { qc, wrapper } = setup(undefined, vi.fn(() => pendingDelete.promise));
-    const assignedFilter = { assignee_id: AGENT_ID };
-    const createdFilter = { creator_id: "member-1" };
     const list = makeListCache(baseIssue, otherIssue);
-    const assignedMyList = makeListCache(baseIssue, otherIssue);
-    const createdMyList = makeListCache(baseIssue);
     const children = [baseIssue, otherIssue];
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), list);
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", assignedFilter),
-      assignedMyList,
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "created", createdFilter),
-      createdMyList,
-    );
     qc.setQueryData<Issue[]>(
       issueKeys.children(WS_ID, PARENT_ISSUE_ID),
       children,
@@ -619,12 +546,6 @@ describe("useBatchDeleteIssues", () => {
       OTHER_ISSUE_ID,
     ]);
     expect(
-      ids(qc.getQueryData(issueKeys.myList(WS_ID, "assigned", assignedFilter))),
-    ).toEqual([OTHER_ISSUE_ID]);
-    expect(
-      ids(qc.getQueryData(issueKeys.myList(WS_ID, "created", createdFilter))),
-    ).toEqual([]);
-    expect(
       qc
         .getQueryData<Issue[]>(issueKeys.children(WS_ID, PARENT_ISSUE_ID))
         ?.map((issue) => issue.id),
@@ -638,12 +559,6 @@ describe("useBatchDeleteIssues", () => {
     ).rejects.toThrow("batch delete failed");
 
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toEqual(list);
-    expect(
-      qc.getQueryData(issueKeys.myList(WS_ID, "assigned", assignedFilter)),
-    ).toEqual(assignedMyList);
-    expect(
-      qc.getQueryData(issueKeys.myList(WS_ID, "created", createdFilter)),
-    ).toEqual(createdMyList);
     expect(qc.getQueryData(issueKeys.children(WS_ID, PARENT_ISSUE_ID))).toEqual(
       children,
     );

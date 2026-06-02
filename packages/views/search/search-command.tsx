@@ -9,7 +9,6 @@ import {
   Link2,
   Loader2,
   MessageSquare,
-  Plus,
   SearchIcon,
   Inbox,
   CircleUser,
@@ -33,7 +32,6 @@ import type {
 } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import {
-  openCreateIssueWithPreference,
   selectRecentIssues,
   useRecentIssuesStore,
 } from "@multica/core/issues/stores";
@@ -41,7 +39,6 @@ import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
-import { useModalStore } from "@multica/core/modals";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { StatusIcon } from "../issues/components";
 import { FeatureIcon } from "../features/components/feature-icon";
@@ -232,28 +229,7 @@ export function SearchCommand() {
         />
       ) : undefined;
 
-    const items: CommandItem[] = [
-      {
-        key: "new-issue",
-        label: t(($) => $.commands.new_issue),
-        icon: Plus,
-        keywords: ["new", "issue", "create", "add"],
-        onSelect: () => {
-          openCreateIssueWithPreference();
-          setOpen(false);
-        },
-      },
-      {
-        key: "new-project",
-        label: t(($) => $.commands.new_feature),
-        icon: Plus,
-        keywords: ["new", "feature", "create", "add"],
-        onSelect: () => {
-          useModalStore.getState().open("create-feature");
-          setOpen(false);
-        },
-      },
-    ];
+    const items: CommandItem[] = [];
 
     if (currentIssue) {
       const identifier = currentIssue.identifier;
@@ -324,10 +300,9 @@ export function SearchCommand() {
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();
-    // No query: only surface the primary creation action. Other commands
-    // (theme switches, copy actions, New Project) are revealed as the user
-    // types, leaving the empty-state space to Recent.
-    if (!q) return commands.filter((c) => c.key === "new-issue");
+    // No query: hide all commands to leave the empty-state space to Recent.
+    // Typing reveals theme switches and copy actions.
+    if (!q) return [];
     return commands.filter(
       (c) =>
         c.label.toLowerCase().includes(q) ||

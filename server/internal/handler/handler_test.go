@@ -1152,7 +1152,7 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO feature (workspace_id, title, status)
-		VALUES ($1, $2, 'in_progress')
+		VALUES ($1, $2, 'running')
 		RETURNING id::text
 	`, testWorkspaceID, "Autopilot feature target").Scan(&projectID); err != nil {
 		t.Fatalf("create feature fixture: %v", err)
@@ -1225,7 +1225,7 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO feature (workspace_id, title, status)
-		VALUES ($1, $2, 'in_progress')
+		VALUES ($1, $2, 'running')
 		RETURNING id::text
 	`, testWorkspaceID, "Autopilot update feature target").Scan(&projectID); err != nil {
 		t.Fatalf("create feature fixture: %v", err)
@@ -1290,19 +1290,18 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 	}
 }
 
-// TestCreateIssueRejectsNonexistentMemberAssignee covers the bug where any
-// well-formed UUID was accepted as assignee_id without checking workspace
-// membership.
-func TestCreateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
+// TestCreateIssueRejectsMemberAssigneeType verifies that "member" is no longer
+// a valid assignee_type — all issues must be assigned to agents.
+func TestCreateIssueRejectsMemberAssigneeType(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":         "Ghost member assignee",
+		"title":         "Member assignee",
 		"assignee_type": "member",
-		"assignee_id":   "00000000-0000-0000-0000-000000000000",
+		"assignee_id":   testUserID,
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 for nonexistent member, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("CreateIssue: expected 400 for member assignee_type, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -1329,7 +1328,7 @@ func TestCreateIssueRejectsAssigneeTypeWithoutID(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Lone assignee_type",
-		"assignee_type": "member",
+		"assignee_type": "agent",
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -1363,27 +1362,6 @@ func TestCreateIssueRejectsUnknownAssigneeType(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("CreateIssue: expected 400 for unknown assignee_type, got %d: %s", w.Code, w.Body.String())
 	}
-}
-
-// TestCreateIssueAcceptsValidMemberAssignee is the positive control — the
-// validator must not block legitimate workspace members.
-func TestCreateIssueAcceptsValidMemberAssignee(t *testing.T) {
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":         "Valid member assignee",
-		"assignee_type": "member",
-		"assignee_id":   testUserID,
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201 for valid member assignee, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var created IssueResponse
-	json.NewDecoder(w.Body).Decode(&created)
-	cleanupReq := newRequest("DELETE", "/api/issues/"+created.ID, nil)
-	cleanupReq = withURLParam(cleanupReq, "id", created.ID)
-	testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
 }
 
 // TestCreateIssueRejectsMalformedAssigneeID covers the case where parseUUID
@@ -1457,9 +1435,9 @@ func TestUpdateIssueRejectsMalformedAssigneeID(t *testing.T) {
 	}
 }
 
-// TestUpdateIssueRejectsNonexistentMemberAssignee verifies the same gap is
-// closed on the update path — UpdateIssue previously only validated agents.
-func TestUpdateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
+// TestUpdateIssueRejectsMemberAssigneeType verifies that "member" is rejected
+// on the update path — only agents are valid assignees.
+func TestUpdateIssueRejectsMemberAssigneeType(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Update assignee target",
@@ -1479,24 +1457,22 @@ func TestUpdateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
 		"assignee_type": "member",
-		"assignee_id":   "00000000-0000-0000-0000-000000000000",
+		"assignee_id":   testUserID,
 	})
 	req = withURLParam(req, "id", created.ID)
 	testHandler.UpdateIssue(w, req)
 	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateIssue: expected 400 for nonexistent member, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("UpdateIssue: expected 400 for member assignee_type, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 // TestUpdateIssueAllowsExplicitUnassign verifies that sending null for both
-// fields still works after the new validator landed — clearing the assignee
-// must not be misclassified as a mismatched pair.
+// fields still works — clearing the assignee must not be misclassified as a
+// mismatched pair.
 func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":         "Issue to unassign",
-		"assignee_type": "member",
-		"assignee_id":   testUserID,
+		"title": "Issue to unassign",
 	})
 	testHandler.CreateIssue(w, req)
 	if w.Code != http.StatusCreated {
@@ -1603,15 +1579,6 @@ func TestCreateCommentRejectsMalformedParentID(t *testing.T) {
 	testHandler.DeleteIssue(w, req)
 }
 
-func TestGetChatSessionRejectsMalformedSessionID(t *testing.T) {
-	w := httptest.NewRecorder()
-	req := newRequest("GET", "/api/chat/sessions/not-a-uuid", nil)
-	req = withURLParam(req, "sessionId", "not-a-uuid")
-	testHandler.GetChatSession(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("GetChatSession: expected 400 for malformed sessionId, got %d: %s", w.Code, w.Body.String())
-	}
-}
 
 func TestCreateAutopilotRejectsMalformedAssigneeID(t *testing.T) {
 	w := httptest.NewRecorder()
@@ -1701,17 +1668,6 @@ func TestUpdateWorkspaceRejectsMalformedID(t *testing.T) {
 }
 
 
-func TestAddReactionRejectsMalformedCommentID(t *testing.T) {
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/comments/not-a-uuid/reactions", map[string]any{
-		"emoji": "thumbs_up",
-	})
-	req = withURLParam(req, "commentId", "not-a-uuid")
-	testHandler.AddReaction(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("AddReaction: expected 400 for malformed commentId, got %d: %s", w.Code, w.Body.String())
-	}
-}
 
 func TestUpdateCommentRejectsMalformedCommentID(t *testing.T) {
 	w := httptest.NewRecorder()
@@ -2506,73 +2462,6 @@ func TestBatchBacklogToTodoByAgentTriggersAssignee(t *testing.T) {
 	}
 }
 
-// TestBacklogToTodoByAgentTriggersSquadLeader covers the squad branch of
-// the backlog→active trigger when the actor is an agent: the leader agent
-// of a squad must wake when one of its squad-assigned backlog issues is
-// promoted by another agent (or by the leader itself acting from a task
-// on a different issue). The task-issue self-loop guard must allow this —
-// only a true same-issue self-loop should be suppressed.
-func TestBacklogToTodoByAgentTriggersSquadLeader(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	leaderAgent := createHandlerTestAgent(t, "Backlog Squad Leader", nil)
-	driverAgent := createHandlerTestAgent(t, "Backlog Squad Driver", nil)
-	driverTask := createHandlerTestTaskForAgent(t, driverAgent)
-
-	var squadID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
-		VALUES ($1, $2, '', $3, $4)
-		RETURNING id
-	`, testWorkspaceID, "Backlog Trigger Squad", leaderAgent, testUserID).Scan(&squadID); err != nil {
-		t.Fatalf("create squad: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID) })
-
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":         "Squad backlog issue",
-		"status":        "backlog",
-		"assignee_type": "squad",
-		"assignee_id":   squadID,
-	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-	var created IssueResponse
-	json.NewDecoder(w.Body).Decode(&created)
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, created.ID)
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
-	})
-
-	// Driver agent (not the leader, task is on no specific issue) promotes
-	// the squad-assigned backlog issue. Squad leader must be enqueued.
-	w = httptest.NewRecorder()
-	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{"status": "todo"})
-	req = withURLParam(req, "id", created.ID)
-	req.Header.Set("X-Agent-ID", driverAgent)
-	req.Header.Set("X-Task-ID", driverTask)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var leaderTasks int
-	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
-		created.ID, leaderAgent,
-	).Scan(&leaderTasks); err != nil {
-		t.Fatalf("failed to count leader tasks: %v", err)
-	}
-	if leaderTasks != 1 {
-		t.Fatalf("expected exactly 1 squad-leader task after agent-driven backlog→todo on squad issue, got %d", leaderTasks)
-	}
-}
 
 func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	w := httptest.NewRecorder()

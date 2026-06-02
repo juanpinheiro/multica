@@ -42,10 +42,10 @@ func jsonResult(v any) (*mcp.CallToolResult, error) {
 
 func listFeaturesTool() mcp.Tool {
 	return mcp.NewTool("list_features",
-		mcp.WithDescription("List features (PRDs) in the workspace. Optionally filter by status."),
+		mcp.WithDescription("List Initiatives (PRDs) in the workspace. Optionally filter by status."),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithString("status",
-			mcp.Description("Filter by status: planned, in_progress, paused, completed, or cancelled."),
+			mcp.Description("Filter by status: draft, ready, running, in_review, done, blocked, or cancelled."),
 		),
 	)
 }

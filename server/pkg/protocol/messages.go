@@ -64,53 +64,6 @@ type RuntimeInfo struct {
 	Status  string `json:"status"`
 }
 
-// ChatMessagePayload is broadcast when a new chat message is created.
-type ChatMessagePayload struct {
-	ChatSessionID string `json:"chat_session_id"`
-	MessageID     string `json:"message_id"`
-	Role          string `json:"role"`
-	Content       string `json:"content"`
-	TaskID        string `json:"task_id,omitempty"`
-	CreatedAt     string `json:"created_at"`
-}
-
-// ChatDonePayload is broadcast when an agent finishes responding to a chat
-// message. Carries the freshly-persisted assistant ChatMessage so the client
-// can write it into the messages cache inline — avoids a refetch round-trip
-// during the live-timeline → AssistantMessage handoff that previously caused
-// a visible flicker (#2123).
-type ChatDonePayload struct {
-	ChatSessionID string `json:"chat_session_id"`
-	TaskID        string `json:"task_id"`
-	MessageID     string `json:"message_id,omitempty"`
-	Content       string `json:"content,omitempty"`
-	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
-	CreatedAt     string `json:"created_at,omitempty"`
-}
-
-// ChatSessionReadPayload is broadcast when the creator marks a session as read.
-// Fires to other devices so their unread counts stay in sync.
-type ChatSessionReadPayload struct {
-	ChatSessionID string `json:"chat_session_id"`
-}
-
-// ChatSessionDeletedPayload is broadcast when a chat session is hard-deleted
-// so other tabs/devices drop it from their session lists and reset the active
-// pointer if it referenced the deleted session.
-type ChatSessionDeletedPayload struct {
-	ChatSessionID string `json:"chat_session_id"`
-}
-
-// ChatSessionUpdatedPayload is broadcast when a user-editable field on a
-// chat session changes (today: title via inline rename). Other tabs/devices
-// patch the session row in their cached list so the dropdown stays in sync
-// without a full refetch.
-type ChatSessionUpdatedPayload struct {
-	ChatSessionID string `json:"chat_session_id"`
-	Title         string `json:"title"`
-	UpdatedAt     string `json:"updated_at"`
-}
-
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket
 // to update last_seen_at and pull pending actions for a single runtime.
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share

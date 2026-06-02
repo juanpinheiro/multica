@@ -84,8 +84,7 @@ export function IssuesPage() {
       include_no_feature: includeNoFeature,
       label_ids: labelFilters,
     };
-    if (scope === "members") filter.assignee_types = ["member"];
-    if (scope === "agents") filter.assignee_types = ["agent", "squad"];
+    if (scope === "agents") filter.assignee_types = ["agent"];
     return filter;
   }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoFeature, labelFilters, priorityFilters, featureFilters, scope, statusFilters]);
 
@@ -119,10 +118,8 @@ export function IssuesPage() {
 
   // Scope pre-filter: narrow by assignee type
   const scopedIssues = useMemo(() => {
-    if (scope === "members")
-      return allIssues.filter((i) => i.assignee_type === "member");
     if (scope === "agents")
-      return allIssues.filter((i) => i.assignee_type === "agent" || i.assignee_type === "squad");
+      return allIssues.filter((i) => i.assignee_type === "agent");
     return allIssues;
   }, [allIssues, scope]);
 

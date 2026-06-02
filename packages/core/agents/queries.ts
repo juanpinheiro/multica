@@ -109,3 +109,18 @@ export function agentTemplateDetailOptions(slug: string) {
     gcTime: 30 * 60 * 1000,
   });
 }
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isTaskMessageTaskId(taskId: string | null | undefined): taskId is string {
+  return typeof taskId === "string" && UUID_PATTERN.test(taskId);
+}
+
+export function taskMessagesOptions(taskId: string) {
+  return queryOptions({
+    queryKey: ["task-messages", taskId] as const,
+    queryFn: () => api.listTaskMessages(taskId),
+    enabled: isTaskMessageTaskId(taskId),
+    staleTime: Infinity,
+  });
+}

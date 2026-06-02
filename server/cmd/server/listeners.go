@@ -127,15 +127,11 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		// Streams relay — have all landed, but the client (WSClient + the
 		// per-page chat/task hooks) does not yet send `subscribe` frames or
 		// replay subscriptions on reconnect. Routing these events through
-		// `BroadcastToScope("task"|"chat", ...)` today would silently drop
-		// every chat/task message on the floor, breaking the live chat
-		// timeline, chat unread badges, and pending-task UI.
+		// `BroadcastToScope("task", ...)` today would silently drop
+		// every task message on the floor, breaking the live task timeline.
 		//
-		// Until the client lands its scope-subscription PR, we keep
-		// task/chat events on workspace fanout (same behavior as before this
-		// PR). The `Event.TaskID` / `Event.ChatSessionID` hints are still
-		// populated by producers so that flipping the switch later is a
-		// one-line change here. See review on PR #1429 for context.
+		// Task events remain on workspace fanout for now. The `Event.TaskID`
+		// hint is still populated so per-task scope can be enabled later.
 
 		if e.WorkspaceID != "" {
 			realtime.M.RecordEvent(e.Type)

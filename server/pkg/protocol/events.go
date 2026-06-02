@@ -9,15 +9,11 @@ const (
 	EventIssueMetadataChanged = "issue_metadata:changed"
 
 	// Comment events
-	EventCommentCreated       = "comment:created"
-	EventCommentUpdated       = "comment:updated"
-	EventCommentDeleted       = "comment:deleted"
-	EventCommentResolved      = "comment:resolved"
-	EventCommentUnresolved    = "comment:unresolved"
-	EventReactionAdded        = "reaction:added"
-	EventReactionRemoved      = "reaction:removed"
-	EventIssueReactionAdded   = "issue_reaction:added"
-	EventIssueReactionRemoved = "issue_reaction:removed"
+	EventCommentCreated    = "comment:created"
+	EventCommentUpdated    = "comment:updated"
+	EventCommentDeleted    = "comment:deleted"
+	EventCommentResolved   = "comment:resolved"
+	EventCommentUnresolved = "comment:unresolved"
 
 	// Agent events
 	EventAgentStatus   = "agent:status"
@@ -56,10 +52,6 @@ const (
 	EventMemberUpdated = "member:updated"
 	EventMemberRemoved = "member:removed"
 
-	// Subscriber events
-	EventSubscriberAdded   = "subscriber:added"
-	EventSubscriberRemoved = "subscriber:removed"
-
 	// Activity events
 	EventActivityCreated = "activity:created"
 
@@ -67,13 +59,6 @@ const (
 	EventSkillCreated = "skill:created"
 	EventSkillUpdated = "skill:updated"
 	EventSkillDeleted = "skill:deleted"
-
-	// Chat events
-	EventChatMessage        = "chat:message"
-	EventChatDone           = "chat:done"
-	EventChatSessionRead    = "chat:session_read"
-	EventChatSessionDeleted = "chat:session_deleted"
-	EventChatSessionUpdated = "chat:session_updated"
 
 	// Feature events
 	EventFeatureCreated         = "feature:created"
@@ -99,11 +84,6 @@ const (
 	EventAutopilotDeleted  = "autopilot:deleted"
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
-
-	// Squad events
-	EventSquadCreated = "squad:created"
-	EventSquadUpdated = "squad:updated"
-	EventSquadDeleted = "squad:deleted"
 
 	// Daemon events
 	EventDaemonHeartbeat     = "daemon:heartbeat"

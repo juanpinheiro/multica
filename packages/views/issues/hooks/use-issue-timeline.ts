@@ -1,15 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   useQuery,
   useQueryClient,
-  useMutationState,
 } from "@tanstack/react-query";
 import type {
   Comment,
   TimelineEntry,
-  Reaction,
 } from "@multica/core/types";
 import type {
   CommentCreatedPayload,
@@ -18,8 +16,6 @@ import type {
   CommentResolvedPayload,
   CommentUnresolvedPayload,
   ActivityCreatedPayload,
-  ReactionAddedPayload,
-  ReactionRemovedPayload,
 } from "@multica/core/types";
 import {
   issueTimelineOptions,
@@ -30,8 +26,6 @@ import {
   useUpdateComment,
   useDeleteComment,
   useResolveComment,
-  useToggleCommentReaction,
-  type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
@@ -51,7 +45,6 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
     created_at: c.created_at,
     updated_at: c.updated_at,
     comment_type: c.type,
-    reactions: c.reactions ?? [],
     attachments: c.attachments ?? [],
     resolved_at: c.resolved_at,
     resolved_by_type: c.resolved_by_type,
@@ -79,7 +72,6 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   const { mutateAsync: updateComment } = useUpdateComment(issueId);
   const { mutateAsync: deleteCommentAsync } = useDeleteComment(issueId);
   const { mutateAsync: resolveCommentAsync } = useResolveComment(issueId);
-  const { mutate: toggleCommentReaction } = useToggleCommentReaction(issueId);
 
   // Reconnect recovery: invalidate so the next render refetches the full
   // timeline. Cheaper than diffing across a possibly-long disconnect.
@@ -212,52 +204,6 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     ),
   );
 
-  useWSEvent(
-    "reaction:added",
-    useCallback(
-      (payload: unknown) => {
-        const { reaction, issue_id } = payload as ReactionAddedPayload;
-        if (issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
-          old?.map((e) => {
-            if (e.id !== reaction.comment_id) return e;
-            const existing = e.reactions ?? [];
-            if (existing.some((r) => r.id === reaction.id)) return e;
-            return { ...e, reactions: [...existing, reaction] };
-          }),
-        );
-      },
-      [qc, issueId],
-    ),
-  );
-
-  useWSEvent(
-    "reaction:removed",
-    useCallback(
-      (payload: unknown) => {
-        const p = payload as ReactionRemovedPayload;
-        if (p.issue_id !== issueId) return;
-        qc.setQueryData<TLCache>(issueKeys.timeline(issueId), (old) =>
-          old?.map((e) => {
-            if (e.id !== p.comment_id) return e;
-            return {
-              ...e,
-              reactions: (e.reactions ?? []).filter(
-                (r) =>
-                  !(
-                    r.emoji === p.emoji &&
-                    r.actor_type === p.actor_type &&
-                    r.actor_id === p.actor_id
-                  ),
-              ),
-            };
-          }),
-        );
-      },
-      [qc, issueId],
-    ),
-  );
-
   // --- Mutation functions ---
 
   const submitComment = useCallback(
@@ -347,85 +293,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     [resolveCommentAsync, t],
   );
 
-  // --- Optimistic UI for comment reactions ---
-  // Derive at render time from pending mutation variables instead of writing
-  // temp data into the cache (which would race with WS events).
-
-  const pendingReactionVars = useMutationState({
-    filters: {
-      mutationKey: ["toggleCommentReaction", issueId],
-      status: "pending",
-    },
-    select: (m) =>
-      m.state.variables as ToggleCommentReactionVars | undefined,
-  });
-
-  const optimisticTimeline = useMemo(() => {
-    if (pendingReactionVars.length === 0) return timeline;
-
-    return timeline.map((entry) => {
-      const pendingForEntry = pendingReactionVars.filter(
-        (v) => v && v.commentId === entry.id,
-      );
-      if (pendingForEntry.length === 0) return entry;
-
-      let reactions = entry.reactions ?? [];
-      for (const vars of pendingForEntry) {
-        if (!vars) continue;
-        if (vars.existing) {
-          reactions = reactions.filter((r) => r.id !== vars.existing!.id);
-        } else {
-          const alreadyExists = reactions.some(
-            (r) =>
-              r.emoji === vars.emoji &&
-              r.actor_type === "member" &&
-              r.actor_id === userId,
-          );
-          if (!alreadyExists) {
-            reactions = [
-              ...reactions,
-              {
-                id: `optimistic-${vars.emoji}`,
-                comment_id: vars.commentId,
-                actor_type: "member",
-                actor_id: userId ?? "",
-                emoji: vars.emoji,
-                created_at: "",
-              },
-            ];
-          }
-        }
-      }
-      return { ...entry, reactions };
-    });
-  }, [timeline, pendingReactionVars, userId]);
-
-  // toggleReaction reads from a ref so its identity does not change with
-  // every WS event. Without this every memoized CommentCard down-tree would
-  // re-render on each timeline mutation, defeating the React.memo cost
-  // savings on long timelines (#1968).
-  const timelineRef = useRef(timeline);
-  useEffect(() => {
-    timelineRef.current = timeline;
-  }, [timeline]);
-
-  const toggleReaction = useCallback(
-    async (commentId: string, emoji: string) => {
-      if (!userId) return;
-      const entry = timelineRef.current.find((e) => e.id === commentId);
-      const existing: Reaction | undefined = (entry?.reactions ?? []).find(
-        (r) =>
-          r.emoji === emoji &&
-          r.actor_type === "member" &&
-          r.actor_id === userId,
-      );
-      toggleCommentReaction({ commentId, emoji, existing });
-    },
-    [userId, toggleCommentReaction],
-  );
-
   return {
-    timeline: optimisticTimeline,
+    timeline,
     loading,
     submitting,
     submitComment,
@@ -433,6 +302,5 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     editComment,
     deleteComment,
     toggleResolveComment,
-    toggleReaction,
   };
 }

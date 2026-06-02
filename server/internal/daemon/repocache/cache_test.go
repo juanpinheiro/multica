@@ -696,8 +696,174 @@ func TestCreateWorktreeWithUnknownRequestedRef(t *testing.T) {
 	}
 }
 
+// TestWorktreeFeatureFallback: a not-yet-created
+// shared feature branch (feature/<slug>) must NOT fail the checkout — it bases
+// the worktree on the remote default branch so the first Run of an Initiative
+// starts autonomously and creates the branch on its first push.
+func TestWorktreeFeatureFallback(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	defaultHead := gitHead(t, sourceRepo)
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "feature/brand-new",
+		AgentName:   "TodoBuilder",
+		TaskID:      "feature-bootstrap-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree should fall back to default branch for a missing feature/* ref, got: %v", err)
+	}
+	if got := gitHead(t, result.Path); got != defaultHead {
+		t.Fatalf("worktree HEAD = %s, want default branch head %s", got, defaultHead)
+	}
+}
+
+// TestCreateWorktreeSharedFeatureBranchFirstRun: the first Run of an Initiative
+// (no remote feature/<slug> yet) must check the worktree out directly on the
+// shared feature branch — NOT a per-task agent/* branch — based on the remote
+// default branch, so the agent's first push creates and lands on feature/<slug>.
+func TestCreateWorktreeSharedFeatureBranchFirstRun(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	defaultHead := gitHead(t, sourceRepo)
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "feature/brand-new",
+		AgentName:   "TodoBuilder",
+		TaskID:      "first-run-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if result.BranchName != "feature/brand-new" {
+		t.Errorf("BranchName = %q, want feature/brand-new (no per-task agent/* branch)", result.BranchName)
+	}
+	if got := currentBranch(t, result.Path); got != "feature/brand-new" {
+		t.Errorf("worktree on branch %q, want feature/brand-new", got)
+	}
+	if got := gitHead(t, result.Path); got != defaultHead {
+		t.Errorf("first-run shared branch HEAD = %s, want default head %s", got, defaultHead)
+	}
+}
+
+// TestCreateWorktreeSharedFeatureBranchExistingRemote: a subsequent Run, where
+// origin/feature/<slug> already exists, must reset the worktree's shared branch
+// to the remote head and track it directly so a plain `git push` lands on the
+// shared branch — no agent/* branch, no agent → feature self-merge.
+func TestCreateWorktreeSharedFeatureBranchExistingRemote(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	defaultHead := gitHead(t, sourceRepo)
+
+	runGitAuthored(t, sourceRepo, "checkout", "-b", "feature/todo-v3")
+	addEmptyCommit(t, sourceRepo, "feature work")
+	featureHead := gitHead(t, sourceRepo)
+	if featureHead == defaultHead {
+		t.Fatal("test setup: feature branch did not advance")
+	}
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "feature/todo-v3",
+		AgentName:   "TodoBuilder",
+		TaskID:      "subsequent-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if result.BranchName != "feature/todo-v3" {
+		t.Errorf("BranchName = %q, want feature/todo-v3 (no per-task agent/* branch)", result.BranchName)
+	}
+	if got := currentBranch(t, result.Path); got != "feature/todo-v3" {
+		t.Errorf("worktree on branch %q, want feature/todo-v3", got)
+	}
+	if got := gitHead(t, result.Path); got != featureHead {
+		t.Errorf("worktree HEAD = %s, want feature branch head %s", got, featureHead)
+	}
+	if got := upstreamOf(t, result.Path, "feature/todo-v3"); got != "origin/feature/todo-v3" {
+		t.Errorf("upstream = %q, want origin/feature/todo-v3 (branch must track the shared branch directly)", got)
+	}
+}
+
+// TestCreateWorktreeNonFeatureRefKeepsAgentBranch: a non-shared ref (anything
+// not under feature/*) must keep the isolated per-task agent/* branch — the
+// single-issue / standalone-issue path is unchanged.
+func TestCreateWorktreeNonFeatureRefKeepsAgentBranch(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	runGitAuthored(t, sourceRepo, "checkout", "-b", "review-branch")
+	addEmptyCommit(t, sourceRepo, "review work")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		Ref:         "review-branch",
+		AgentName:   "Reviewer",
+		TaskID:      "non-feature-task-id",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if !strings.HasPrefix(result.BranchName, "agent/reviewer/") {
+		t.Errorf("BranchName = %q, want agent/reviewer/* (isolated per-task branch)", result.BranchName)
+	}
+}
+
 func trimLine(s string) string {
 	return strings.TrimSpace(s)
+}
+
+// currentBranch returns the checked-out branch name of the worktree at repoPath.
+func currentBranch(t *testing.T, repoPath string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repoPath, "branch", "--show-current").Output()
+	if err != nil {
+		t.Fatalf("git branch --show-current in %s: %v", repoPath, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// upstreamOf returns the configured upstream (e.g. "origin/feature/x") of branch
+// in repoPath, or "" when no upstream is set.
+func upstreamOf(t *testing.T, repoPath, branch string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", branch+"@{upstream}").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // gitRefCommit resolves a git ref to its commit SHA in repoPath.

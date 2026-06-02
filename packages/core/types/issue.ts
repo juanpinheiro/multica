@@ -11,16 +11,8 @@ export type IssueStatus =
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
-export type IssueAssigneeType = "member" | "agent" | "squad";
-
-export interface IssueReaction {
-  id: string;
-  issue_id: string;
-  actor_type: string;
-  actor_id: string;
-  emoji: string;
-  created_at: string;
-}
+export type IssueAssigneeType = "agent";
+export type IssueActorType = "member" | "agent";
 
 /**
  * Per-issue metadata is a flat KV map agents use to record pipeline state
@@ -43,15 +35,17 @@ export interface Issue {
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;
-  creator_type: IssueAssigneeType;
+  creator_type: IssueActorType;
   creator_id: string;
   parent_issue_id: string | null;
   feature_id: string | null;
+  // The Milestone this Issue belongs to within its Initiative (ADR-0002).
+  // Optional until the milestone table and its wiring land in issue 07.
+  milestone_id?: string | null;
   position: number;
   start_date: string | null;
   due_date: string | null;
   metadata: IssueMetadata;
-  reactions?: IssueReaction[];
   labels?: Label[];
   created_at: string;
   updated_at: string;

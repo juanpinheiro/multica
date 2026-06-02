@@ -2,7 +2,6 @@ import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
-  Issue,
   IssueStatus,
   ListGroupedIssuesParams,
   ListIssuesParams,
@@ -26,21 +25,6 @@ export const issueKeys = {
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
     [...issueKeys.assigneeGroupsAll(wsId), filter] as const,
-  /** All "my issues" queries — use for bulk invalidation. */
-  myAll: (wsId: string) => [...issueKeys.all(wsId), "my"] as const,
-  /** PREFIX for per-scope invalidation — no sort. */
-  myList: (wsId: string, scope: string, filter: MyIssuesFilter) =>
-    [...issueKeys.myAll(wsId), scope, filter] as const,
-  /** FULL KEY for queryOptions — includes sort. */
-  myListSorted: (wsId: string, scope: string, filter: MyIssuesFilter, sort?: IssueSortParam) =>
-    [...issueKeys.myList(wsId, scope, filter), sort ?? {}] as const,
-  myAssigneeGroupsAll: (wsId: string) =>
-    [...issueKeys.myAll(wsId), "assignee-groups"] as const,
-  myAssigneeGroups: (
-    wsId: string,
-    scope: string,
-    filter: AssigneeGroupedIssuesFilter,
-  ) => [...issueKeys.myAssigneeGroupsAll(wsId), scope, filter] as const,
   /** All Feature Gantt queries — prefix-match key for cross-project invalidation. */
   featureGanttAll: (wsId: string) =>
     [...issueKeys.all(wsId), "feature-gantt"] as const,
@@ -61,9 +45,6 @@ export const issueKeys = {
   /** Full-issue timeline (single TanStack Query, no cursor). */
   timeline: (issueId: string) =>
     ["issues", "timeline", issueId] as const,
-  reactions: (issueId: string) => ["issues", "reactions", issueId] as const,
-  subscribers: (issueId: string) =>
-    ["issues", "subscribers", issueId] as const,
   usage: (issueId: string) => ["issues", "usage", issueId] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
@@ -76,11 +57,6 @@ export const issueKeys = {
    *  every per-issue list, regardless of which issue is currently mounted. */
   tasksAll: () => ["issues", "tasks"] as const,
 };
-
-export type MyIssuesFilter = Pick<
-  ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "feature_id" | "involves_user_id"
->;
 
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
@@ -103,7 +79,7 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
   return out;
 }
 
-async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
+async function fetchFirstPages(filter: Pick<ListIssuesParams, "assignee_id" | "assignee_ids" | "creator_id" | "feature_id"> = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const responses = await Promise.all(
     PAGINATED_STATUSES.map((status) =>
       api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
@@ -118,104 +94,6 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
 }
 
 /**
- * "All my issues" — union of three server filters:
- *   assignee_id=me OR creator_id=me OR involves_user_id=me
- *
- * The backend has no OR-across-user-filters today, so we run the three
- * existing single-filter fetches in parallel and dedupe on the client by
- * issue id within each status bucket. Order within each bucket preserves
- * the first-seen position (each sub-fetch is already server-sorted).
- *
- * Personal lists are bounded (tens to a few hundred issues across all
- * three relations), so 3× the request count is acceptable — a single
- * fetchFirstPages already runs 7 status fetches in parallel, so the total
- * here is 21 small parallel requests. Easy enough; no need to add a new
- * backend query just for this scope.
- *
- * `total` per bucket is set to the merged length, not the true server
- * total — pagination on the "All" scope is out of scope; the first
- * 50-per-status × 3 widening (deduped) is what the page renders.
- */
-async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
-  const [byAssignee, byCreator, byInvolves] = await Promise.all([
-    fetchFirstPages({ assignee_id: userId }, sort),
-    fetchFirstPages({ creator_id: userId }, sort),
-    fetchFirstPages({ involves_user_id: userId }, sort),
-  ]);
-  const byStatus: ListIssuesCache["byStatus"] = {};
-  for (const status of PAGINATED_STATUSES) {
-    const seen = new Set<string>();
-    const merged: Issue[] = [];
-    for (const cache of [byAssignee, byCreator, byInvolves]) {
-      const bucket = cache.byStatus[status];
-      if (!bucket) continue;
-      for (const issue of bucket.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        merged.push(issue);
-      }
-    }
-    byStatus[status] = { issues: merged, total: merged.length };
-  }
-  return { byStatus };
-}
-
-/**
- * Sibling of {@link fetchAllMyFirstPages} for the assignee-grouped board
- * view. Runs the three single-filter grouped queries in parallel and
- * merges groups by (assignee_type, assignee_id), deduping issues within
- * each group. Extra filters from the page (statuses, priorities, etc.)
- * pass through unchanged.
- */
-async function fetchAllMyAssigneeGroups(
-  userId: string,
-  filter: AssigneeGroupedIssuesFilter,
-  sort?: IssueSortParam,
-): Promise<GroupedIssuesResponse> {
-  const variants: AssigneeGroupedIssuesFilter[] = [
-    { ...filter, assignee_id: userId },
-    { ...filter, creator_id: userId },
-    { ...filter, involves_user_id: userId },
-  ];
-  const responses = await Promise.all(
-    variants.map((f) =>
-      api.listGroupedIssues({
-        group_by: "assignee",
-        limit: ISSUE_PAGE_SIZE,
-        offset: 0,
-        ...sort,
-        ...f,
-      }),
-    ),
-  );
-  const groupKey = (g: GroupedIssuesResponse["groups"][number]) =>
-    `${g.assignee_type ?? "_"}::${g.assignee_id ?? "_"}`;
-  const merged = new Map<string, GroupedIssuesResponse["groups"][number]>();
-  for (const res of responses) {
-    for (const group of res.groups) {
-      const key = groupKey(group);
-      const existing = merged.get(key);
-      if (!existing) {
-        merged.set(key, {
-          ...group,
-          issues: [...group.issues],
-          total: group.issues.length,
-        });
-        continue;
-      }
-      const seen = new Set(existing.issues.map((i) => i.id));
-      for (const issue of group.issues) {
-        if (seen.has(issue.id)) continue;
-        seen.add(issue.id);
-        existing.issues.push(issue);
-      }
-      existing.total = existing.issues.length;
-    }
-  }
-  return { groups: [...merged.values()] };
-}
-
-/**
  * CACHE SHAPE NOTE: The raw cache stores {@link ListIssuesCache} (buckets keyed
  * by status, each with `{ issues, total }`), and `select` flattens it to
  * `Issue[]` for consumers. Mutations and ws-updaters must use
@@ -224,10 +102,38 @@ async function fetchAllMyAssigneeGroups(
  * Fetches the first page of each paginated status in parallel. Use
  * {@link useLoadMoreByStatus} to paginate a specific status into the cache.
  */
+export type ActorIssueFilter = {
+  assignee_id?: string;
+  creator_id?: string;
+};
+
+export function actorIssueListOptions(
+  wsId: string,
+  scope: string,
+  filter: ActorIssueFilter,
+  sort?: IssueSortParam,
+) {
+  return queryOptions({
+    queryKey: [...issueKeys.list(wsId), "actor", scope, filter, sort ?? {}] as const,
+    queryFn: () => fetchFirstPages(filter, sort),
+    select: flattenIssueBuckets,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function issueListOptions(wsId: string, sort?: IssueSortParam) {
   return queryOptions({
     queryKey: issueKeys.listSorted(wsId, sort),
     queryFn: () => fetchFirstPages({}, sort),
+    select: flattenIssueBuckets,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function featureIssueListOptions(wsId: string, featureId: string) {
+  return queryOptions({
+    queryKey: [...issueKeys.list(wsId), "feature", featureId] as const,
+    queryFn: () => fetchFirstPages({ feature_id: featureId }),
     select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
   });
@@ -248,32 +154,6 @@ export function issueAssigneeGroupsOptions(
         ...sort,
         ...filter,
       }),
-    placeholderData: keepPreviousData,
-  });
-}
-
-/**
- * Server-filtered issue list for the My Issues page.
- * Each scope gets its own cache entry so switching tabs is instant after first load.
- */
-export function myIssueListOptions(
-  wsId: string,
-  scope: string,
-  filter: MyIssuesFilter,
-  // Required when scope === "all" — the user id whose three relations
-  // (assignee, creator, agents+squads) we union over. For every other
-  // scope the filter object already carries the relevant id and userId
-  // is ignored.
-  userId?: string,
-  sort?: IssueSortParam,
-) {
-  return queryOptions({
-    queryKey: issueKeys.myListSorted(wsId, scope, filter, sort),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyFirstPages(userId, sort)
-        : fetchFirstPages(filter, sort),
-    select: flattenIssueBuckets,
     placeholderData: keepPreviousData,
   });
 }
@@ -331,31 +211,6 @@ export function featureGanttIssuesOptions(wsId: string, featureId: string) {
   });
 }
 
-export function myIssueAssigneeGroupsOptions(
-  wsId: string,
-  scope: string,
-  filter: AssigneeGroupedIssuesFilter,
-  // See myIssueListOptions for the userId contract — only consulted when
-  // scope === "all", and powers the 3-fetch grouped union.
-  userId?: string,
-  sort?: IssueSortParam,
-) {
-  return queryOptions<GroupedIssuesResponse>({
-    queryKey: issueKeys.myAssigneeGroups(wsId, scope, { ...filter, ...sort }),
-    queryFn: () =>
-      scope === "all" && userId
-        ? fetchAllMyAssigneeGroups(userId, filter, sort)
-        : api.listGroupedIssues({
-            group_by: "assignee",
-            limit: ISSUE_PAGE_SIZE,
-            offset: 0,
-            ...sort,
-            ...filter,
-          }),
-    placeholderData: keepPreviousData,
-  });
-}
-
 export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
@@ -395,23 +250,6 @@ export function issueTimelineOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.timeline(issueId),
     queryFn: () => api.listTimeline(issueId),
-  });
-}
-
-export function issueReactionsOptions(issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.reactions(issueId),
-    queryFn: async () => {
-      const issue = await api.getIssue(issueId);
-      return issue.reactions ?? [];
-    },
-  });
-}
-
-export function issueSubscribersOptions(issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.subscribers(issueId),
-    queryFn: () => api.listIssueSubscribers(issueId),
   });
 }
 

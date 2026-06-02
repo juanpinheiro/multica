@@ -1,8 +1,16 @@
 import type { IssueStatus, IssuePriority } from "./issue";
+import type { InitiativeStatus } from "../initiative/status";
 
-export type FeatureStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
+// A Feature is the persisted shape of an Initiative (ADR-0002); its status is
+// the Initiative lifecycle state. The `FeatureStatus` alias is kept while the
+// `feature` table name and API surface remain.
+export type FeatureStatus = InitiativeStatus;
 
 export type FeaturePriority = "urgent" | "high" | "medium" | "low" | "none";
+
+// Mode is the planning-time autonomy choice for an Initiative (ADR-0005): AFK is
+// one big autonomous PR, HITL is several reviewed PRs.
+export type InitiativeMode = "hitl" | "afk";
 
 export interface Feature {
   id: string;
@@ -15,6 +23,13 @@ export interface Feature {
   lead_type: "member" | "agent" | null;
   lead_id: string | null;
   branch_slug: string | null;
+  // Mode + the budget/failure-tolerance fields feed the Tripwire/Budget safety
+  // net (ADR-0005). A zero budget means "no cap" for that dimension.
+  mode: InitiativeMode;
+  budget_tokens: number;
+  budget_runs: number;
+  budget_seconds: number;
+  failure_tolerance: number;
   created_at: string;
   updated_at: string;
   issue_count: number;

@@ -66,11 +66,11 @@ export interface AgentTask {
   id: string;
   agent_id: string;
   runtime_id: string;
-  // Empty string ("") when the task has no linked issue — either chat- or
-  // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
-  // which source produced it.
+  // Empty string ("") when the task has no linked issue — autopilot-spawned.
   issue_id: string;
   status: "queued" | "dispatched" | "running" | "completed" | "failed" | "cancelled" | "waiting_local_directory";
+  /** A Run is a worker (implements an Issue) or a validator (checks a Milestone's DoD). ADR-0002. */
+  role?: "worker" | "validator";
   priority: number;
   dispatched_at: string | null;
   started_at: string | null;
@@ -81,8 +81,6 @@ export interface AgentTask {
   // `omitempty`, so the field may also be missing on non-failed tasks).
   failure_reason?: TaskFailureReason | "";
   created_at: string;
-  /** Non-empty when the task was spawned from a chat session. */
-  chat_session_id?: string;
   /** Non-empty when the task was spawned by an autopilot run. */
   autopilot_run_id?: string;
   /** Set when this task was created as an auto-retry of a parent task. */
@@ -95,17 +93,12 @@ export interface AgentTask {
    * Canonical short description of what triggered this task — snapshot
    * taken at creation time. For comment-triggered tasks it's the
    * comment text (truncated to ~200 chars); for autopilot it's the
-   * autopilot title; NULL for direct assignments and chat tasks.
-   * Persists even if the source comment / autopilot is later edited
-   * or deleted.
+   * autopilot title; NULL for direct assignments.
+   * Persists even if the source comment / autopilot is later edited or deleted.
    */
   trigger_summary?: string;
-  /**
-   * Server-computed source discriminator used by the activity row to label
-   * tasks that have no linked issue (so e.g. quick-create tasks render
-   * with a meaningful title instead of falling through to "Untracked").
-   */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  /** Server-computed source discriminator. */
+  kind?: "comment" | "autopilot" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts).

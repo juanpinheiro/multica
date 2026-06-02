@@ -388,86 +388,6 @@ func TestBuildPromptCommentTriggeredNoContent(t *testing.T) {
 	}
 }
 
-// TestBuildPromptSquadLeaderNoActionProhibition verifies that when a squad
-// leader is triggered by another agent's comment, the per-turn prompt
-// explicitly forbids posting a comment whose only purpose is to announce
-// no_action or "exiting silently". This is the fix for MUL-2168.
-func TestBuildPromptSquadLeaderNoActionProhibition(t *testing.T) {
-	t.Parallel()
-
-	prompt := BuildPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Progress update: tests passing.",
-		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "Worker",
-		Agent: &AgentData{
-			Name:         "Leader",
-			Instructions: "You lead the team.\n\n## Squad Operating Protocol\n\nYou are the LEADER.",
-		},
-	}, "claude")
-
-	for _, want := range []string{
-		"Squad leader no_action rule",
-		"DO NOT post any comment",
-		"multica squad activity",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("squad leader prompt missing %q\n---\n%s", want, prompt)
-		}
-	}
-
-	// Non-squad-leader agent should NOT get the squad leader rule.
-	nonLeaderPrompt := BuildPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Progress update: tests passing.",
-		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "Worker",
-		Agent: &AgentData{
-			Name:         "Regular",
-			Instructions: "You are a regular agent.",
-		},
-	}, "claude")
-
-	if strings.Contains(nonLeaderPrompt, "Squad leader no_action rule") {
-		t.Fatalf("non-squad-leader prompt should NOT contain squad leader rule\n---\n%s", nonLeaderPrompt)
-	}
-}
-
-func TestBuildPromptQuickCreate_WithParent(t *testing.T) {
-	t.Parallel()
-
-	parentID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	prompt := BuildPrompt(Task{
-		QuickCreatePrompt:        "create a sub-task for the login page",
-		QuickCreateParentIssueID: parentID,
-		Agent:                    &AgentData{ID: "agent-1", Name: "TestAgent"},
-	}, "claude")
-
-	if !strings.Contains(prompt, "--parent") {
-		t.Fatalf("prompt missing --parent flag:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, parentID) {
-		t.Fatalf("prompt missing parent issue UUID %q:\n%s", parentID, prompt)
-	}
-}
-
-func TestBuildPromptQuickCreate_WithoutParent(t *testing.T) {
-	t.Parallel()
-
-	prompt := BuildPrompt(Task{
-		QuickCreatePrompt: "create a top-level issue",
-		Agent:             &AgentData{ID: "agent-1", Name: "TestAgent"},
-	}, "claude")
-
-	if strings.Contains(prompt, "--parent") {
-		t.Fatalf("prompt should not contain --parent when no parent set:\n%s", prompt)
-	}
-	if !strings.Contains(prompt, "omit") {
-		t.Fatalf("prompt should say parent is omitted when no parent set:\n%s", prompt)
-	}
-}
 
 func TestIsWorkspaceNotFoundError(t *testing.T) {
 	t.Parallel()
@@ -1722,7 +1642,7 @@ func TestReportTaskResult_NonCompletedHitsFailEndpoint(t *testing.T) {
 				t.Errorf("failure_reason: got %v, want %q", got, tc.wantFailureReason)
 			}
 			if rec.payload["session_id"] != "ses-x" {
-				t.Errorf("session_id should be forwarded on failure paths so chat resume keeps working, got %v", rec.payload["session_id"])
+				t.Errorf("session_id should be forwarded on failure paths for resume, got %v", rec.payload["session_id"])
 			}
 		})
 	}

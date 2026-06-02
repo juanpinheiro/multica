@@ -94,7 +94,7 @@ describe("useLoadMoreByStatus", () => {
     });
 
     const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, sort),
+      () => useLoadMoreByStatus("todo", sort),
       { wrapper: createWrapper(qc) },
     );
 
@@ -142,7 +142,7 @@ describe("useLoadMoreByStatus", () => {
     });
 
     const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, activeSort),
+      () => useLoadMoreByStatus("todo", activeSort),
       { wrapper: createWrapper(qc) },
     );
 
@@ -168,66 +168,8 @@ describe("useLoadMoreByStatus", () => {
     expect(stale?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-99"]);
   });
 
-  it("targets the myList scoped cache when myIssues is provided", async () => {
-    const sort: IssueSortParam = { sort_by: "title", sort_direction: "asc" };
-    const myIssues = { scope: "assigned", filter: { assignee_id: "user-1" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, sort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { in_progress: { issues: [makeIssue(1, { status: "in_progress" })], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2, { status: "in_progress" })],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("in_progress", myIssues, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "in_progress",
-      limit: 50,
-      offset: 1,
-      sort_by: "title",
-      sort_direction: "asc",
-      assignee_id: "user-1",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.in_progress?.issues).toHaveLength(2);
-  });
-
-  it("works with no sort (matches the {} key used by sort-less callers)", async () => {
-    const myIssues = { scope: "actor", filter: { assignee_id: "user-2" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, undefined);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({ issues: [makeIssue(2)], total: 2 });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", myIssues),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.total).toBe(2);
-    expect(result.current.hasMore).toBe(true);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues).toHaveLength(2);
-  });
 });
+
 
 describe("useLoadMoreByAssigneeGroup", () => {
   let qc: QueryClient;
@@ -252,10 +194,10 @@ describe("useLoadMoreByAssigneeGroup", () => {
     const seed: GroupedIssuesResponse = {
       groups: [
         {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(1, { assignee_type: "member", assignee_id: "user-1" })],
+          id: "assignee:agent:agent-1",
+          assignee_type: "agent",
+          assignee_id: "agent-1",
+          issues: [makeIssue(1, { assignee_type: "agent", assignee_id: "agent-1" })],
           total: 2,
         },
       ],
@@ -265,10 +207,10 @@ describe("useLoadMoreByAssigneeGroup", () => {
     listGroupedIssues.mockResolvedValue({
       groups: [
         {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(2, { assignee_type: "member", assignee_id: "user-1" })],
+          id: "assignee:agent:agent-1",
+          assignee_type: "agent",
+          assignee_id: "agent-1",
+          issues: [makeIssue(2, { assignee_type: "agent", assignee_id: "agent-1" })],
           total: 2,
         },
       ],
@@ -278,9 +220,9 @@ describe("useLoadMoreByAssigneeGroup", () => {
       () =>
         useLoadMoreByAssigneeGroup(
           {
-            id: "assignee:member:user-1",
-            assignee_type: "member",
-            assignee_id: "user-1",
+            id: "assignee:agent:agent-1",
+            assignee_type: "agent",
+            assignee_id: "agent-1",
           },
           queryKey,
           { statuses: ["todo"] },
@@ -303,8 +245,8 @@ describe("useLoadMoreByAssigneeGroup", () => {
       sort_by: "priority",
       sort_direction: "desc",
       statuses: ["todo"],
-      group_assignee_type: "member",
-      group_assignee_id: "user-1",
+      group_assignee_type: "agent",
+      group_assignee_id: "agent-1",
     });
 
     const updated = qc.getQueryData<GroupedIssuesResponse>(queryKey);
@@ -325,8 +267,6 @@ function makeAttachment(id: string): Attachment {
     workspace_id: WS_ID,
     issue_id: "issue-1",
     comment_id: "comment-1",
-    chat_session_id: null,
-    chat_message_id: null,
     uploader_type: "member",
     uploader_id: "user-1",
     filename: `${id}.txt`,

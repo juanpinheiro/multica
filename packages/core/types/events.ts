@@ -1,7 +1,7 @@
-import type { Issue, IssueMetadata, IssueReaction } from "./issue";
+import type { Issue, IssueMetadata } from "./issue";
 import type { Agent } from "./agent";
 import type { InboxItem } from "./inbox";
-import type { Comment, Reaction } from "./comment";
+import type { Comment } from "./comment";
 import type { TimelineEntry } from "./activity";
 import type { Workspace } from "./workspace";
 import type { Feature } from "./feature";
@@ -40,18 +40,7 @@ export type WSEventType =
   | "skill:created"
   | "skill:updated"
   | "skill:deleted"
-  | "subscriber:added"
-  | "subscriber:removed"
   | "activity:created"
-  | "reaction:added"
-  | "reaction:removed"
-  | "issue_reaction:added"
-  | "issue_reaction:removed"
-  | "chat:message"
-  | "chat:done"
-  | "chat:session_read"
-  | "chat:session_deleted"
-  | "chat:session_updated"
   | "feature:created"
   | "feature:updated"
   | "feature:deleted"
@@ -170,19 +159,6 @@ export interface WorkspaceDeletedPayload {
   workspace_id: string;
 }
 
-export interface SubscriberAddedPayload {
-  issue_id: string;
-  user_type: string;
-  user_id: string;
-  reason: string;
-}
-
-export interface SubscriberRemovedPayload {
-  issue_id: string;
-  user_type: string;
-  user_id: string;
-}
-
 export interface ActivityCreatedPayload {
   issue_id: string;
   entry: TimelineEntry;
@@ -191,7 +167,6 @@ export interface ActivityCreatedPayload {
 export interface TaskMessagePayload {
   task_id: string;
   issue_id: string;
-  chat_session_id?: string;
   seq: number;
   type: "text" | "thinking" | "tool_use" | "tool_result" | "error";
   tool?: string;
@@ -204,7 +179,6 @@ export interface TaskQueuedPayload {
   task_id: string;
   agent_id: string;
   issue_id: string;
-  chat_session_id?: string;
   status: string;
 }
 
@@ -213,14 +187,12 @@ export interface TaskDispatchPayload {
   agent_id: string;
   issue_id: string;
   runtime_id: string;
-  chat_session_id?: string;
 }
 
 export interface TaskCompletedPayload {
   task_id: string;
   agent_id: string;
   issue_id: string;
-  chat_session_id?: string;
   status: string;
 }
 
@@ -228,7 +200,6 @@ export interface TaskFailedPayload {
   task_id: string;
   agent_id: string;
   issue_id: string;
-  chat_session_id?: string;
   status: string;
 }
 
@@ -236,65 +207,7 @@ export interface TaskCancelledPayload {
   task_id: string;
   agent_id: string;
   issue_id: string;
-  chat_session_id?: string;
   status: string;
-}
-
-export interface ReactionAddedPayload {
-  reaction: Reaction;
-  issue_id: string;
-}
-
-export interface ReactionRemovedPayload {
-  comment_id: string;
-  issue_id: string;
-  emoji: string;
-  actor_type: string;
-  actor_id: string;
-}
-
-export interface IssueReactionAddedPayload {
-  reaction: IssueReaction;
-  issue_id: string;
-}
-
-export interface IssueReactionRemovedPayload {
-  issue_id: string;
-  emoji: string;
-  actor_type: string;
-  actor_id: string;
-}
-
-export interface ChatMessageEventPayload {
-  chat_session_id: string;
-  message_id: string;
-  role: "user" | "assistant";
-  content: string;
-  task_id?: string;
-  created_at: string;
-}
-
-export interface ChatDonePayload {
-  chat_session_id: string;
-  task_id: string;
-  /**
-   * Server populates these from the freshly-persisted assistant ChatMessage
-   * row so the WS handler can write it into the messages cache inline. Older
-   * servers (pre-#2123) only sent chat_session_id + task_id; treat every field
-   * below as optional and fall back to a refetch when absent.
-   */
-  message_id?: string;
-  content?: string;
-  elapsed_ms?: number;
-  created_at?: string;
-}
-
-export interface ChatSessionReadPayload {
-  chat_session_id: string;
-}
-
-export interface ChatSessionDeletedPayload {
-  chat_session_id: string;
 }
 
 export interface FeatureCreatedPayload {
@@ -327,15 +240,11 @@ export interface WSEventPayloadMap {
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
-  "issue_reaction:added": IssueReactionAddedPayload;
-  "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;
   "comment:updated": CommentUpdatedPayload;
   "comment:deleted": CommentDeletedPayload;
   "comment:resolved": CommentResolvedPayload;
   "comment:unresolved": CommentUnresolvedPayload;
-  "reaction:added": ReactionAddedPayload;
-  "reaction:removed": ReactionRemovedPayload;
   "agent:status": AgentStatusPayload;
   "agent:created": AgentCreatedPayload;
   "agent:archived": AgentArchivedPayload;
@@ -354,14 +263,7 @@ export interface WSEventPayloadMap {
   "inbox:batch-archived": InboxBatchArchivedPayload;
   "workspace:updated": WorkspaceUpdatedPayload;
   "workspace:deleted": WorkspaceDeletedPayload;
-  "subscriber:added": SubscriberAddedPayload;
-  "subscriber:removed": SubscriberRemovedPayload;
   "activity:created": ActivityCreatedPayload;
-  "chat:message": ChatMessageEventPayload;
-  "chat:done": ChatDonePayload;
-  "chat:session_read": ChatSessionReadPayload;
-  "chat:session_deleted": ChatSessionDeletedPayload;
-  "chat:session_updated": unknown;
   "feature:created": FeatureCreatedPayload;
   "feature:updated": FeatureUpdatedPayload;
   "feature:deleted": FeatureDeletedPayload;

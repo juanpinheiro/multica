@@ -109,15 +109,6 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
-  describe("listIssueSubscribers", () => {
-    it("returns [] when the response is null", async () => {
-      stubFetchJson(null);
-      const client = new ApiClient("https://api.example.test");
-      const subs = await client.listIssueSubscribers("issue-1");
-      expect(subs).toEqual([]);
-    });
-  });
-
   describe("listChildIssues", () => {
     it("returns { issues: [] } when the issues field is missing", async () => {
       stubFetchJson({});

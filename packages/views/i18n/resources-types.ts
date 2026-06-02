@@ -17,12 +17,10 @@ import type workspace from "../locales/en/workspace.json";
 import type features from "../locales/en/features.json";
 import type autopilots from "../locales/en/autopilots.json";
 import type skills from "../locales/en/skills.json";
-import type chat from "../locales/en/chat.json";
 import type modals from "../locales/en/modals.json";
 import type runtimes from "../locales/en/runtimes.json";
 import type layout from "../locales/en/layout.json";
 import type usage from "../locales/en/usage.json";
-import type squads from "../locales/en/squads.json";
 
 // Module augmentation enables i18next v26 selector API across the monorepo:
 // `t($ => $.common.field)` resolves to the value in en/common.json.
@@ -53,12 +51,10 @@ declare global {
     features: typeof features;
     autopilots: typeof autopilots;
     skills: typeof skills;
-    chat: typeof chat;
     modals: typeof modals;
     runtimes: typeof runtimes;
     layout: typeof layout;
     usage: typeof usage;
-    squads: typeof squads;
   }
 }
 

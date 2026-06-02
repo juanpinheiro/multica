@@ -150,6 +150,22 @@ func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
 func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
 
+// ptrToInt8 / ptrToInt4 convert an optional request field into a nullable
+// sqlc param: nil → invalid (so a COALESCE keeps the existing/default value).
+func ptrToInt8(v *int64) pgtype.Int8 {
+	if v == nil {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: *v, Valid: true}
+}
+
+func ptrToInt4(v *int32) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: *v, Valid: true}
+}
+
 // parseUUIDOrBadRequest validates a UUID string sourced from user input
 // (URL params, request body, headers). On invalid input it writes a 400
 // response and returns ok=false; callers must return immediately.
@@ -200,19 +216,6 @@ func (h *Handler) publishTask(eventType, workspaceID, actorType, actorID, taskID
 		ActorID:     actorID,
 		TaskID:      taskID,
 		Payload:     payload,
-	})
-}
-
-// publishChat is publish() plus a ChatSessionID hint so the realtime layer
-// can route the event to the per-chat-session scope.
-func (h *Handler) publishChat(eventType, workspaceID, actorType, actorID, chatSessionID string, payload any) {
-	h.Bus.Publish(events.Event{
-		Type:          eventType,
-		WorkspaceID:   workspaceID,
-		ActorType:     actorType,
-		ActorID:       actorID,
-		ChatSessionID: chatSessionID,
-		Payload:       payload,
 	})
 }
 

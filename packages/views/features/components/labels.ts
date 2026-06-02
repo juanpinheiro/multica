@@ -12,10 +12,12 @@ import { useT } from "../../i18n";
 export function useFeatureStatusLabels(): Record<FeatureStatus, string> {
   const { t } = useT("features");
   return {
-    planned: t(($) => $.status.planned),
-    in_progress: t(($) => $.status.in_progress),
-    paused: t(($) => $.status.paused),
-    completed: t(($) => $.status.completed),
+    draft: t(($) => $.status.draft),
+    ready: t(($) => $.status.ready),
+    running: t(($) => $.status.running),
+    in_review: t(($) => $.status.in_review),
+    done: t(($) => $.status.done),
+    blocked: t(($) => $.status.blocked),
     cancelled: t(($) => $.status.cancelled),
   };
 }

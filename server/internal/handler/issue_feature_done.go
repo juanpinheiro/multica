@@ -9,66 +9,33 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/initiative"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// notifyFeatureReadyForReview fires an inbox notification when the last
-// issue under a shared-branch feature transitions to done.
-//
-// Guards:
-//   - transition must be non-done → done (prev.Status != "done" and issue.Status == "done")
-//   - issue must belong to a feature (feature_id set)
-//   - feature must have a branch_slug (shared-branch model only)
-//   - no siblings may remain outside done status
-//
-// Errors are logged at warn and swallowed — this is a best-effort side-effect
-// on a successful status transition and must not roll back the caller.
-func (h *Handler) notifyFeatureReadyForReview(ctx context.Context, prev, issue db.Issue) {
-	if prev.Status == "done" || issue.Status != "done" {
-		return
-	}
-	if !issue.FeatureID.Valid {
-		return
-	}
-
-	feature, err := h.Queries.GetFeature(ctx, issue.FeatureID)
+// notifyInitiativeReadyForReview fires an inbox notification when the Orchestrator
+// advances an Initiative to in_review — all Milestones have passed their DoD.
+// Prompts the human to flip the consolidated PR from draft to ready-for-review.
+// Best-effort: errors are logged and swallowed.
+func (h *Handler) notifyInitiativeReadyForReview(ctx context.Context, featureID pgtype.UUID) {
+	feature, err := h.Queries.GetFeature(ctx, featureID)
 	if err != nil {
-		slog.Warn("feature ready: load feature failed",
-			"error", err,
-			"issue_id", uuidToString(issue.ID),
-			"feature_id", uuidToString(issue.FeatureID))
+		slog.Warn("feature ready: load feature failed", "feature_id", uuidToString(featureID), "error", err)
 		return
 	}
 	if !feature.BranchSlug.Valid || feature.BranchSlug.String == "" {
 		return
 	}
 
-	remaining, err := h.Queries.CountNonDoneFeatureSiblings(ctx, db.CountNonDoneFeatureSiblingsParams{
-		FeatureID: issue.FeatureID,
-		ID:        issue.ID,
-	})
-	if err != nil {
-		slog.Warn("feature ready: count siblings failed",
-			"error", err,
-			"feature_id", uuidToString(issue.FeatureID))
-		return
-	}
-	if remaining > 0 {
-		return
-	}
-
-	// Use the first workspace member as the recipient (singleton-user workspace).
-	members, err := h.Queries.ListMembers(ctx, issue.WorkspaceID)
+	members, err := h.Queries.ListMembers(ctx, feature.WorkspaceID)
 	if err != nil || len(members) == 0 {
 		slog.Warn("feature ready: load workspace member failed",
-			"error", err,
-			"workspace_id", uuidToString(issue.WorkspaceID))
+			"error", err, "workspace_id", uuidToString(feature.WorkspaceID))
 		return
 	}
-	member := members[0]
 
-	total, err := h.Queries.CountIssuesByFeature(ctx, issue.FeatureID)
+	total, err := h.Queries.CountIssuesByFeature(ctx, featureID)
 	if err != nil {
 		slog.Warn("feature ready: count total issues failed", "error", err)
 		total = 0
@@ -76,16 +43,16 @@ func (h *Handler) notifyFeatureReadyForReview(ctx context.Context, prev, issue d
 
 	body, prURL := h.buildFeatureReadyBody(ctx, feature, int(total))
 	details, _ := json.Marshal(map[string]any{
-		"feature_id":    uuidToString(feature.ID),
-		"branch_slug":   feature.BranchSlug.String,
-		"issues_done":   total,
-		"pr_url":        prURL,
+		"feature_id":  uuidToString(feature.ID),
+		"branch_slug": feature.BranchSlug.String,
+		"issues_done": total,
+		"pr_url":      prURL,
 	})
 
 	item, err := h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-		WorkspaceID:   issue.WorkspaceID,
+		WorkspaceID:   feature.WorkspaceID,
 		RecipientType: "member",
-		RecipientID:   member.ID,
+		RecipientID:   members[0].ID,
 		Type:          "feature_ready_for_review",
 		Severity:      "action_required",
 		IssueID:       pgtype.UUID{},
@@ -97,13 +64,25 @@ func (h *Handler) notifyFeatureReadyForReview(ctx context.Context, prev, issue d
 	})
 	if err != nil {
 		slog.Warn("feature ready: create inbox item failed",
-			"error", err,
-			"feature_id", uuidToString(feature.ID))
+			"error", err, "feature_id", uuidToString(featureID))
 		return
 	}
 
-	h.publish(protocol.EventInboxNew, uuidToString(issue.WorkspaceID), "system", "",
-		map[string]any{"item": featureReadyInboxItemToMap(item)})
+	h.publish(protocol.EventInboxNew, uuidToString(feature.WorkspaceID), "system", "",
+		map[string]any{"item": inboxItemToEventMap(item)})
+}
+
+// setFeatureStatus performs a validated Initiative status write. Best-effort:
+// errors are logged, not returned, since it runs as a side-effect of a committed
+// status transition.
+func (h *Handler) setFeatureStatus(ctx context.Context, featureID pgtype.UUID, status initiative.Status) {
+	if _, err := h.Queries.SetFeatureStatus(ctx, db.SetFeatureStatusParams{
+		ID:     featureID,
+		Status: string(status),
+	}); err != nil {
+		slog.Warn("set feature status failed",
+			"error", err, "feature_id", uuidToString(featureID), "status", status)
+	}
 }
 
 // buildFeatureReadyBody constructs the notification body. Returns (body, prURL)
@@ -126,9 +105,10 @@ func (h *Handler) buildFeatureReadyBody(ctx context.Context, feature db.Feature,
 	return fmt.Sprintf("All %d %s completed. No PR linked yet.", issueCount, word), ""
 }
 
-// featureReadyInboxItemToMap builds the wire-shape map for EventInboxNew,
-// mirroring the shape used by the notification_listeners path.
-func featureReadyInboxItemToMap(item db.InboxItem) map[string]any {
+// inboxItemToEventMap builds the wire-shape map for EventInboxNew, mirroring the
+// shape used by the notification_listeners path. Shared by the feature-ready and
+// tripwire-pause notification paths.
+func inboxItemToEventMap(item db.InboxItem) map[string]any {
 	return map[string]any{
 		"id":             uuidToString(item.ID),
 		"workspace_id":   uuidToString(item.WorkspaceID),

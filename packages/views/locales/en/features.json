@@ -18,10 +18,12 @@
     "created": "Created"
   },
   "status": {
-    "planned": "Planned",
-    "in_progress": "In Progress",
-    "paused": "Paused",
-    "completed": "Completed",
+    "draft": "Draft",
+    "ready": "Ready",
+    "running": "Running",
+    "in_review": "In Review",
+    "done": "Done",
+    "blocked": "Blocked",
     "cancelled": "Cancelled"
   },
   "priority": {
@@ -65,13 +67,23 @@
     "toast_feature_deleted": "Feature deleted",
     "toast_move_issue_failed": "Failed to move issue",
     "approve_button": "Approve & start",
-    "section_ready_now": "Ready now",
-    "section_blocked": "Blocked",
+    "section_milestones": "Milestones",
     "section_issues": "Issues",
+    "section_decisions": "Decision Log",
+    "decision_learned": "Learned:",
+    "decisions_empty": "No decisions recorded yet — the retrospective runs when the Initiative reaches review.",
     "branch_label": "Branch",
     "exec_mode_label": "Exec",
     "exec_mode_inplace": "In-place",
-    "exec_mode_inplace_tooltip": "Issues run serially in the workspace's real directory. A second task waits until the first finishes."
+    "exec_mode_inplace_tooltip": "Issues run serially in the workspace's real directory. A second task waits until the first finishes.",
+    "mode_label": "Mode",
+    "mode_hitl": "HITL",
+    "mode_afk": "AFK",
+    "mode_hitl_tooltip": "Reviewed PRs — work is split into several Initiatives, each reviewed and merged before the next starts.",
+    "mode_afk_tooltip": "Autonomous — one big PR reviewed once when the whole DoD is green."
+  },
+  "milestones": {
+    "empty": "No milestones yet"
   },
   "resources": {
     "section_header": "Resources",

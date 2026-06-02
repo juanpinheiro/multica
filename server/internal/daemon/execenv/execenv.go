@@ -54,19 +54,15 @@ type TaskContextForEnv struct {
 	FeatureID               string                  // issue's feature, when present
 	FeatureTitle            string                  // human-readable feature title
 	FeatureResources        []FeatureResourceForEnv // resources attached to the feature
-	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string
 	AutopilotDescription    string
 	AutopilotSource         string
 	AutopilotTriggerPayload string
-	QuickCreatePrompt       string // non-empty for quick-create tasks
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
-	// non-empty so every agent in the workspace sees the same shared context,
-	// regardless of issue / chat / autopilot / quick-create.
+	// non-empty so every agent in the workspace sees the same shared context.
 	WorkspaceContext string
 	// RequestingUserName + RequestingUserProfileDescription describe the
 	// human the agent is acting on behalf of. v1 sources them from the
@@ -79,7 +75,7 @@ type TaskContextForEnv struct {
 	// TargetBranch is the resolved git branch for this issue task, set by
 	// feature.Resolve on the server side (feature.target_branch wins, then
 	// issue.metadata.target_branch, then "issue/<identifier>"). Empty for
-	// chat / quick-create / autopilot tasks that have no issue.
+	// autopilot tasks that have no issue.
 	TargetBranch string
 	// IsSharedBranch is true when TargetBranch came from feature.target_branch,
 	// meaning sibling issues of the same feature also push to this branch.
@@ -328,15 +324,12 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.
-// The GC loop dispatches its decision tree on this value so chat / autopilot /
-// quick-create tasks are no longer forced through the issue-centric path.
+// The GC loop dispatches its decision tree on this value.
 type GCMetaKind string
 
 const (
 	GCKindIssue        GCMetaKind = "issue"
-	GCKindChat         GCMetaKind = "chat"
 	GCKindAutopilotRun GCMetaKind = "autopilot_run"
-	GCKindQuickCreate  GCMetaKind = "quick_create"
 )
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
@@ -349,9 +342,7 @@ const (
 type GCMeta struct {
 	Kind           GCMetaKind `json:"kind,omitempty"`
 	IssueID        string     `json:"issue_id,omitempty"`
-	ChatSessionID  string     `json:"chat_session_id,omitempty"`
 	AutopilotRunID string     `json:"autopilot_run_id,omitempty"`
-	TaskID         string     `json:"task_id,omitempty"`
 	WorkspaceID    string     `json:"workspace_id"`
 	CompletedAt    time.Time  `json:"completed_at"`
 }

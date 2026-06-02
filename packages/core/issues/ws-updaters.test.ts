@@ -21,9 +21,7 @@ import type {
   AgentTask,
   Attachment,
   Issue,
-  IssueReaction,
   IssueLabelsResponse,
-  IssueSubscriber,
   IssueUsageSummary,
   Label,
   ListIssuesCache,
@@ -235,25 +233,6 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<IssueReaction[]>(issueKeys.reactions(ISSUE_ID), [
-      {
-        id: "reaction-1",
-        issue_id: ISSUE_ID,
-        actor_type: "member",
-        actor_id: "user-1",
-        emoji: "+1",
-        created_at: "2025-01-01T00:00:00Z",
-      },
-    ]);
-    qc.setQueryData<IssueSubscriber[]>(issueKeys.subscribers(ISSUE_ID), [
-      {
-        issue_id: ISSUE_ID,
-        user_type: "member",
-        user_id: "user-1",
-        reason: "manual",
-        created_at: "2025-01-01T00:00:00Z",
-      },
-    ]);
     qc.setQueryData<IssueUsageSummary>(issueKeys.usage(ISSUE_ID), {
       total_input_tokens: 10,
       total_output_tokens: 20,
@@ -267,8 +246,6 @@ describe("onIssueDeleted", () => {
         workspace_id: WS_ID,
         issue_id: ISSUE_ID,
         comment_id: null,
-        chat_session_id: null,
-        chat_message_id: null,
         uploader_type: "member",
         uploader_id: "user-1",
         filename: "evidence.png",
@@ -296,8 +273,6 @@ describe("onIssueDeleted", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.timeline(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.reactions(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.subscribers(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.usage(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.attachments(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.tasks(ISSUE_ID))).toBeUndefined();
@@ -313,33 +288,20 @@ describe("onIssueDeleted", () => {
     });
   });
 
-  it("removes the deleted issue from workspace and my-issues list caches immediately", () => {
-    const myFilter = { assignee_id: AGENT_ID };
+  it("removes the deleted issue from workspace list caches immediately", () => {
     qc.setQueryData<ListIssuesCache>(
       issueKeys.list(WS_ID),
-      makeListCache(baseIssue, otherIssue),
-    );
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", myFilter),
       makeListCache(baseIssue, otherIssue),
     );
 
     onIssueDeleted(qc, WS_ID, ISSUE_ID);
 
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
-    const myList = qc.getQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", myFilter),
-    );
     expect(list?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
       OTHER_ISSUE_ID,
     ]);
     expect(list?.byStatus.todo?.total).toBe(1);
-    expect(myList?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      OTHER_ISSUE_ID,
-    ]);
-    expect(myList?.byStatus.todo?.total).toBe(1);
     expectInvalidated(qc, issueKeys.list(WS_ID));
-    expectInvalidated(qc, issueKeys.myList(WS_ID, "assigned", myFilter));
   });
 
   it("invalidates parent progress when the parent id only exists in detail cache", () => {
@@ -380,28 +342,6 @@ describe("onIssueDeleted", () => {
     expectInvalidated(qc, issueKeys.childProgress(WS_ID));
   });
 
-  it("invalidates parent progress when the parent id only exists in a my-issues cache", () => {
-    const myFilter = { assignee_id: AGENT_ID };
-    qc.setQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", myFilter),
-      makeListCache(parentedIssue, otherIssue),
-    );
-    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, PARENT_ISSUE_ID), [
-      otherIssue,
-    ]);
-    qc.setQueryData(issueKeys.childProgress(WS_ID), new Map());
-
-    onIssueDeleted(qc, WS_ID, ISSUE_ID);
-
-    const myList = qc.getQueryData<ListIssuesCache>(
-      issueKeys.myList(WS_ID, "assigned", myFilter),
-    );
-    expect(myList?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      OTHER_ISSUE_ID,
-    ]);
-    expectInvalidated(qc, issueKeys.children(WS_ID, PARENT_ISSUE_ID));
-    expectInvalidated(qc, issueKeys.childProgress(WS_ID));
-  });
 
   it("invalidates child progress when the deleted issue is itself a parent", () => {
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);

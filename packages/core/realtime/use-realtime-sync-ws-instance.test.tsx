@@ -101,8 +101,8 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (12 workspace-scoped + 1 workspaceKeys.list() = 13 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(13);
+    // (11 workspace-scoped + 1 workspaceKeys.list() = 12 calls)
+    expect(invalidateSpy).toHaveBeenCalledTimes(12);
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {

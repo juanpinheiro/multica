@@ -137,6 +137,14 @@ type RepoData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ValidatorAssertionData carries a single DoD assertion delivered to a
+// validator Run at claim time so the agent knows what to check.
+type ValidatorAssertionData struct {
+	ID       string `json:"id"`
+	Text     string `json:"text"`
+	Position int32  `json:"position"`
+}
+
 // CrossRepoSiblingData describes a sibling issue in a different repo within
 // the same feature. Mirrors daemon.CrossRepoSiblingData via JSON field names.
 type CrossRepoSiblingData struct {
@@ -167,11 +175,13 @@ type AgentTaskResponse struct {
 	WorkspaceID string `json:"workspace_id"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
-	// as `## Workspace Context` so every agent running in this workspace —
-	// regardless of issue / chat / autopilot / quick-create — sees the same
-	// shared context. Empty when the workspace owner hasn't set it.
+	// as `## Workspace Context` so every agent running in this workspace sees
+	// the same shared context. Empty when the workspace owner hasn't set it.
 	WorkspaceContext        string                `json:"workspace_context,omitempty"`
 	Status                  string                `json:"status"`
+	// Role discriminates a worker Run (implements an Issue) from a validator
+	// Run (checks a Milestone's DoD). ADR-0002.
+	Role                    string                `json:"role,omitempty"`
 	Priority                int32                 `json:"priority"`
 	DispatchedAt            *string               `json:"dispatched_at"`
 	StartedAt               *string               `json:"started_at"`
@@ -198,19 +208,12 @@ type AgentTaskResponse struct {
 	TriggerSummary          *string               `json:"trigger_summary,omitempty"`           // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
 	TriggerAuthorType       string                `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind of the triggering comment
 	TriggerAuthorName       string                `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
-	ChatSessionID           string                `json:"chat_session_id,omitempty"`           // non-empty for chat tasks
-	ChatMessage             string                `json:"chat_message,omitempty"`              // user message for chat tasks
-	ChatMessageAttachments  []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`  // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	AutopilotRunID          string                `json:"autopilot_run_id,omitempty"`          // non-empty for autopilot-spawned tasks
 	AutopilotID             string                `json:"autopilot_id,omitempty"`              // autopilot that spawned this task
 	AutopilotTitle          string                `json:"autopilot_title,omitempty"`           // autopilot title used as task context
 	AutopilotDescription    string                `json:"autopilot_description,omitempty"`     // autopilot description used as task prompt
 	AutopilotSource         string                `json:"autopilot_source,omitempty"`          // manual, schedule, webhook, or api
 	AutopilotTriggerPayload json.RawMessage       `json:"autopilot_trigger_payload,omitempty"` // optional trigger payload for webhook/api runs
-	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`          // user's natural-language input for quick-create tasks
-	QuickCreateParentIssueID string                `json:"quick_create_parent_issue_id,omitempty"` // parent issue ID when creating a sub-issue via quick-create
-	SquadID                  string                `json:"squad_id,omitempty"`                     // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string                `json:"squad_name,omitempty"`                   // display name for the picker squad
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -219,7 +222,7 @@ type AgentTaskResponse struct {
 	// is empty.
 	RequestingUserName               string `json:"requesting_user_name,omitempty"`
 	RequestingUserProfileDescription string `json:"requesting_user_profile_description,omitempty"`
-	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	Kind                             string `json:"kind"` // discriminator: "comment" | "autopilot" | "direct" — source kind for the activity row
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -250,18 +253,9 @@ type AgentTaskResponse struct {
 	// projected from workspace.mode. The daemon runs in-place workspaces in
 	// their real umbrella directory; empty/unknown is treated as worktree.
 	Mode string `json:"mode,omitempty"`
-}
-
-// ChatAttachmentMeta is the structured attachment metadata embedded in
-// claim responses for chat tasks. The agent uses these to run
-// `multica attachment download <id>` rather than guessing from the
-// markdown URL (which is signed and 30-min expiring on private CDN).
-// The mirror struct on the daemon side lives in internal/daemon/types.go
-// and uses the same JSON field names.
-type ChatAttachmentMeta struct {
-	ID          string `json:"id"`
-	Filename    string `json:"filename"`
-	ContentType string `json:"content_type,omitempty"`
+	// ValidatorAssertions carries the Milestone's DoD assertions for a
+	// validator Run. Populated by ClaimTaskByRuntime; empty for worker Runs.
+	ValidatorAssertions []ValidatorAssertionData `json:"validator_assertions,omitempty"`
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
@@ -301,6 +295,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		RuntimeID:        uuidToString(t.RuntimeID),
 		IssueID:          uuidToString(t.IssueID),
 		Status:           t.Status,
+		Role:             t.Role,
 		Priority:         t.Priority,
 		DispatchedAt:     timestampToPtr(t.DispatchedAt),
 		StartedAt:        timestampToPtr(t.StartedAt),
@@ -317,30 +312,16 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		TriggerCommentID: uuidToPtr(t.TriggerCommentID),
 		TriggerSummary:   textToPtr(t.TriggerSummary),
 		WorkDir:          workDir,
-		// Surface task source so the UI can distinguish issue-linked tasks
-		// from chat-spawned or autopilot-spawned ones; all three may arrive
-		// with issue_id = "" once a task has no linked issue.
-		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
 	}
 }
 
 // computeTaskKind picks the source-discriminator string the activity UI uses
-// to choose how to render a task row. Computed from the existing FK shape so
-// no extra DB lookup is needed: chat / autopilot / comment-on-issue (any
-// triggered task with both an issue_id and trigger_comment_id) / quick_create
-// (no linked source — the agent is creating the issue itself) / direct
-// (assignee-driven task on an existing issue).
+// to render a task row.
 func computeTaskKind(t db.AgentTaskQueue) string {
-	if uuidToString(t.ChatSessionID) != "" {
-		return "chat"
-	}
 	if uuidToString(t.AutopilotRunID) != "" {
 		return "autopilot"
-	}
-	if uuidToString(t.IssueID) == "" {
-		return "quick_create"
 	}
 	if uuidToString(t.TriggerCommentID) != "" {
 		return "comment"

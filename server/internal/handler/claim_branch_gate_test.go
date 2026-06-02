@@ -57,8 +57,8 @@ func TestClaimAgentTask_BranchGate(t *testing.T) {
 		t.Helper()
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO feature (workspace_id, title, branch_slug)
-			VALUES ($1, $2, $3)
+			INSERT INTO feature (workspace_id, title, branch_slug, status)
+			VALUES ($1, $2, $3, 'running')
 			RETURNING id
 		`, testWorkspaceID, fmt.Sprintf("branch-gate-feature-%d", time.Now().UnixNano()), branchSlug).Scan(&id); err != nil {
 			t.Fatalf("create feature: %v", err)
@@ -349,8 +349,8 @@ func TestClaimTaskByRuntime_BranchPayload(t *testing.T) {
 		t.Helper()
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO feature (workspace_id, title, branch_slug)
-			VALUES ($1, $2, $3)
+			INSERT INTO feature (workspace_id, title, branch_slug, status)
+			VALUES ($1, $2, $3, 'running')
 			RETURNING id
 		`, testWorkspaceID, fmt.Sprintf("branch-payload-feature-%d", time.Now().UnixNano()), branchSlug).Scan(&id); err != nil {
 			t.Fatalf("create feature: %v", err)

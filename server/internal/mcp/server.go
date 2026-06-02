@@ -21,6 +21,7 @@ func New(client *cli.APIClient, version string) *Server {
 	srv := &Server{mcp: s, client: client}
 	registerReadTools(srv)
 	registerFeatureTools(srv)
+	registerMilestoneTools(srv)
 	registerIssueTools(srv)
 	return srv
 }

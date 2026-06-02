@@ -6,7 +6,6 @@ import {
   ISSUE_PAGE_SIZE,
   type AssigneeGroupedIssuesFilter,
   type IssueSortParam,
-  type MyIssuesFilter,
 } from "./queries";
 import {
   addIssueToBuckets,
@@ -26,58 +25,37 @@ import {
 } from "./delete-cache";
 import { useWorkspaceId } from "../hooks";
 import { useRecentIssuesStore } from "./stores";
-import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
+import type { GroupedIssuesResponse, Issue, IssueAssigneeGroup, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
   UpdateIssueRequest,
   ListIssuesCache,
 } from "../types";
-import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
+import type { TimelineEntry } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
-
-// ---------------------------------------------------------------------------
-// Shared mutation variable types — used by both mutation hooks and
-// useMutationState consumers to keep the type assertion in sync.
-// ---------------------------------------------------------------------------
-
-export type ToggleCommentReactionVars = {
-  commentId: string;
-  emoji: string;
-  existing: Reaction | undefined;
-};
-
-export type ToggleIssueReactionVars = {
-  emoji: string;
-  existing: IssueReaction | undefined;
-};
 
 // ---------------------------------------------------------------------------
 // Per-status pagination
 // ---------------------------------------------------------------------------
 
 /**
- * Paginate one status column into the cache. Works for both the workspace
- * issue list and per-scope My Issues lists (pass `myIssues` to target the
- * latter).
+ * Paginate one status column into the cache.
  *
  * `sort` must match the sort the consuming `useQuery` was called with —
- * the query key embeds it (see `listSorted` / `myListSorted`), so a load-more
- * with the wrong sort would patch a stale cache entry that nobody is
- * subscribed to. It is also threaded into the API request so the appended
- * page lines up with the server-side ordering of the existing items.
+ * the query key embeds it (see `listSorted`), so a load-more with the wrong
+ * sort would patch a stale cache entry that nobody is subscribed to. It is
+ * also threaded into the API request so the appended page lines up with the
+ * server-side ordering of the existing items.
  */
 export function useLoadMoreByStatus(
   status: IssueStatus,
-  myIssues?: { scope: string; filter: MyIssuesFilter },
   sort?: IssueSortParam,
 ) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const [isLoading, setIsLoading] = useState(false);
 
-  const activeKey = myIssues
-    ? issueKeys.myListSorted(wsId, myIssues.scope, myIssues.filter, sort)
-    : issueKeys.listSorted(wsId, sort);
+  const activeKey = issueKeys.listSorted(wsId, sort);
   const cache = qc.getQueryData<ListIssuesCache>(activeKey);
   const bucket = cache?.byStatus[status];
   const loaded = bucket?.issues.length ?? 0;
@@ -93,7 +71,6 @@ export function useLoadMoreByStatus(
         limit: ISSUE_PAGE_SIZE,
         offset: loaded,
         ...sort,
-        ...myIssues?.filter,
       });
       qc.setQueryData<ListIssuesCache>(activeKey, (old) => {
         if (!old) return old;
@@ -108,7 +85,7 @@ export function useLoadMoreByStatus(
     } finally {
       setIsLoading(false);
     }
-  }, [qc, activeKey, status, loaded, hasMore, isLoading, myIssues?.filter, sort]);
+  }, [qc, activeKey, status, loaded, hasMore, isLoading, sort]);
 
   return { loadMore, hasMore, isLoading, total };
 }
@@ -199,7 +176,6 @@ export function useCreateIssue() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.featureGanttAll(wsId) });
     },
   });
@@ -281,7 +257,6 @@ export function useUpdateIssue() {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.featureGanttAll(wsId) });
       // Refresh the issue's attachments cache when the description editor
       // bound new uploads — the description editor reads `issueAttachments`
@@ -317,7 +292,6 @@ export function useDeleteIssue() {
     onMutate: async (id) => {
       await Promise.all([
         qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
       ]);
       const metadata = collectDeletedIssueCacheMetadata(qc, wsId, id);
       await Promise.all(
@@ -326,9 +300,6 @@ export function useDeleteIssue() {
         ),
       );
       const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
-      const prevMyLists = qc.getQueriesData<ListIssuesCache>({
-        queryKey: issueKeys.myAll(wsId),
-      });
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
       const prevChildren = new Map<string, Issue[] | undefined>();
       for (const parentId of metadata.parentIssueIds) {
@@ -342,16 +313,11 @@ export function useDeleteIssue() {
       pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
       useRecentIssuesStore.getState().removeId(wsId, id);
-      return { id, metadata, prevLists, prevMyLists, prevDetail, prevChildren };
+      return { id, metadata, prevLists, prevDetail, prevChildren };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prevLists) {
         for (const [key, snapshot] of ctx.prevLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevMyLists) {
-        for (const [key, snapshot] of ctx.prevMyLists) {
           qc.setQueryData(key, snapshot);
         }
       }
@@ -370,7 +336,6 @@ export function useDeleteIssue() {
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.featureGanttAll(wsId) });
       if (ctx?.metadata) invalidateDeletedIssueParentCaches(qc, wsId, ctx.metadata);
     },
@@ -434,7 +399,6 @@ export function useBatchUpdateIssues() {
     onSettled: (_data, _err, _vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.featureGanttAll(wsId) });
       if (ctx?.affectedParentIds && ctx.affectedParentIds.size > 0) {
         for (const parentId of ctx.affectedParentIds) {
@@ -456,7 +420,6 @@ export function useBatchDeleteIssues() {
     onMutate: async (ids) => {
       await Promise.all([
         qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
       ]);
       const metadataById = new Map(
         ids.map((id) => [
@@ -476,9 +439,6 @@ export function useBatchDeleteIssues() {
         ),
       );
       const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
-      const prevMyLists = qc.getQueriesData<ListIssuesCache>({
-        queryKey: issueKeys.myAll(wsId),
-      });
       const prevChildren = new Map<string, Issue[] | undefined>();
       for (const parentId of parentIssueIds) {
         prevChildren.set(
@@ -495,16 +455,11 @@ export function useBatchDeleteIssues() {
         }
         useRecentIssuesStore.getState().removeId(wsId, id);
       }
-      return { prevLists, prevMyLists, prevChildren, parentIssueIds, metadataById };
+      return { prevLists, prevChildren, parentIssueIds, metadataById };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevLists) {
         for (const [key, snapshot] of ctx.prevLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
-      if (ctx?.prevMyLists) {
-        for (const [key, snapshot] of ctx.prevMyLists) {
           qc.setQueryData(key, snapshot);
         }
       }
@@ -527,11 +482,6 @@ export function useBatchDeleteIssues() {
           qc.setQueryData(key, snapshot);
         }
       }
-      if (ctx?.prevMyLists) {
-        for (const [key, snapshot] of ctx.prevMyLists) {
-          qc.setQueryData(key, snapshot);
-        }
-      }
       if (ctx?.prevChildren) {
         for (const [parentId, snapshot] of ctx.prevChildren) {
           qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
@@ -546,7 +496,6 @@ export function useBatchDeleteIssues() {
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-      qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.featureGanttAll(wsId) });
       if (ctx?.parentIssueIds && ctx.parentIssueIds.size > 0) {
         invalidateDeletedIssueParentCaches(qc, wsId, {
@@ -586,7 +535,6 @@ export function useCreateComment(issueId: string) {
         content: comment.content,
         parent_id: comment.parent_id,
         comment_type: comment.type,
-        reactions: comment.reactions ?? [],
         attachments: comment.attachments ?? [],
         created_at: comment.created_at,
         updated_at: comment.updated_at,
@@ -716,116 +664,3 @@ export function useResolveComment(issueId: string) {
   });
 }
 
-export function useToggleCommentReaction(issueId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationKey: ["toggleCommentReaction", issueId] as const,
-    mutationFn: async ({
-      commentId,
-      emoji,
-      existing,
-    }: ToggleCommentReactionVars) => {
-      if (existing) {
-        await api.removeReaction(commentId, emoji);
-        return null;
-      }
-      return api.addReaction(commentId, emoji);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Issue-level Reactions
-// ---------------------------------------------------------------------------
-
-export function useToggleIssueReaction(issueId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationKey: ["toggleIssueReaction", issueId] as const,
-    mutationFn: async ({
-      emoji,
-      existing,
-    }: ToggleIssueReactionVars) => {
-      if (existing) {
-        await api.removeIssueReaction(issueId, emoji);
-        return null;
-      }
-      return api.addIssueReaction(issueId, emoji);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });
-    },
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Issue Subscribers
-// ---------------------------------------------------------------------------
-
-export function useToggleIssueSubscriber(issueId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({
-      userId,
-      userType,
-      subscribed,
-    }: {
-      userId: string;
-      userType: "member" | "agent";
-      subscribed: boolean;
-    }) => {
-      if (subscribed) {
-        await api.unsubscribeFromIssue(issueId, userId, userType);
-      } else {
-        await api.subscribeToIssue(issueId, userId, userType);
-      }
-    },
-    onMutate: async ({ userId, userType, subscribed }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.subscribers(issueId) });
-      const prev = qc.getQueryData<IssueSubscriber[]>(
-        issueKeys.subscribers(issueId),
-      );
-
-      if (subscribed) {
-        qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
-          (old) =>
-            old?.filter(
-              (s) => !(s.user_id === userId && s.user_type === userType),
-            ),
-        );
-      } else {
-        const temp: IssueSubscriber = {
-          issue_id: issueId,
-          user_type: userType,
-          user_id: userId,
-          reason: "manual",
-          created_at: new Date().toISOString(),
-        };
-        qc.setQueryData<IssueSubscriber[]>(
-          issueKeys.subscribers(issueId),
-          (old) => {
-            if (
-              old?.some(
-                (s) => s.user_id === userId && s.user_type === userType,
-              )
-            )
-              return old;
-            return [...(old ?? []), temp];
-          },
-        );
-      }
-      return { prev };
-    },
-    onError: (_err, _vars, ctx) => {
-      if (ctx?.prev)
-        qc.setQueryData(issueKeys.subscribers(issueId), ctx.prev);
-    },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: issueKeys.subscribers(issueId) });
-    },
-  });
-}

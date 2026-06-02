@@ -22,8 +22,6 @@
   },
   "commands": {
     "current_theme_aria": "Current theme",
-    "new_issue": "New Issue",
-    "new_feature": "New Feature",
     "copy_issue_link": "Copy Issue Link",
     "copy_identifier": "Copy Identifier ({{identifier}})",
     "switch_to_light": "Switch to Light Theme",

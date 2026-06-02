@@ -20,7 +20,6 @@ import {
   PinOff,
   Plus,
   Tag,
-  Users,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -37,9 +36,6 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
-import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
-import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
@@ -55,6 +51,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { collectThreadReplies } from "./thread-utils";
 import { AgentLiveCard } from "./agent-live-card";
 import { ExecutionLogSection } from "./execution-log-section";
+import { IssueDodSection } from "./issue-dod-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
@@ -66,104 +63,19 @@ import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOpt
 import { featureDetailOptions } from "@multica/core/features/queries";
 import { FeatureIcon } from "../../features/components/feature-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
-import { useIssueReactions } from "../hooks/use-issue-reactions";
-import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
-import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
-import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 
-function SubscriberPopoverContent({
-  members,
-  agents,
-  subscribers,
-  toggleSubscriber,
-  t,
-}: {
-  members: { user_id: string; name: string }[];
-  agents: { id: string; name: string; archived_at?: string | null }[];
-  subscribers: { user_type: string; user_id: string }[];
-  toggleSubscriber: (id: string, type: "member" | "agent", subscribed: boolean) => void;
-  t: ActivityT;
-}) {
-  const [search, setSearch] = useState("");
-  const q = search.trim().toLowerCase();
-
-  const uniqueMembers = members.filter((m, i, arr) => arr.findIndex((x) => x.user_id === m.user_id) === i);
-  const activeAgents = agents.filter((a) => !a.archived_at);
-
-  const filteredMembers = q
-    ? uniqueMembers.filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
-    : uniqueMembers;
-  const filteredAgents = q
-    ? activeAgents.filter((a) => a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q))
-    : activeAgents;
-
-  return (
-    <PopoverContent align="end" className="w-64 p-0">
-      <Command shouldFilter={false}>
-        <CommandInput
-          placeholder={t(($) => $.detail.change_subscribers_placeholder)}
-          value={search}
-          onValueChange={setSearch}
-        />
-        <CommandList className="max-h-64">
-          {filteredMembers.length === 0 && filteredAgents.length === 0 && (
-            <CommandEmpty>{t(($) => $.detail.no_subscribers_results)}</CommandEmpty>
-          )}
-          {filteredMembers.length > 0 && (
-            <CommandGroup heading={t(($) => $.detail.members_group)}>
-              {filteredMembers.map((m) => {
-                const sub = subscribers.find((s) => s.user_type === "member" && s.user_id === m.user_id);
-                const isSubbed = !!sub;
-                return (
-                  <CommandItem
-                    key={`member-${m.user_id}`}
-                    onSelect={() => toggleSubscriber(m.user_id, "member", isSubbed)}
-                    className="flex items-center gap-2.5"
-                  >
-                    <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
-                    <span className="truncate flex-1">{m.name}</span>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          )}
-          {filteredAgents.length > 0 && (
-            <CommandGroup heading={t(($) => $.detail.agents_group)}>
-              {filteredAgents.map((a) => {
-                const sub = subscribers.find((s) => s.user_type === "agent" && s.user_id === a.id);
-                const isSubbed = !!sub;
-                return (
-                  <CommandItem
-                    key={`agent-${a.id}`}
-                    onSelect={() => toggleSubscriber(a.id, "agent", isSubbed)}
-                    className="flex items-center gap-2.5"
-                  >
-                    <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
-                    <span className="truncate flex-1">{a.name}</span>
-                  </CommandItem>
-                );
-              })}
-            </CommandGroup>
-          )}
-        </CommandList>
-      </Command>
-    </PopoverContent>
-  );
-}
 
 function shortDate(date: string | null): string {
   if (!date) return "—";
@@ -666,7 +578,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
   // Workspace owners and admins moderate any comment authored by anyone
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
@@ -838,11 +749,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [issue, issueLoading, onDelete]);
 
-  // Custom hooks — encapsulate timeline, reactions, subscribers
   const {
     timeline, loading: timelineLoading,
     submitComment, submitReply,
-    editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
+    editComment, deleteComment, toggleResolveComment,
   } = useIssueTimeline(id, user?.id);
 
   // Resolve / unresolve must always clear the per-session expand entry so
@@ -864,8 +774,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // the previous render via `prevThreadRepliesRef`: if a thread's flat list
   // is shallow-equal to the previous one, we reuse the previous array so
   // React.memo on CommentCard / ResolvedThreadBar can short-circuit. Without
-  // this, every WS event (including reactions, edits, AI streaming on an
-  // unrelated thread) hands every card a brand-new prop reference and forces
+  // this, every WS event (edits, AI streaming on an unrelated thread) hands
+  // every card a brand-new prop reference and forces
   // every thread subtree to re-render in lockstep.
   const prevThreadRepliesRef = useRef<Map<string, TimelineEntry[]>>(new Map());
   const timelineView = useMemo(() => {
@@ -988,15 +898,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (!rootId) return -1;
     return items.findIndex((it) => it.id === rootId);
   }, [items, highlightCommentId, replyToRoot]);
-
-  const {
-    reactions: issueReactions,
-    toggleReaction: handleToggleIssueReaction,
-  } = useIssueReactions(id, user?.id);
-
-  const {
-    subscribers, isSubscribed, toggleSubscribe: handleToggleSubscribe, toggleSubscriber,
-  } = useIssueSubscribers(id, user?.id);
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
@@ -1476,6 +1377,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           when there are no runs to show. */}
       <ExecutionLogSection issueId={id} />
 
+      {/* Acceptance criteria — the DoD assertions of this issue's Milestone.
+          Only shown when the issue belongs to a Milestone with assertions. */}
+      <IssueDodSection issueId={id} wsId={wsId} />
+
       {/* Token usage */}
       {usage && usage.task_count > 0 && (
         <div>
@@ -1572,7 +1477,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onReply={submitReply}
             onEdit={editComment}
             onDelete={deleteComment}
-            onToggleReaction={handleToggleReaction}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             highlightedCommentId={highlightedId}
@@ -1777,12 +1681,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             />
 
             <div className="flex items-center gap-1 mt-3">
-              <ReactionBar
-                reactions={issueReactions}
-                currentUserId={user?.id}
-                onToggle={handleToggleIssueReaction}
-                getActorName={getActorName}
-              />
               <FileUploadButton
                 size="sm"
                 onSelect={(file) => descEditorRef.current?.uploadFile(file)}
@@ -1791,19 +1689,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             {descDragOver && <FileDropOverlay />}
           </div>
 
-          {/* Sub-issues — Linear-style */}
-          {childIssues.length === 0 && (
-            <div className="mt-6">
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => actions.openCreateSubIssue()}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>{t(($) => $.detail.add_sub_issues)}</span>
-              </button>
-            </div>
-          )}
           {childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
             return (
@@ -1844,21 +1729,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
                     )}
                   />
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                          onClick={() => actions.openCreateSubIssue()}
-                          aria-label={t(($) => $.detail.add_sub_issue_aria)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
-                  </Tooltip>
                 </div>
 
                 {/* Inline batch toolbar — appears next to the rows when
@@ -1884,46 +1754,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <h2 className="text-base font-semibold">{t(($) => $.detail.activity_section)}</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleToggleSubscribe}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {isSubscribed ? t(($) => $.detail.unsubscribe) : t(($) => $.detail.subscribe)}
-                </button>
-                <Popover>
-                  <PopoverTrigger className="cursor-pointer hover:opacity-80 transition-opacity">
-                    {subscribers.length > 0 ? (
-                      <AvatarGroup>
-                        {subscribers.slice(0, 4).map((sub) => (
-                          <ActorAvatar
-                            key={`${sub.user_type}-${sub.user_id}`}
-                            actorType={sub.user_type}
-                            actorId={sub.user_id}
-                            size={24}
-                            enableHoverCard
-                          />
-                        ))}
-                        {subscribers.length > 4 && (
-                          <AvatarGroupCount>+{subscribers.length - 4}</AvatarGroupCount>
-                        )}
-                      </AvatarGroup>
-                    ) : (
-                      <span className="flex items-center justify-center h-6 w-6 rounded-full border border-dashed border-muted-foreground/30 text-muted-foreground">
-                        <Users className="h-3 w-3" />
-                      </span>
-                    )}
-                  </PopoverTrigger>
-                  <SubscriberPopoverContent
-                    members={members}
-                    agents={agents}
-                    subscribers={subscribers}
-                    toggleSubscriber={toggleSubscriber}
-                    t={t}
-                  />
-                </Popover>
               </div>
             </div>
 

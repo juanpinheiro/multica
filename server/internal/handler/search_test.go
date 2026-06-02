@@ -113,9 +113,9 @@ func TestBuildProjectSearchQuery_SingleTerm(t *testing.T) {
 		t.Error("query should contain LOWER(COALESCE(p.description, '')) LIKE")
 	}
 
-	// Should exclude completed/cancelled by default.
-	if !strings.Contains(query, "NOT IN ('completed', 'cancelled')") {
-		t.Error("query should exclude completed/cancelled when includeClosed=false")
+	// Should exclude terminal Initiatives (done/cancelled) by default.
+	if !strings.Contains(query, "NOT IN ('done', 'cancelled')") {
+		t.Error("query should exclude done/cancelled when includeClosed=false")
 	}
 }
 
@@ -140,8 +140,8 @@ func TestBuildProjectSearchQuery_MultiTerm(t *testing.T) {
 func TestBuildProjectSearchQuery_IncludeClosed(t *testing.T) {
 	query, _ := buildFeatureSearchQuery("test", []string{"test"}, true)
 
-	if strings.Contains(query, "NOT IN ('completed', 'cancelled')") {
-		t.Error("query should not exclude completed/cancelled when includeClosed=true")
+	if strings.Contains(query, "NOT IN ('done', 'cancelled')") {
+		t.Error("query should not exclude done/cancelled when includeClosed=true")
 	}
 }
 

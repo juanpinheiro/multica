@@ -1,13 +1,7 @@
 -- name: ListIssues :many
--- involves_user_id widens the assignee filter to surface issues where the user
--- is *indirectly* the assignee — via an owned agent or a squad they belong to /
--- lead / have an agent inside. The semantics intentionally exclude direct
--- member assignment (`assignee_type='member' AND assignee_id=involves_user_id`)
--- because that is already the meaning of the `assignee_id` filter (tab 1
--- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id, i.milestone_id, i.metadata
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -18,46 +12,6 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('feature_id')::uuid IS NULL OR i.feature_id = sqlc.narg('feature_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
-  AND (
-    sqlc.narg('involves_user_id')::uuid IS NULL
-    -- (1) assignee is an agent owned by the user
-    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
-           WHERE a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-    ))
-    -- (2)(3)(4) assignee is a squad related to the user — three relations
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          -- (2) the user is a human member of the squad
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = sqlc.narg('involves_user_id')::uuid
-          UNION
-          -- (3) the squad's canonical leader is an agent owned by the user.
-          -- We read squad.leader_id directly rather than relying on a
-          -- squad_member row, because the leader copy in squad_member is
-          -- best-effort (see squad.go AddSquadMember error handling).
-          SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
-           WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-          UNION
-          -- (4) the squad has an agent member owned by the user
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-    ))
-  )
 ORDER BY i.position ASC, i.created_at DESC
 LIMIT $2 OFFSET $3;
 
@@ -74,14 +28,33 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, feature_id,
-    repo_id
+    repo_id, milestone_id
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
 SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
+
+-- name: CountNonDoneMilestoneSiblings :one
+-- Counts issues in the same Milestone that have not yet reached `done`,
+-- excluding the issue that just transitioned. Returns 0 when the Milestone's
+-- work is complete and the validator Run may be dispatched.
+SELECT count(*)::bigint FROM issue
+WHERE milestone_id = $1 AND id != $2 AND status != 'done';
+
+-- name: CreateDodFollowUpIssue :one
+-- A worker Issue created inside a Milestone when its DoD validation fails, so
+-- the Initiative self-heals. Assigned to the agent that owns the work; status
+-- 'backlog' keeps the Milestone non-done until the follow-up is resolved.
+INSERT INTO issue (
+    workspace_id, feature_id, milestone_id, title, description, status, priority,
+    assignee_type, assignee_id, creator_type, creator_id, number, position
+) VALUES (
+    $1, $2, $3, $4, $5, 'backlog', 'high',
+    'agent', $6, 'agent', $6, $7, 0
+) RETURNING *;
 
 -- name: UpdateIssue :one
 UPDATE issue SET
@@ -142,8 +115,6 @@ LIMIT 1;
 DELETE FROM issue WHERE id = $1 AND workspace_id = $2;
 
 -- name: ListOpenIssues :many
--- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
--- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id, i.metadata
@@ -156,42 +127,9 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('feature_id')::uuid IS NULL OR i.feature_id = sqlc.narg('feature_id'))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
-  AND (
-    sqlc.narg('involves_user_id')::uuid IS NULL
-    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
-           WHERE a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = sqlc.narg('involves_user_id')::uuid
-          UNION
-          SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
-           WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-          UNION
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-    ))
-  )
 ORDER BY i.position ASC, i.created_at DESC;
 
 -- name: CountIssues :one
--- See ListIssues for the semantics of involves_user_id.
 SELECT count(*) FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -201,39 +139,7 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('feature_id')::uuid IS NULL OR i.feature_id = sqlc.narg('feature_id'))
   AND (sqlc.narg('scheduled')::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
-  AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
-  AND (
-    sqlc.narg('involves_user_id')::uuid IS NULL
-    OR (i.assignee_type = 'agent' AND i.assignee_id IN (
-          SELECT a.id FROM agent a
-           WHERE a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'member'
-             AND sm.member_id   = sqlc.narg('involves_user_id')::uuid
-          UNION
-          SELECT s.id
-            FROM squad s
-            JOIN agent a ON a.id = s.leader_id
-           WHERE s.workspace_id = $1
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-          UNION
-          SELECT sm.squad_id
-            FROM squad_member sm
-            JOIN squad s ON s.id = sm.squad_id
-            JOIN agent a ON a.id = sm.member_id
-           WHERE s.workspace_id = $1
-             AND sm.member_type = 'agent'
-             AND a.workspace_id = $1
-             AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
-    ))
-  );
+  AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb);
 
 -- name: ListChildIssues :many
 SELECT * FROM issue
@@ -253,7 +159,7 @@ WHERE workspace_id = $1
 LIMIT 1;
 
 -- name: CountCreatedIssueAssignees :many
--- Count assignees on issues created by a specific user.
+-- Count agent assignees on issues in this workspace.
 SELECT
   assignee_type,
   assignee_id,
@@ -261,7 +167,6 @@ SELECT
 FROM issue
 WHERE workspace_id = $1
   AND creator_id = $2
-  AND creator_type = 'member'
   AND assignee_type IS NOT NULL
   AND assignee_id IS NOT NULL
 GROUP BY assignee_type, assignee_id;

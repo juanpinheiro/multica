@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
 import {
   DndContext,
@@ -15,12 +15,9 @@ import {
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
-import { useModalStore } from "@multica/core/modals";
+import type { IssueSortParam } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { StatusHeading } from "./status-heading";
@@ -55,18 +52,12 @@ export function ListView({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
-  myIssuesScope,
-  myIssuesFilter,
-  featureId,
   onMoveIssue,
   sort,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
-  featureId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   sort?: IssueSortParam;
 }) {
@@ -91,10 +82,6 @@ export function ListView({
       ),
     [visibleStatuses, listCollapsedStatuses]
   );
-
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
 
   const dragEnabled = !!onMoveIssue;
 
@@ -306,8 +293,6 @@ export function ListView({
             issueIds={columns[statusGroupId(status)] ?? EMPTY_IDS}
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
-            myIssuesOpts={myIssuesOpts}
-            featureId={featureId}
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
             sortLabel={sortLabel}
@@ -355,8 +340,6 @@ function StatusAccordionItem({
   issueIds,
   issueMap,
   childProgressMap,
-  myIssuesOpts,
-  featureId,
   dragEnabled,
   isExpanded,
   sortLabel,
@@ -366,8 +349,6 @@ function StatusAccordionItem({
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
-  featureId?: string;
   dragEnabled: boolean;
   isExpanded: boolean;
   sortLabel: string | null;
@@ -379,7 +360,6 @@ function StatusAccordionItem({
   const deselect = useIssueSelectionStore((s) => s.deselect);
   const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
     status,
-    myIssuesOpts,
     sort,
   );
 
@@ -432,27 +412,6 @@ function StatusAccordionItem({
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
           <StatusHeading status={status} count={total} />
         </Accordion.Trigger>
-        <div className="pr-2">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
-                  onClick={() =>
-                    useModalStore
-                      .getState()
-                      .open("create-issue", { status, ...(featureId ? { feature_id: featureId } : {}) })
-                  }
-                />
-              }
-            >
-              <Plus className="size-3.5" />
-            </TooltipTrigger>
-            <TooltipContent>{t(($) => $.list.add_issue_tooltip)}</TooltipContent>
-          </Tooltip>
-        </div>
       </Accordion.Header>
       <Accordion.Panel>
         {issues.length > 0 ? (

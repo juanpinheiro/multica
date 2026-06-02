@@ -44,15 +44,6 @@ export interface ListIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   feature_id?: string;
-  /**
-   * Widen the assignee filter to issues where the user is the *indirect*
-   * assignee — assignee is one of the user's owned agents, or a squad that
-   * involves the user (human member / leader-via-owned-agent / agent member
-   * owned by the user). Direct member assignment is intentionally excluded:
-   * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
-   * disjoint result sets by construction.
-   */
-  involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   open_only?: boolean;
@@ -84,8 +75,6 @@ export interface ListGroupedIssuesParams {
   assignee_ids?: string[];
   creator_id?: string;
   feature_id?: string;
-  /** See `ListIssuesParams.involves_user_id` — same semantics. */
-  involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   assignee_filters?: IssueActorRef[];

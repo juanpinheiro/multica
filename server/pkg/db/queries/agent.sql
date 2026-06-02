@@ -146,23 +146,68 @@ VALUES (
 )
 RETURNING *;
 
--- name: CreateQuickCreateTask :one
--- Quick-create tasks have no issue / chat / autopilot link; the entire job
--- description (prompt, requester, workspace) lives in context JSONB. The
--- daemon detects this variant via context.type == "quick_create".
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
-VALUES ($1, $2, NULL, 'queued', $3, $4)
+-- name: CreateValidatorTask :one
+-- A validator Run (ADR-0006): role=validator on the Milestone's Issue, with a
+-- fresh session so it reviews with clean context, separate from the worker.
+-- Dispatched at a Milestone boundary to check the Milestone against its DoD.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, role, force_fresh_session
+)
+VALUES (
+    $1, $2, $3, 'queued', $4, 'validator', TRUE
+)
 RETURNING *;
 
--- name: LinkTaskToIssue :exec
--- Attaches the issue a quick-create task produced back to the task row, once
--- the agent has finished and the issue exists. Guarded by `issue_id IS NULL`
--- so this never overwrites an issue id that was set at task creation (only
--- quick-create tasks land here unset). Fixes the activity row staying on
--- "Creating issue" forever after completion.
-UPDATE agent_task_queue
-SET issue_id = $2
-WHERE id = $1 AND issue_id IS NULL;
+-- name: CreateRetrospectiveTask :one
+-- A retrospective Run (issue 19): role=retrospective on the Initiative's last
+-- Issue, with a fresh session so it reviews the finished work with clean context.
+-- Dispatched at the Initiative boundary to record the Decision Log and update the
+-- architecture docs.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, role, force_fresh_session
+)
+VALUES (
+    $1, $2, $3, 'queued', $4, 'retrospective', TRUE
+)
+RETURNING *;
+
+-- name: CountActiveRetrospectiveRunsByFeature :one
+-- Counts in-flight retrospective Runs on any Issue in the Initiative, so the
+-- boundary trigger does not dispatch a duplicate retrospective.
+SELECT count(*)::bigint
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.feature_id = $1
+  AND atq.role = 'retrospective'
+  AND atq.status IN ('queued', 'dispatched', 'running');
+
+-- name: CountActiveValidatorRunsByMilestone :one
+-- Counts in-flight validator Runs on any Issue in the Milestone, so the boundary
+-- trigger does not dispatch a duplicate validator while one is still working.
+SELECT count(*)::bigint
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.milestone_id = $1
+  AND atq.role = 'validator'
+  AND atq.status IN ('queued', 'dispatched', 'running');
+
+-- name: CountRunsByFeature :one
+-- Counts every Run (worker and validator) dispatched for an Initiative — the
+-- Run-budget input to the Tripwire/Budget safety net.
+SELECT count(*)::bigint
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+WHERE i.feature_id = $1;
+
+-- name: GetValidatorAgent :one
+-- Picks a non-archived, runtime-backed agent other than the worker to keep the
+-- creator-verifier separation. ErrNoRows means the caller falls back to the
+-- worker agent with a fresh session.
+SELECT id FROM agent
+WHERE workspace_id = $1 AND id != $2
+  AND archived_at IS NULL AND runtime_id IS NOT NULL
+ORDER BY created_at ASC
+LIMIT 1;
 
 -- name: CreateRetryTask :one
 -- Clones a parent task into a fresh queued attempt. Carries forward the
@@ -176,13 +221,13 @@ WHERE id = $1 AND issue_id IS NULL;
 -- parent and the self-trigger guard in shouldEnqueueSquadLeaderOnComment
 -- continues to recognise it as a leader task.
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
+    agent_id, runtime_id, issue_id, autopilot_run_id,
     status, priority, trigger_comment_id, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id, p.runtime_id, p.issue_id, p.autopilot_run_id,
     'queued', p.priority, p.trigger_comment_id, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
@@ -236,16 +281,6 @@ SET status = 'cancelled', completed_at = now()
 WHERE trigger_comment_id = $1 AND status IN ('queued', 'dispatched', 'running')
 RETURNING *;
 
--- name: CancelAgentTasksByChatSession :many
--- Cancels active tasks belonging to a chat session. Called from
--- DeleteChatSession so the daemon doesn't keep running work whose result
--- has nowhere to land. Must run BEFORE the chat_session row is deleted —
--- the FK ON DELETE SET NULL would otherwise nullify chat_session_id and we
--- could no longer reach those tasks.
-UPDATE agent_task_queue
-SET status = 'cancelled', completed_at = now()
-WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running')
-RETURNING *;
 
 -- name: GetAgentTask :one
 SELECT * FROM agent_task_queue
@@ -256,16 +291,10 @@ WHERE id = $1;
 -- a task is only claimable when no other task for the same issue AND same agent is
 -- already dispatched or running. This allows different agents to work on the same
 -- issue in parallel while preventing a single agent from running duplicate tasks.
--- Chat tasks (issue_id IS NULL) use chat_session_id for serialization instead.
--- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
--- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
--- otherwise a user mashing the create button could fire concurrent quick-creates
--- whose completion lookup would race over "most recent issue by this agent".
 --
 -- Dependency gate: a task whose issue has unsatisfied `blocks`/`blocked_by`
 -- dependencies (blocker.status != 'done') is not claimable. `related`
--- dependencies are non-gating. Chat / quick-create tasks have no issue_id
--- and are unaffected.
+-- dependencies are non-gating.
 --
 -- Branch gate: when two queued tasks would push to the same git branch OF THE
 -- SAME REPO, only one runs at a time so two agents don't fight over the same
@@ -280,8 +309,7 @@ WHERE id = $1;
 -- serialization to (repo, branch), letting backend and frontend slices run in
 -- parallel while two slices on one repo's feature branch stay serial. Issues
 -- with repo_id IS NULL hold no branch and are exempt (the i2.repo_id = ...
--- comparison is never true against NULL). Chat / quick-create tasks have no
--- issue_id and are unaffected.
+-- comparison is never true against NULL).
 UPDATE agent_task_queue
 SET status = 'dispatched', dispatched_at = now()
 WHERE id = (
@@ -291,18 +319,41 @@ WHERE id = (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
             AND active.status IN ('dispatched', 'running')
-            AND (
-              (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
-              OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
-              OR (
-                atq.issue_id IS NULL
-                AND atq.chat_session_id IS NULL
-                AND atq.autopilot_run_id IS NULL
-                AND active.issue_id IS NULL
-                AND active.chat_session_id IS NULL
-                AND active.autopilot_run_id IS NULL
-              )
-            )
+            AND atq.issue_id IS NOT NULL
+            AND active.issue_id = atq.issue_id
+      )
+      -- Initiative-status gate: when the task's issue belongs to an Initiative
+      -- (feature), that Initiative must be 'ready' or 'running' for the task to
+      -- be claimable. 'draft' (not yet flipped) and terminal/blocked states hold
+      -- the work back. Issues with no feature_id are not governed by any
+      -- Initiative and remain claimable.
+      --
+      -- Exception: the retrospective Run (issue 19) is dispatched exactly when
+      -- the Orchestrator advances the Initiative to 'in_review', so it must stay
+      -- claimable in that state — otherwise the Gate blocks the very Run it just
+      -- dispatched and the Decision Log is never written (the task sits 'queued'
+      -- until it expires). Mirrored in gate.World.InitiativeActive's doc.
+      AND NOT EXISTS (
+          SELECT 1 FROM issue gi
+          JOIN feature gf ON gi.feature_id = gf.id
+          WHERE atq.issue_id IS NOT NULL
+            AND gi.id = atq.issue_id
+            AND gf.status NOT IN ('ready', 'running')
+            AND NOT (atq.role = 'retrospective' AND gf.status = 'in_review')
+      )
+      -- Milestone gate: when the task's issue belongs to a Milestone, every
+      -- earlier Milestone in the same Initiative (a lower position) must have
+      -- passed validation before this Milestone's Issues become claimable. This
+      -- mirrors gate.MilestoneGateOpen (server/internal/gate), the pure spec of
+      -- the predicate. Issues with no milestone_id are exempt.
+      AND NOT EXISTS (
+          SELECT 1 FROM issue mi
+          JOIN milestone m ON mi.milestone_id = m.id
+          JOIN milestone prev ON prev.feature_id = m.feature_id
+                             AND prev.position < m.position
+                             AND prev.validation_status <> 'passed'
+          WHERE atq.issue_id IS NOT NULL
+            AND mi.id = atq.issue_id
       )
       AND NOT EXISTS (
           SELECT 1 FROM issue_dependency d
@@ -433,9 +484,8 @@ LIMIT 1;
 -- Marks a task as failed. session_id and work_dir are merged via COALESCE so
 -- if the agent already established a real session before failing (e.g. it
 -- crashed mid-conversation, was cancelled, or hit a tool error) the resume
--- pointer is preserved on the task row. The next chat task can then fall
--- back to GetLastChatTaskSession and continue the conversation instead of
--- silently starting over.
+-- pointer is preserved on the task row. The next task on the same issue can
+-- then resume the conversation instead of silently starting over.
 --
 -- failure_reason is a coarse classifier consumed by the auto-retry path;
 -- 'agent_error' is the safe default when the daemon doesn't supply one.

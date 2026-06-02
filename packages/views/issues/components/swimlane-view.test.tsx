@@ -251,8 +251,8 @@ const mockIssues: Issue[] = [
     description: "Child description",
     status: "in_progress",
     priority: "medium",
-    assignee_type: "member",
-    assignee_id: "user-1",
+    assignee_type: "agent",
+    assignee_id: "agent-1",
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: "parent-1",
@@ -360,39 +360,6 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Child Issue 1")).toBeInTheDocument();
   });
 
-  it("triggers modal open when add button is clicked", () => {
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-
-    const addButtons = screen.getAllByRole("button", { name: /add issue/i });
-    expect(addButtons.length).toBeGreaterThan(0);
-
-    fireEvent.click(addButtons[0]!);
-    expect(mockOpenModal).toHaveBeenCalledWith("create-issue", expect.any(Object));
-  });
-
-  it("includes feature_id in the create payload when featureId prop is set", () => {
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        onMoveIssue={vi.fn()}
-        featureId="proj-42"
-      />,
-    );
-
-    const addButtons = screen.getAllByRole("button", { name: /add issue/i });
-    fireEvent.click(addButtons[0]!);
-
-    expect(mockOpenModal).toHaveBeenCalledWith(
-      "create-issue",
-      expect.objectContaining({ feature_id: "proj-42" }),
-    );
-  });
-
   // A child whose parent isn't in the loaded set — lands in "Other parents".
   const orphanChild: Issue = {
     id: "lonely-child",
@@ -403,8 +370,8 @@ describe("SwimLaneView", () => {
     description: null,
     status: "todo",
     priority: "medium",
-    assignee_type: "member",
-    assignee_id: "user-1",
+    assignee_type: "agent",
+    assignee_id: "agent-1",
     creator_type: "member",
     creator_id: "user-1",
     parent_issue_id: "missing-parent",
@@ -426,22 +393,6 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Lonely Child")).toBeInTheDocument();
   });
 
-  it("does not render the add-issue button inside 'Other parents' cells", () => {
-    renderWithI18n(
-      <SwimLaneView
-        issues={[...mockIssues, orphanChild]}
-        onMoveIssue={vi.fn()}
-      />,
-    );
-
-    // No parent + Parent Issue 1 each have one + per visible status column.
-    // The Other parents lane must add zero.
-    const realLaneCount = 2;
-    const visibleStatusCount = 6; // BOARD_STATUSES default
-    expect(
-      screen.getAllByRole("button", { name: /add issue/i }).length,
-    ).toBe(realLaneCount * visibleStatusCount);
-  });
 
   it("does not call onMoveIssue when a card is dropped onto the empty whitespace of an 'Other parents' cell", () => {
     // `over.id` is the orphan cell id — what dnd-kit emits when the
@@ -1049,8 +1000,8 @@ describe("SwimLaneView", () => {
       id: "issue-x",
       identifier: "PROJ-200",
       title: "Issue X",
-      assignee_type: "member",
-      assignee_id: "user-1",
+      assignee_type: "agent",
+      assignee_id: "agent-2",
       parent_issue_id: null,
       feature_id: null,
       status: "todo",
@@ -1103,7 +1054,7 @@ describe("SwimLaneView", () => {
       <SwimLaneView issues={assigneeIssues} onMoveIssue={mockOnMoveIssue} />,
     );
 
-    const target = "swim:assignee:member:user-1:in_review";
+    const target = "swim:assignee:agent:agent-2:in_review";
     act(() => {
       lastOnDragOver({ active: { id: "issue-z" }, over: { id: target } });
     });
@@ -1114,8 +1065,8 @@ describe("SwimLaneView", () => {
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "issue-z",
       expect.objectContaining({
-        assignee_type: "member",
-        assignee_id: "user-1",
+        assignee_type: "agent",
+        assignee_id: "agent-2",
         status: "in_review",
       }),
     );

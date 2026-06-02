@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/initiative"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -802,6 +803,13 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 					h.advanceIssueToDone(ctx, issue, workspaceID)
 				}
 			}
+			// A merged PR is the human-review gate for in_review → done (ADR-0005).
+			// After all issues are orchestrated, advance any Initiative that reached
+			// in_review to done. Called only on merge so closed-without-merge PRs
+			// do not prematurely complete an Initiative.
+			if state == "merged" {
+				h.advanceFeaturesOnPRMerge(ctx, reevalIssues)
+			}
 		}
 	}
 
@@ -1127,12 +1135,14 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		return
 	}
 
-	// Fire the platform parent-notification and feature-completion paths on the
-	// same transition the HTTP UpdateIssue / BatchUpdateIssues handlers use.
+	// Fire the platform parent-notification and orchestration on the same
+	// transition the HTTP UpdateIssue / BatchUpdateIssues handlers use.
 	// A merged PR is the dominant way a sub-issue reaches `done`, so skipping
 	// these helpers here would silently drop notifications on that path.
+	// Feature-ready notification is now fired by the Orchestrator when it
+	// advances the Initiative to in_review (not at individual issue-done).
 	h.notifyParentOfChildDone(ctx, issue, updated)
-	h.notifyFeatureReadyForReview(ctx, issue, updated)
+	h.orchestrateOnIssueDone(ctx, issue, updated)
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)
@@ -1154,6 +1164,33 @@ func parseStrictUUID(s string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, err
 	}
 	return u, nil
+}
+
+// advanceFeaturesOnPRMerge advances any Initiative in in_review to done when a
+// PR is merged. The PR merge is the human-review gate for in_review → done
+// (ADR-0005). Deduplicates by feature so a PR linked to several issues in the
+// same Initiative only triggers one transition.
+func (h *Handler) advanceFeaturesOnPRMerge(ctx context.Context, issues []db.Issue) {
+	seen := make(map[pgtype.UUID]struct{})
+	for _, issue := range issues {
+		if !issue.FeatureID.Valid {
+			continue
+		}
+		if _, dup := seen[issue.FeatureID]; dup {
+			continue
+		}
+		seen[issue.FeatureID] = struct{}{}
+		feature, err := h.Queries.GetFeature(ctx, issue.FeatureID)
+		if err != nil {
+			slog.Warn("pr lifecycle: load feature failed",
+				"feature_id", uuidToString(issue.FeatureID), "error", err)
+			continue
+		}
+		if feature.Status != string(initiative.StatusInReview) {
+			continue
+		}
+		h.advanceInitiative(ctx, issue.FeatureID, initiative.StatusInReview, initiative.StatusDone)
+	}
 }
 
 func coalesce(a, fallback string) string {

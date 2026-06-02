@@ -7,7 +7,6 @@ import {
   Settings,
   FolderGit2,
   FlaskConical,
-  Bell,
   Plug,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
@@ -21,15 +20,13 @@ import { RepositoriesTab } from "./repositories-tab";
 import { GitHubTab } from "./github-tab";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
-import { NotificationsTab } from "./notifications-tab";
 import { useT } from "../../i18n";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications"] as const;
+const ACCOUNT_TAB_KEYS = ["profile", "preferences"] as const;
 const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
-  notifications: Bell,
-} as const;
+} satisfies Record<string, React.ComponentType<{ className?: string }>>;
 
 const WORKSPACE_TAB_KEYS = [
   "general",
@@ -150,7 +147,6 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
         <div className="w-full max-w-3xl mx-auto p-4 md:p-6">
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="preferences"><PreferencesTab /></TabsContent>
-          <TabsContent value="notifications"><NotificationsTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
           <TabsContent value="github"><GitHubTab /></TabsContent>

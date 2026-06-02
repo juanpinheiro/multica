@@ -97,10 +97,10 @@ func TestMCPListFeaturesStatusFilter(t *testing.T) {
 	sess := newSession(t, s)
 	initialize(t, sess)
 
-	callTool(t, sess, "list_features", map[string]any{"status": "planned"})
+	callTool(t, sess, "list_features", map[string]any{"status": "draft"})
 
-	if capturedQuery != "status=planned" {
-		t.Errorf("query = %q, want status=planned", capturedQuery)
+	if capturedQuery != "status=draft" {
+		t.Errorf("query = %q, want status=draft", capturedQuery)
 	}
 }
 

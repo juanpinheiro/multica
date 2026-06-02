@@ -143,7 +143,7 @@ func TestMCPServerToolsList(t *testing.T) {
 	if tools == nil {
 		tools = []any{}
 	}
-	const wantTools = 16
+	const wantTools = 19
 	if len(tools) != wantTools {
 		t.Errorf("tools/list returned %d tools, want %d", len(tools), wantTools)
 	}
@@ -157,6 +157,7 @@ func TestMCPServerToolsList(t *testing.T) {
 	for _, want := range []string{
 		"list_features", "get_feature", "list_issues", "get_issue", "list_agents", "list_repos",
 		"create_feature", "update_feature", "approve_feature", "set_feature_status",
+		"create_milestone", "update_milestone", "create_dod_assertion",
 		"create_issue", "update_issue", "set_issue_status", "assign_issue",
 		"comment_on_issue", "link_issue_dependency",
 	} {

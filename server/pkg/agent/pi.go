@@ -19,6 +19,10 @@ import (
 // stream on stdout.
 type piBackend struct {
 	cfg Config
+	// resultTeardownGrace overrides defaultResultTeardownGrace. Zero means use
+	// the default; tests set a small value to keep the hung-after-result path
+	// fast.
+	resultTeardownGrace time.Duration
 }
 
 var (
@@ -261,6 +265,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var output strings.Builder
 		finalStatus := "completed"
 		var finalError string
+		resultSeen := false
 		usage := make(map[string]TokenUsage)
 
 		scanner := bufio.NewScanner(stdout)
@@ -334,6 +339,14 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					u.CacheWriteTokens += msg.Usage.CacheWrite
 					usage[model] = u
 				}
+				// turn_end is the authoritative completion signal. Tear the
+				// process down proactively so a CLI that ends its turn and then
+				// hangs resolves now instead of blocking the reader until the
+				// idle watchdog.
+				if !resultSeen {
+					resultSeen = true
+					scheduleResultTeardown(runCtx, cancel, resolveResultTeardownGrace(b.resultTeardownGrace))
+				}
 
 			case "error":
 				errText := decodePiString(evt.Message)
@@ -362,15 +375,20 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		waitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("pi timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		} else if waitErr != nil && finalStatus == "completed" {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("pi exited with error: %v", waitErr)
+		// A run that ended its turn has already recorded its real disposition.
+		// Don't let the teardown cancel — or a non-zero exit from the force-kill
+		// that follows it — clobber that into aborted/failed.
+		if !resultSeen {
+			if runCtx.Err() == context.DeadlineExceeded {
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("pi timed out after %s", timeout)
+			} else if runCtx.Err() == context.Canceled {
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			} else if waitErr != nil && finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("pi exited with error: %v", waitErr)
+			}
 		}
 
 		b.cfg.Logger.Info("pi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())

@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/mention"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -31,14 +30,10 @@ type CommentResponse struct {
 	ResolvedAt     *string              `json:"resolved_at"`
 	ResolvedByType *string              `json:"resolved_by_type"`
 	ResolvedByID   *string              `json:"resolved_by_id"`
-	Reactions      []ReactionResponse   `json:"reactions"`
 	Attachments    []AttachmentResponse `json:"attachments"`
 }
 
-func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments []AttachmentResponse) CommentResponse {
-	if reactions == nil {
-		reactions = []ReactionResponse{}
-	}
+func commentToResponse(c db.Comment, attachments []AttachmentResponse) CommentResponse {
 	if attachments == nil {
 		attachments = []AttachmentResponse{}
 	}
@@ -55,7 +50,6 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		ResolvedAt:     timestampToPtr(c.ResolvedAt),
 		ResolvedByType: textToPtr(c.ResolvedByType),
 		ResolvedByID:   uuidToPtr(c.ResolvedByID),
-		Reactions:      reactions,
 		Attachments:    attachments,
 	}
 }
@@ -260,13 +254,12 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	for i, c := range result.Comments {
 		commentIDs[i] = c.ID
 	}
-	grouped := h.groupReactions(r, commentIDs)
 	groupedAtt := h.groupAttachments(r, commentIDs)
 
 	resp := make([]CommentResponse, len(result.Comments))
 	for i, c := range result.Comments {
 		cid := uuidToString(c.ID)
-		resp[i] = commentToResponse(c, grouped[cid], groupedAtt[cid])
+		resp[i] = commentToResponse(c, groupedAtt[cid])
 	}
 
 	// Emit the next cursor as response headers when the page is likely not
@@ -662,17 +655,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 							return
 						}
 					}
-					noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
-					if checkErr != nil {
-						slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
-							"error", checkErr,
-							"task_id", taskIDHeader,
-							"issue_id", issueID,
-						)...)
-					} else if noAction {
-						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
-						return
-					}
 				}
 			}
 		}
@@ -709,7 +691,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
-	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
+	resp := commentToResponse(comment, groupedAtt[uuidToString(comment.ID)])
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
@@ -742,14 +724,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.TaskService.EnqueueTaskForIssue(r.Context(), issue, comment.ID); err != nil {
 			slog.Warn("enqueue agent task on comment failed", "issue_id", issueID, "error", err)
 		}
-	}
-
-	// Squad trigger: if the issue is assigned to a squad, trigger the squad leader.
-	// Skip when the comment author is the leader (prevent internal loops), or
-	// when a member explicitly @mentions anyone (agent/member/squad/all) — that
-	// counts as deliberate routing and the leader stays out.
-	if h.shouldEnqueueSquadLeaderOnComment(r.Context(), issue, comment.Content, authorType, authorID) {
-		h.enqueueSquadLeaderTask(r.Context(), issue, comment.ID, authorType, authorID)
 	}
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
@@ -901,50 +875,6 @@ func (h *Handler) enqueueMentionedAgentTasks(ctx context.Context, issue db.Issue
 		mentions = util.ParseMentions(parentComment.Content)
 	}
 	for _, m := range mentions {
-		if m.Type == "squad" {
-			// @squad mention → trigger the squad's leader agent.
-			squadUUID := parseUUID(m.ID)
-			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-				ID:          squadUUID,
-				WorkspaceID: issue.WorkspaceID,
-			})
-			if err != nil {
-				continue
-			}
-			leaderID := squad.LeaderID
-			// Prevent self-trigger only when the agent's last activity on this
-			// issue was itself a leader task. An agent that holds both the
-			// leader and a worker role in the squad must still wake its
-			// leader role after posting a comment from its worker task.
-			if authorType == "agent" && authorID == uuidToString(leaderID) &&
-				h.lastTaskWasLeader(ctx, issue.ID, leaderID) {
-				continue
-			}
-			// Verify leader agent is ready (has runtime, not archived).
-			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-				ID:          leaderID,
-				WorkspaceID: issue.WorkspaceID,
-			})
-			if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-				continue
-			}
-			// Private-agent gate: prevent triggering a private leader via squad mention.
-			if !h.canAccessPrivateAgent(ctx, agent, authorType, authorID, wsID) {
-				continue
-			}
-			// Dedup: skip if leader already has a pending task for this issue.
-			hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-				IssueID: issue.ID,
-				AgentID: leaderID,
-			})
-			if err != nil || hasPending {
-				continue
-			}
-			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, leaderID, comment.ID); err != nil {
-				slog.Warn("enqueue squad leader mention task failed", "issue_id", uuidToString(issue.ID), "squad_id", m.ID, "error", err)
-			}
-			continue
-		}
 		if m.Type != "agent" {
 			continue
 		}
@@ -1071,11 +1001,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		h.linkAttachmentsByIDs(r.Context(), comment.ID, existing.IssueID, attachmentIDs)
 	}
 
-	// Fetch reactions and attachments for the updated comment.
-	grouped := h.groupReactions(r, []pgtype.UUID{comment.ID})
+	// Fetch attachments for the updated comment.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	cid := uuidToString(comment.ID)
-	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
+	resp := commentToResponse(comment, groupedAtt[cid])
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
 	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 	writeJSON(w, http.StatusOK, resp)
@@ -1212,10 +1141,9 @@ func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	grouped := h.groupReactions(r, []pgtype.UUID{updated.ID})
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{updated.ID})
 	cid := uuidToString(updated.ID)
-	resp := commentToResponse(updated, grouped[cid], groupedAtt[cid])
+	resp := commentToResponse(updated, groupedAtt[cid])
 
 	// Suppress the event on a re-resolve no-op so consumers do not re-process
 	// an unchanged thread (notifications, log spam).
@@ -1240,10 +1168,9 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	grouped := h.groupReactions(r, []pgtype.UUID{updated.ID})
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{updated.ID})
 	cid := uuidToString(updated.ID)
-	resp := commentToResponse(updated, grouped[cid], groupedAtt[cid])
+	resp := commentToResponse(updated, groupedAtt[cid])
 
 	if wasResolved {
 		slog.Info("comment unresolved", append(logger.RequestAttrs(r), "comment_id", cid)...)

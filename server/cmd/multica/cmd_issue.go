@@ -614,18 +614,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["assignee_id"] = aID
 	}
 
-	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
-	// before invoking the agent, the agent's `multica issue create` call
-	// inherits the env var and tags the new issue with origin_type=
-	// quick_create + origin_id=<task_id>. The completion handler then
-	// locates the issue deterministically by origin instead of "most
-	// recent issue by this agent", which is racy when max_concurrent_tasks
-	// > 1 and the agent is creating other issues in parallel.
-	if taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID"); taskID != "" {
-		body["origin_type"] = "quick_create"
-		body["origin_id"] = taskID
-	}
-
 	// Pre-validate attachments BEFORE creating the issue so a bad path
 	// can never produce a half-created issue (which would otherwise
 	// trigger callers — especially the agent doing quick-create — to
@@ -1679,7 +1667,7 @@ func normalizeAssigneeLookupInput(raw string) string {
 	input := strings.TrimSpace(raw)
 	if m := util.MentionRe.FindStringSubmatch(input); len(m) == 4 && m[0] == input {
 		switch m[2] {
-		case "member", "agent", "squad":
+		case "member", "agent":
 			return m[3]
 		}
 	}

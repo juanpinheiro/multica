@@ -14,8 +14,8 @@ import (
 )
 
 // TestAutopilotFeatureGate verifies that DispatchAutopilot respects
-// feature.status: dispatch is skipped unless the feature is in_progress,
-// and autopilots with no feature are unaffected.
+// the parent Initiative (feature) status: dispatch is skipped unless the
+// Initiative is running, and autopilots with no feature are unaffected.
 func TestAutopilotFeatureGate(t *testing.T) {
 	ctx := context.Background()
 
@@ -74,8 +74,8 @@ func TestAutopilotFeatureGate(t *testing.T) {
 		return ap
 	}
 
-	t.Run("planned skips dispatch and records skip reason", func(t *testing.T) {
-		featureID := makeFeature(t, "planned")
+	t.Run("draft skips dispatch and records skip reason", func(t *testing.T) {
+		featureID := makeFeature(t, "draft")
 		ap := makeAutopilot(t, featureID)
 
 		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
@@ -85,8 +85,8 @@ func TestAutopilotFeatureGate(t *testing.T) {
 		if run.Status != "skipped" {
 			t.Errorf("run.Status = %q, want skipped", run.Status)
 		}
-		if run.FailureReason.String != "feature_not_in_progress" {
-			t.Errorf("run.FailureReason = %q, want feature_not_in_progress", run.FailureReason.String)
+		if run.FailureReason.String != "feature_not_running" {
+			t.Errorf("run.FailureReason = %q, want feature_not_running", run.FailureReason.String)
 		}
 		if run.IssueID.Valid {
 			t.Error("run.IssueID should be unset for skipped dispatch")
@@ -102,8 +102,8 @@ func TestAutopilotFeatureGate(t *testing.T) {
 		}
 	})
 
-	t.Run("in_progress dispatches normally and enqueues task", func(t *testing.T) {
-		featureID := makeFeature(t, "in_progress")
+	t.Run("running dispatches normally and enqueues task", func(t *testing.T) {
+		featureID := makeFeature(t, "running")
 		ap := makeAutopilot(t, featureID)
 		t.Cleanup(func() {
 			testPool.Exec(context.Background(), `DELETE FROM issue WHERE origin_id = $1`, ap.ID)
@@ -129,8 +129,8 @@ func TestAutopilotFeatureGate(t *testing.T) {
 		}
 	})
 
-	t.Run("completed skips dispatch", func(t *testing.T) {
-		featureID := makeFeature(t, "completed")
+	t.Run("done skips dispatch", func(t *testing.T) {
+		featureID := makeFeature(t, "done")
 		ap := makeAutopilot(t, featureID)
 
 		run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil, "")
@@ -140,8 +140,8 @@ func TestAutopilotFeatureGate(t *testing.T) {
 		if run.Status != "skipped" {
 			t.Errorf("run.Status = %q, want skipped", run.Status)
 		}
-		if run.FailureReason.String != "feature_not_in_progress" {
-			t.Errorf("run.FailureReason = %q, want feature_not_in_progress", run.FailureReason.String)
+		if run.FailureReason.String != "feature_not_running" {
+			t.Errorf("run.FailureReason = %q, want feature_not_running", run.FailureReason.String)
 		}
 	})
 

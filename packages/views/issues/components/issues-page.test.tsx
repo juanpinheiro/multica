@@ -95,24 +95,6 @@ const mockListAgents = vi.hoisted(() =>
     },
   ]),
 );
-const mockListSquads = vi.hoisted(() =>
-  vi.fn().mockResolvedValue([
-    {
-      id: "squad-1",
-      workspace_id: "ws-1",
-      name: "Squad One",
-      description: "",
-      instructions: "",
-      avatar_url: null,
-      leader_id: "agent-1",
-      creator_id: "user-1",
-      archived_at: null,
-      archived_by: null,
-      created_at: "2026-01-01T00:00:00Z",
-      updated_at: "2026-01-01T00:00:00Z",
-    },
-  ]),
-);
 vi.mock("@multica/core/api", () => ({
   api: {
     listIssues: (...args: any[]) => mockListIssues(...args),
@@ -120,7 +102,6 @@ vi.mock("@multica/core/api", () => ({
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
-    listSquads: (...args: any[]) => mockListSquads(...args),
   },
   getApi: () => ({
     listIssues: (...args: any[]) => mockListIssues(...args),
@@ -128,7 +109,6 @@ vi.mock("@multica/core/api", () => ({
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
-    listSquads: (...args: any[]) => mockListSquads(...args),
   }),
   setApiInstance: vi.fn(),
 }));
@@ -351,8 +331,8 @@ const mockIssues: Issue[] = [
     description: "Add JWT authentication",
     status: "todo",
     priority: "high",
-    assignee_type: "member",
-    assignee_id: "user-1",
+    assignee_type: "agent",
+    assignee_id: "agent-1",
     creator_type: "member",
     creator_id: "user-1",
     start_date: null,
@@ -391,25 +371,6 @@ const mockIssues: Issue[] = [
     priority: "low",
     assignee_type: null,
     assignee_id: null,
-    creator_type: "member",
-    creator_id: "user-1",
-    start_date: null,
-    due_date: null,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  },
-  {
-    ...issueDefaults,
-    id: "issue-4",
-    workspace_id: "ws-1",
-    number: 4,
-    identifier: "TES-4",
-    title: "Squad task",
-    description: null,
-    status: "todo",
-    priority: "medium",
-    assignee_type: "squad",
-    assignee_id: "squad-1",
     creator_type: "member",
     creator_id: "user-1",
     start_date: null,
@@ -531,12 +492,7 @@ describe("IssuesPage (shared)", () => {
 
     renderWithQuery(<IssuesPage />);
 
-    // "Test User" renders both as the assignee group header and on the
-    // assignee chip of each card grouped under that header, so a unique
-    // match is not guaranteed.
-    await screen.findAllByText("Test User");
-    expect(screen.getAllByText("Agent One").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText("Squad One").length).toBeGreaterThanOrEqual(1);
+    expect((await screen.findAllByText("Agent One")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("No assignee")).toBeInTheDocument();
   });
 
@@ -585,11 +541,11 @@ describe("IssuesPage (shared)", () => {
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("All");
-    expect(screen.getByText("Members")).toBeInTheDocument();
+    expect(screen.queryByText("Members")).not.toBeInTheDocument();
     expect(screen.getByText("Agents")).toBeInTheDocument();
   });
 
-  it("agents scope includes squad-assigned issues", async () => {
+  it("agents scope shows only agent-assigned issues", async () => {
     mockScope = "agents";
     mockViewState.viewMode = "list";
     mockListIssues.mockImplementation((params: any) =>
@@ -600,26 +556,10 @@ describe("IssuesPage (shared)", () => {
     );
     renderWithQuery(<IssuesPage />);
 
-    // Squad task and agent task should be visible
+    // Both issues are agent-assigned, so both should be visible
     await screen.findByText("Design landing page");
-    expect(screen.getByText("Squad task")).toBeInTheDocument();
-    // Member task should NOT be visible
-    expect(screen.queryByText("Implement auth")).not.toBeInTheDocument();
-  });
-
-  it("members scope excludes squad-assigned issues", async () => {
-    mockScope = "members";
-    mockViewState.viewMode = "list";
-    mockListIssues.mockImplementation((params: any) =>
-      Promise.resolve({
-        issues: mockIssues.filter((i) => i.status === params?.status),
-        total: mockIssues.filter((i) => i.status === params?.status).length,
-      }),
-    );
-    renderWithQuery(<IssuesPage />);
-
-    await screen.findByText("Implement auth");
-    expect(screen.queryByText("Squad task")).not.toBeInTheDocument();
-    expect(screen.queryByText("Design landing page")).not.toBeInTheDocument();
+    expect(screen.getByText("Implement auth")).toBeInTheDocument();
+    // Unassigned issue should NOT be visible in agents scope
+    expect(screen.queryByText("Write tests")).not.toBeInTheDocument();
   });
 });

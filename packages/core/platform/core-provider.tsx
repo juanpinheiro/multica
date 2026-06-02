@@ -4,7 +4,6 @@ import { useMemo } from "react";
 import { ApiClient } from "../api/client";
 import { setApiInstance, setSchemaLogger } from "../api";
 import { createAuthStore, registerAuthStore } from "../auth";
-import { createChatStore, registerChatStore } from "../chat";
 import {
   I18nProvider,
   LocaleAdapterProvider,
@@ -16,16 +15,13 @@ import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
-import type { StorageAdapter } from "../types/storage";
 
 // Module-level singletons — created once at first render, never recreated.
 // Vite HMR preserves module-level state, so these survive hot reloads.
 let initialized = false;
 let authStore: ReturnType<typeof createAuthStore>;
-let chatStore: ReturnType<typeof createChatStore>;
 function initCore(
   apiBaseUrl: string,
-  storage: StorageAdapter,
   identity?: ClientIdentity,
 ) {
   if (initialized) return;
@@ -45,9 +41,6 @@ function initCore(
   authStore = createAuthStore({ api });
   registerAuthStore(authStore);
 
-  chatStore = createChatStore({ storage });
-  registerChatStore(chatStore);
-
   initialized = true;
 }
 
@@ -65,7 +58,7 @@ export function CoreProvider({
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and identity are set at app boot and never change at runtime.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => initCore(apiBaseUrl, storage, identity), []);
+  useMemo(() => initCore(apiBaseUrl, identity), []);
 
   // I18nProvider wraps everything else: server and client must use the same
   // (locale, resources) to avoid hydration mismatch. Language switching goes

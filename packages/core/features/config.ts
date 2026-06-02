@@ -1,10 +1,12 @@
 import type { FeatureStatus, FeaturePriority } from "../types";
 
 export const FEATURE_STATUS_ORDER: FeatureStatus[] = [
-  "planned",
-  "in_progress",
-  "paused",
-  "completed",
+  "draft",
+  "ready",
+  "running",
+  "in_review",
+  "done",
+  "blocked",
   "cancelled",
 ];
 
@@ -12,10 +14,12 @@ export const FEATURE_STATUS_CONFIG: Record<
   FeatureStatus,
   { label: string; color: string; dotColor: string; badgeBg: string; badgeText: string }
 > = {
-  planned: { label: "Planned", color: "text-muted-foreground", dotColor: "bg-muted-foreground", badgeBg: "bg-muted", badgeText: "text-muted-foreground" },
-  in_progress: { label: "In Progress", color: "text-warning", dotColor: "bg-warning", badgeBg: "bg-warning", badgeText: "text-white" },
-  paused: { label: "Paused", color: "text-muted-foreground", dotColor: "bg-muted-foreground", badgeBg: "bg-muted", badgeText: "text-muted-foreground" },
-  completed: { label: "Completed", color: "text-info", dotColor: "bg-info", badgeBg: "bg-info", badgeText: "text-white" },
+  draft: { label: "Draft", color: "text-muted-foreground", dotColor: "bg-muted-foreground", badgeBg: "bg-muted", badgeText: "text-muted-foreground" },
+  ready: { label: "Ready", color: "text-info", dotColor: "bg-info", badgeBg: "bg-info", badgeText: "text-white" },
+  running: { label: "Running", color: "text-warning", dotColor: "bg-warning", badgeBg: "bg-warning", badgeText: "text-white" },
+  in_review: { label: "In Review", color: "text-info", dotColor: "bg-info", badgeBg: "bg-info", badgeText: "text-white" },
+  done: { label: "Done", color: "text-info", dotColor: "bg-info", badgeBg: "bg-info", badgeText: "text-white" },
+  blocked: { label: "Blocked", color: "text-muted-foreground", dotColor: "bg-muted-foreground", badgeBg: "bg-muted", badgeText: "text-muted-foreground" },
   cancelled: { label: "Cancelled", color: "text-destructive", dotColor: "bg-destructive", badgeBg: "bg-muted", badgeText: "text-muted-foreground" },
 };
 

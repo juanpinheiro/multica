@@ -6,7 +6,6 @@ import {
   ArrowUpRight,
   CircleHelp,
   Hash,
-  MessageSquare,
   Workflow,
   X,
   Layers2,
@@ -88,26 +87,16 @@ export function ActivityTab({ agent }: ActivityTabProps) {
 
   const [recentDisplayLimit, setRecentDisplayLimit] = useState(RECENT_INITIAL);
 
-  // Chat tasks are intentionally hidden across every Agent-scoped surface
-  // (list / detail / activity). They have their own UI in the chat
-  // experience; mixing them in here muddies "what is this agent doing
-  // for the team" with "what is this agent doing in private chat".
-  const isWorkflowTask = (t: AgentTask) => !t.chat_session_id;
-
   const activeTasks = useMemo(() => {
     return snapshot.filter(
-      (t) => t.agent_id === agent.id && isWorkflowTask(t) && isNonTerminalStatus(t.status),
+      (t) => t.agent_id === agent.id && isNonTerminalStatus(t.status),
     );
   }, [snapshot, agent.id]);
 
-  // Most recent terminal tasks. Includes cancelled — users searching
-  // "what just happened" want to see cancellations alongside completions
-  // and failures. Chat sessions filtered out for the same reason as above.
   const recentTasksAll = useMemo(() => {
     return [...agentTasks]
       .filter(
         (t) =>
-          isWorkflowTask(t) &&
           !!t.completed_at &&
           (t.status === "completed" ||
             t.status === "failed" ||
@@ -394,7 +383,7 @@ function TaskRow({
     if (cancelling) return;
     setCancelling(true);
     try {
-      await api.cancelTaskById(task.id);
+      await api.cancelTask(task.issue_id, task.id);
       // No manual invalidate needed — the task:cancelled WS event flows
       // through useRealtimeSync's `task:` prefix path which already
       // invalidates snapshot + per-agent + per-issue task lists.
@@ -404,36 +393,22 @@ function TaskRow({
     }
   };
 
-  const isTerminalStatus =
-    task.status === "completed" ||
-    task.status === "failed" ||
-    task.status === "cancelled";
   const sourceFallback = !hasIssue
-    ? task.kind === "quick_create"
-      ? isTerminalStatus
-        ? t(($) => $.tab_body.activity.source_quick_create)
-        : t(($) => $.tab_body.activity.source_creating_issue)
-      : task.chat_session_id
-        ? t(($) => $.tab_body.activity.source_chat_session)
-        : task.autopilot_run_id
-          ? t(($) => $.tab_body.activity.source_autopilot_run)
-          : t(($) => $.tab_body.activity.source_untracked)
+    ? task.autopilot_run_id
+      ? t(($) => $.tab_body.activity.source_autopilot_run)
+      : t(($) => $.tab_body.activity.source_untracked)
     : null;
 
   const SourceIcon = hasIssue
     ? Hash
-    : task.chat_session_id
-      ? MessageSquare
-      : task.autopilot_run_id
-        ? Workflow
-        : CircleHelp;
+    : task.autopilot_run_id
+      ? Workflow
+      : CircleHelp;
   const sourceLabel = hasIssue
     ? t(($) => $.tab_body.activity.source_issue)
-    : task.chat_session_id
-      ? t(($) => $.tab_body.activity.source_chat)
-      : task.autopilot_run_id
-        ? t(($) => $.tab_body.activity.source_autopilot)
-        : t(($) => $.tab_body.activity.source_untracked);
+    : task.autopilot_run_id
+      ? t(($) => $.tab_body.activity.source_autopilot)
+      : t(($) => $.tab_body.activity.source_untracked);
 
   const timeText =
     timeMode === "active"

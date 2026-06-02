@@ -626,7 +626,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica label list",
 		"multica workspace member list",
 		"multica agent list",
-		"multica squad list",
 		"multica issue runs",
 		"multica issue run-messages",
 		"multica attachment download",
@@ -1333,39 +1332,6 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 	} {
 		if strings.Contains(s, banned) {
 			t.Errorf("AGENTS.md still carries Codex stdin mandate %q on Windows\n---\n%s", banned, s)
-		}
-	}
-}
-
-func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{QuickCreatePrompt: "create a task"}
-	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	s := string(data)
-
-	for _, want := range []string{
-		"quick-create task",
-		"Created <identifier-or-id>: <title>",
-		"identifier` from JSON output",
-		"Do not assume any workspace issue prefix",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("quick-create runtime config missing %q\n---\n%s", want, s)
-		}
-	}
-	for _, absent := range []string{
-		"Created MUL-<n>",
-	} {
-		if strings.Contains(s, absent) {
-			t.Errorf("quick-create runtime config should not contain %q\n---\n%s", absent, s)
 		}
 	}
 }
@@ -2919,8 +2885,7 @@ func TestReadGCMeta_LegacyFileDefaultsToIssueKind(t *testing.T) {
 	}
 }
 
-// New v2 meta files for chat / autopilot / quick-create round-trip without
-// being misclassified as the issue kind.
+// New v2 meta files for autopilot round-trip without being misclassified.
 func TestWriteReadGCMeta_KindRoundTrip(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -2928,9 +2893,7 @@ func TestWriteReadGCMeta_KindRoundTrip(t *testing.T) {
 		meta GCMeta
 		want GCMetaKind
 	}{
-		{"chat", GCMeta{Kind: GCKindChat, ChatSessionID: "cs-1", WorkspaceID: "ws"}, GCKindChat},
 		{"autopilot_run", GCMeta{Kind: GCKindAutopilotRun, AutopilotRunID: "ar-1", WorkspaceID: "ws"}, GCKindAutopilotRun},
-		{"quick_create", GCMeta{Kind: GCKindQuickCreate, TaskID: "t-1", WorkspaceID: "ws"}, GCKindQuickCreate},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -3033,64 +2996,6 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	})
 }
 
-// TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction verifies that
-// when IsSquadLeader is true and the task is comment-triggered, the generated
-// CLAUDE.md explicitly forbids posting comments that merely announce no_action.
-// This is the fix for MUL-2168 — squad leaders were posting "Exiting silently"
-// comments because the comment-triggered path lacked the prohibition.
-func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	ctx := TaskContextForEnv{
-		IssueID:          "issue-1",
-		TriggerCommentID: "comment-1",
-		IsSquadLeader:    true,
-	}
-	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-	s := string(data)
-
-	// The comment-triggered workflow must contain the squad leader no_action rule.
-	for _, want := range []string{
-		"Squad leader rule",
-		"DO NOT post any comment",
-		"multica squad activity",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
-		}
-	}
-
-	// The Output section must use strong prohibition language.
-	if !strings.Contains(s, "you MUST exit without posting any comment") {
-		t.Errorf("Output section missing strong prohibition for squad leader no_action")
-	}
-
-	// Non-squad-leader should NOT have the squad leader rule in comment-triggered path.
-	dir2 := t.TempDir()
-	ctx2 := TaskContextForEnv{
-		IssueID:          "issue-1",
-		TriggerCommentID: "comment-1",
-		IsSquadLeader:    false,
-	}
-	if _, err := InjectRuntimeConfig(dir2, "claude", ctx2); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data2, err := os.ReadFile(filepath.Join(dir2, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-	s2 := string(data2)
-	if strings.Contains(s2, "Squad leader rule") {
-		t.Errorf("non-squad-leader CLAUDE.md should NOT contain squad leader rule")
-	}
-}
 
 // TestBuildMetaSkillContentEmitsRequestingUser pins MUL-2406's brief
 // injection contract: when the runtime owner has a profile description,
@@ -3536,15 +3441,6 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name: "quick_create_no_metadata_section",
-			ctx: TaskContextForEnv{
-				QuickCreatePrompt: "create a task about X",
-			},
-			provider: "codex",
-			filename: "AGENTS.md",
-			want:     withoutSection,
-		},
-		{
 			name: "run_only_autopilot_no_metadata_section",
 			ctx: TaskContextForEnv{
 				AutopilotRunID: "run-md-1",
@@ -3552,15 +3448,6 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			},
 			provider: "codex",
 			filename: "AGENTS.md",
-			want:     withoutSection,
-		},
-		{
-			name: "chat_no_metadata_section",
-			ctx: TaskContextForEnv{
-				ChatSessionID: "chat-md-1",
-			},
-			provider: "claude",
-			filename: "CLAUDE.md",
 			want:     withoutSection,
 		},
 	}

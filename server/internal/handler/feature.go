@@ -12,25 +12,35 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/feature"
+	"github.com/multica-ai/multica/server/internal/initiative"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type FeatureResponse struct {
-	ID           string  `json:"id"`
-	WorkspaceID  string  `json:"workspace_id"`
-	Title        string  `json:"title"`
-	Description  *string `json:"description"`
-	Icon         *string `json:"icon"`
-	Status       string  `json:"status"`
-	Priority     string  `json:"priority"`
-	LeadType     *string `json:"lead_type"`
-	LeadID       *string `json:"lead_id"`
-	BranchSlug   *string `json:"branch_slug"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
-	IssueCount   int64   `json:"issue_count"`
-	DoneCount    int64   `json:"done_count"`
+	ID          string  `json:"id"`
+	WorkspaceID string  `json:"workspace_id"`
+	Title       string  `json:"title"`
+	Description *string `json:"description"`
+	Icon        *string `json:"icon"`
+	Status      string  `json:"status"`
+	Priority    string  `json:"priority"`
+	LeadType    *string `json:"lead_type"`
+	LeadID      *string `json:"lead_id"`
+	BranchSlug  *string `json:"branch_slug"`
+	// Mode is the planning-time autonomy choice (hitl|afk); the budget and
+	// failure-tolerance fields feed the Tripwire/Budget safety net (ADR-0005).
+	// A zero budget means "no cap" for that dimension.
+	Mode             string `json:"mode"`
+	BudgetTokens     int64  `json:"budget_tokens"`
+	BudgetRuns       int32  `json:"budget_runs"`
+	BudgetSeconds    int64  `json:"budget_seconds"`
+	FailureTolerance int32  `json:"failure_tolerance"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+	IssueCount       int64  `json:"issue_count"`
+	DoneCount        int64  `json:"done_count"`
 	// ResourceCount is a breadcrumb pointing at the sub-collection at
 	// /api/features/{id}/resources. Resources themselves stay out of this
 	// payload to keep parent metadata and child collections separate; clients
@@ -40,18 +50,23 @@ type FeatureResponse struct {
 
 func featureToResponse(p db.Feature) FeatureResponse {
 	return FeatureResponse{
-		ID:           uuidToString(p.ID),
-		WorkspaceID:  uuidToString(p.WorkspaceID),
-		Title:        p.Title,
-		Description:  textToPtr(p.Description),
-		Icon:         textToPtr(p.Icon),
-		Status:       p.Status,
-		Priority:     p.Priority,
-		LeadType:     textToPtr(p.LeadType),
-		LeadID:       uuidToPtr(p.LeadID),
-		BranchSlug:   textToPtr(p.BranchSlug),
-		CreatedAt:    timestampToString(p.CreatedAt),
-		UpdatedAt:    timestampToString(p.UpdatedAt),
+		ID:               uuidToString(p.ID),
+		WorkspaceID:      uuidToString(p.WorkspaceID),
+		Title:            p.Title,
+		Description:      textToPtr(p.Description),
+		Icon:             textToPtr(p.Icon),
+		Status:           p.Status,
+		Priority:         p.Priority,
+		LeadType:         textToPtr(p.LeadType),
+		LeadID:           uuidToPtr(p.LeadID),
+		BranchSlug:       textToPtr(p.BranchSlug),
+		Mode:             p.Mode,
+		BudgetTokens:     p.BudgetTokens,
+		BudgetRuns:       p.BudgetRuns,
+		BudgetSeconds:    p.BudgetSeconds,
+		FailureTolerance: p.FailureTolerance,
+		CreatedAt:        timestampToString(p.CreatedAt),
+		UpdatedAt:        timestampToString(p.UpdatedAt),
 	}
 }
 
@@ -72,15 +87,22 @@ func (h *Handler) loadFeatureResourceCount(ctx context.Context, projectID pgtype
 }
 
 type CreateFeatureRequest struct {
-	Title        string                                `json:"title"`
-	Description  *string                               `json:"description"`
-	Icon         *string                               `json:"icon"`
-	Status       string                                `json:"status"`
-	Priority     string                                `json:"priority"`
-	LeadType     *string                               `json:"lead_type"`
-	LeadID       *string                               `json:"lead_id"`
-	BranchSlug   *string                               `json:"branch_slug"`
-	Resources    []CreateFeatureResourceRequestPayload `json:"resources,omitempty"`
+	Title       string                                `json:"title"`
+	Description *string                               `json:"description"`
+	Icon        *string                               `json:"icon"`
+	Status      string                                `json:"status"`
+	Priority    string                                `json:"priority"`
+	LeadType    *string                               `json:"lead_type"`
+	LeadID      *string                               `json:"lead_id"`
+	BranchSlug  *string                               `json:"branch_slug"`
+	// Initiative planning fields (ADR-0005). Omit to take the DB defaults
+	// (mode hitl, no budget caps, failure tolerance 3).
+	Mode             *string                               `json:"mode"`
+	BudgetTokens     *int64                                `json:"budget_tokens"`
+	BudgetRuns       *int32                                `json:"budget_runs"`
+	BudgetSeconds    *int64                                `json:"budget_seconds"`
+	FailureTolerance *int32                                `json:"failure_tolerance"`
+	Resources        []CreateFeatureResourceRequestPayload `json:"resources,omitempty"`
 }
 
 // CreateFeatureResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -94,14 +116,44 @@ type CreateFeatureResourceRequestPayload struct {
 }
 
 type UpdateFeatureRequest struct {
-	Title        *string `json:"title"`
-	Description  *string `json:"description"`
-	Icon         *string `json:"icon"`
-	Status       *string `json:"status"`
-	Priority     *string `json:"priority"`
-	LeadType     *string `json:"lead_type"`
-	LeadID       *string `json:"lead_id"`
-	BranchSlug   *string `json:"branch_slug"`
+	Title            *string `json:"title"`
+	Description      *string `json:"description"`
+	Icon             *string `json:"icon"`
+	Status           *string `json:"status"`
+	Priority         *string `json:"priority"`
+	LeadType         *string `json:"lead_type"`
+	LeadID           *string `json:"lead_id"`
+	BranchSlug       *string `json:"branch_slug"`
+	Mode             *string `json:"mode"`
+	BudgetTokens     *int64  `json:"budget_tokens"`
+	BudgetRuns       *int32  `json:"budget_runs"`
+	BudgetSeconds    *int64  `json:"budget_seconds"`
+	FailureTolerance *int32  `json:"failure_tolerance"`
+}
+
+// validInitiativeMode reports whether m is an accepted Mode value.
+func validInitiativeMode(m string) bool {
+	return initiative.ValidMode(initiative.Mode(m))
+}
+
+// validateInitiativeTransition guards a control-plane (UI / MCP) status change
+// against the Initiative state machine. A no-op (target == current) is allowed;
+// an unknown target is a 400; an illegal move is a 422. Returns false (after
+// writing the response) when the caller must abort.
+func (h *Handler) validateInitiativeTransition(w http.ResponseWriter, current, target string) bool {
+	if target == current {
+		return true
+	}
+	to := initiative.Status(target)
+	if !to.Valid() {
+		writeError(w, http.StatusBadRequest, "invalid status: "+target)
+		return false
+	}
+	if err := initiative.Transition(initiative.Status(current), to); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return false
+	}
+	return true
 }
 
 func (h *Handler) ListFeatures(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +255,21 @@ func (h *Handler) CreateFeature(w http.ResponseWriter, r *http.Request) {
 	}
 	status := req.Status
 	if status == "" {
-		status = "planned"
+		status = string(initiative.StatusDraft)
+	}
+	if !initiative.Status(status).Valid() {
+		writeError(w, http.StatusBadRequest, "invalid status: "+status)
+		return
+	}
+	if req.Mode != nil && !validInitiativeMode(*req.Mode) {
+		writeError(w, http.StatusBadRequest, "invalid mode: "+*req.Mode)
+		return
+	}
+	if req.BranchSlug != nil {
+		if err := feature.ValidateBranchSlug(*req.BranchSlug); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	priority := req.Priority
 	if priority == "" {
@@ -244,15 +310,20 @@ func (h *Handler) CreateFeature(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createParams := db.CreateFeatureParams{
-		WorkspaceID:  wsUUID,
-		Title:        req.Title,
-		Description:  ptrToText(req.Description),
-		Icon:         ptrToText(req.Icon),
-		Status:       status,
-		LeadType:     leadType,
-		LeadID:       leadID,
-		Priority:     priority,
-		BranchSlug:   ptrToText(req.BranchSlug),
+		WorkspaceID:      wsUUID,
+		Title:            req.Title,
+		Description:      ptrToText(req.Description),
+		Icon:             ptrToText(req.Icon),
+		Status:           status,
+		LeadType:         leadType,
+		LeadID:           leadID,
+		Priority:         priority,
+		BranchSlug:       ptrToText(req.BranchSlug),
+		Mode:             ptrToText(req.Mode),
+		BudgetTokens:     ptrToInt8(req.BudgetTokens),
+		BudgetRuns:       ptrToInt4(req.BudgetRuns),
+		BudgetSeconds:    ptrToInt8(req.BudgetSeconds),
+		FailureTolerance: ptrToInt4(req.FailureTolerance),
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -378,13 +449,29 @@ func (h *Handler) UpdateFeature(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
+	if req.Status != nil {
+		if !h.validateInitiativeTransition(w, prevFeature.Status, *req.Status) {
+			return
+		}
+	}
+	if req.Mode != nil && !validInitiativeMode(*req.Mode) {
+		writeError(w, http.StatusBadRequest, "invalid mode: "+*req.Mode)
+		return
+	}
+	if _, ok := rawFields["branch_slug"]; ok && req.BranchSlug != nil {
+		if err := feature.ValidateBranchSlug(*req.BranchSlug); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+
 	params := db.UpdateFeatureParams{
-		ID:           prevFeature.ID,
-		Description:  prevFeature.Description,
-		Icon:         prevFeature.Icon,
-		LeadType:     prevFeature.LeadType,
-		LeadID:       prevFeature.LeadID,
-		BranchSlug:   prevFeature.BranchSlug,
+		ID:          prevFeature.ID,
+		Description: prevFeature.Description,
+		Icon:        prevFeature.Icon,
+		LeadType:    prevFeature.LeadType,
+		LeadID:      prevFeature.LeadID,
+		BranchSlug:  prevFeature.BranchSlug,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -392,6 +479,13 @@ func (h *Handler) UpdateFeature(w http.ResponseWriter, r *http.Request) {
 	if req.Status != nil {
 		params.Status = pgtype.Text{String: *req.Status, Valid: true}
 	}
+	if req.Mode != nil {
+		params.Mode = pgtype.Text{String: *req.Mode, Valid: true}
+	}
+	params.BudgetTokens = ptrToInt8(req.BudgetTokens)
+	params.BudgetRuns = ptrToInt4(req.BudgetRuns)
+	params.BudgetSeconds = ptrToInt8(req.BudgetSeconds)
+	params.FailureTolerance = ptrToInt4(req.FailureTolerance)
 	if req.Priority != nil {
 		params.Priority = pgtype.Text{String: *req.Priority, Valid: true}
 	}
@@ -542,7 +636,7 @@ func buildFeatureSearchQuery(phrase string, terms []string, includeClosed bool) 
 	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
 
 	if !includeClosed {
-		whereClause += " AND p.status NOT IN ('completed', 'cancelled')"
+		whereClause += " AND p.status NOT IN ('done', 'cancelled')"
 	}
 
 	// --- ORDER BY ranking ---

@@ -86,8 +86,6 @@ vi.mock("@multica/core/issues/stores", () => {
       (wsId: string | null) =>
       (state: { byWorkspace: Record<string, typeof mockRecentItems.current> }) =>
         wsId ? (state.byWorkspace[wsId] ?? EMPTY) : EMPTY,
-    openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
-      mockOpenModal("quick-create-issue", data ?? null),
   };
 });
 
@@ -207,20 +205,14 @@ describe("SearchCommand", () => {
     expect(screen.queryByPlaceholderText("Type a command or search...")).not.toBeInTheDocument();
   });
 
-  it("shows only New Issue by default and hides Pages / low-frequency commands until query", () => {
+  it("hides all commands (Pages and Commands sections) until the user types a query", () => {
     renderSearch();
 
     expect(screen.queryByText("Pages")).not.toBeInTheDocument();
-    // Only the primary creation action surfaces on empty query; everything
-    // else (theme, copy, New Project) must be revealed by typing.
-    expect(screen.getByText("Commands")).toBeInTheDocument();
-    expect(
-      screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText("Commands")).not.toBeInTheDocument();
+    expect(screen.queryByText("New Issue")).not.toBeInTheDocument();
     expect(screen.queryByText("New Feature")).not.toBeInTheDocument();
     expect(screen.queryByText("Switch to Light Theme")).not.toBeInTheDocument();
-    expect(screen.queryByText("Switch to Dark Theme")).not.toBeInTheDocument();
-    expect(screen.queryByText("Use System Theme")).not.toBeInTheDocument();
   });
 
   it("filters navigation pages by query", async () => {
@@ -317,32 +309,6 @@ describe("SearchCommand", () => {
     expect(screen.getByText("MUL-1")).toBeInTheDocument();
     expect(screen.getByText("Second issue")).toBeInTheDocument();
     expect(screen.getByText("MUL-2")).toBeInTheDocument();
-  });
-
-  it("shows New Issue / New Feature under Commands and triggers the modal store", async () => {
-    const user = userEvent.setup();
-    renderSearch();
-
-    const input = screen.getByPlaceholderText("Type a command or search...");
-    await user.type(input, "new");
-
-    await waitFor(() => {
-      expect(screen.getByText("Commands")).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText((_, el) => el?.textContent === "New Feature" && el?.tagName === "SPAN"),
-      ).toBeInTheDocument();
-    });
-
-    const newIssue = await screen.findByText(
-      (_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN",
-    );
-    await user.click(newIssue);
-
-    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", null);
-    expect(useSearchStore.getState().open).toBe(false);
   });
 
   it("hides copy-link commands when not on an issue detail route", async () => {

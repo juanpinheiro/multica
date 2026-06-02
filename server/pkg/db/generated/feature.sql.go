@@ -47,24 +47,37 @@ func (q *Queries) CountNonDoneFeatureSiblings(ctx context.Context, arg CountNonD
 const createFeature = `-- name: CreateFeature :one
 INSERT INTO feature (
     workspace_id, title, description, icon, status,
-    lead_type, lead_id, priority, branch_slug
+    lead_type, lead_id, priority, branch_slug,
+    mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug
+    $1, $2, $3, $4, $5, $6, $7, $8, $9,
+    COALESCE($10::text, 'hitl'),
+    COALESCE($11::bigint, 0),
+    COALESCE($12::int, 0),
+    COALESCE($13::bigint, 0),
+    COALESCE($14::int, 3)
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug, mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance
 `
 
 type CreateFeatureParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      string      `json:"status"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	Priority    string      `json:"priority"`
-	BranchSlug  pgtype.Text `json:"branch_slug"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	Title            string      `json:"title"`
+	Description      pgtype.Text `json:"description"`
+	Icon             pgtype.Text `json:"icon"`
+	Status           string      `json:"status"`
+	LeadType         pgtype.Text `json:"lead_type"`
+	LeadID           pgtype.UUID `json:"lead_id"`
+	Priority         string      `json:"priority"`
+	BranchSlug       pgtype.Text `json:"branch_slug"`
+	Mode             pgtype.Text `json:"mode"`
+	BudgetTokens     pgtype.Int8 `json:"budget_tokens"`
+	BudgetRuns       pgtype.Int4 `json:"budget_runs"`
+	BudgetSeconds    pgtype.Int8 `json:"budget_seconds"`
+	FailureTolerance pgtype.Int4 `json:"failure_tolerance"`
 }
 
+// Mode and the budget/failure-tolerance fields are optional: omit them and the
+// DB defaults apply (hitl, no caps, tolerance 3) via the COALESCE fallbacks.
 func (q *Queries) CreateFeature(ctx context.Context, arg CreateFeatureParams) (Feature, error) {
 	row := q.db.QueryRow(ctx, createFeature,
 		arg.WorkspaceID,
@@ -76,6 +89,11 @@ func (q *Queries) CreateFeature(ctx context.Context, arg CreateFeatureParams) (F
 		arg.LeadID,
 		arg.Priority,
 		arg.BranchSlug,
+		arg.Mode,
+		arg.BudgetTokens,
+		arg.BudgetRuns,
+		arg.BudgetSeconds,
+		arg.FailureTolerance,
 	)
 	var i Feature
 	err := row.Scan(
@@ -91,6 +109,11 @@ func (q *Queries) CreateFeature(ctx context.Context, arg CreateFeatureParams) (F
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.BranchSlug,
+		&i.Mode,
+		&i.BudgetTokens,
+		&i.BudgetRuns,
+		&i.BudgetSeconds,
+		&i.FailureTolerance,
 	)
 	return i, err
 }
@@ -111,7 +134,7 @@ func (q *Queries) DeleteFeature(ctx context.Context, arg DeleteFeatureParams) er
 }
 
 const getFeature = `-- name: GetFeature :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug FROM feature
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug, mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance FROM feature
 WHERE id = $1
 `
 
@@ -131,12 +154,17 @@ func (q *Queries) GetFeature(ctx context.Context, id pgtype.UUID) (Feature, erro
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.BranchSlug,
+		&i.Mode,
+		&i.BudgetTokens,
+		&i.BudgetRuns,
+		&i.BudgetSeconds,
+		&i.FailureTolerance,
 	)
 	return i, err
 }
 
 const getFeatureInWorkspace = `-- name: GetFeatureInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug FROM feature
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug, mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance FROM feature
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -161,6 +189,11 @@ func (q *Queries) GetFeatureInWorkspace(ctx context.Context, arg GetFeatureInWor
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.BranchSlug,
+		&i.Mode,
+		&i.BudgetTokens,
+		&i.BudgetRuns,
+		&i.BudgetSeconds,
+		&i.FailureTolerance,
 	)
 	return i, err
 }
@@ -231,6 +264,28 @@ func (q *Queries) GetFeatureOpenPR(ctx context.Context, featureID pgtype.UUID) (
 	return i, err
 }
 
+const getIssueFeatureStatus = `-- name: GetIssueFeatureStatus :one
+SELECT f.id AS feature_id, f.status
+FROM issue i
+JOIN feature f ON i.feature_id = f.id
+WHERE i.id = $1
+`
+
+type GetIssueFeatureStatusRow struct {
+	FeatureID pgtype.UUID `json:"feature_id"`
+	Status    string      `json:"status"`
+}
+
+// Returns the Initiative (feature) id and status for an issue, when the issue
+// belongs to one. Used by the execution plane to advance Initiative status as
+// its Runs claim and complete.
+func (q *Queries) GetIssueFeatureStatus(ctx context.Context, id pgtype.UUID) (GetIssueFeatureStatusRow, error) {
+	row := q.db.QueryRow(ctx, getIssueFeatureStatus, id)
+	var i GetIssueFeatureStatusRow
+	err := row.Scan(&i.FeatureID, &i.Status)
+	return i, err
+}
+
 const listFeatureIssueSummaries = `-- name: ListFeatureIssueSummaries :many
 SELECT i.id, i.title, i.number, i.repo_id,
        COALESCE(r.name, '') AS repo_name
@@ -278,7 +333,7 @@ func (q *Queries) ListFeatureIssueSummaries(ctx context.Context, featureID pgtyp
 }
 
 const listFeatures = `-- name: ListFeatures :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug FROM feature
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug, mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance FROM feature
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -313,6 +368,11 @@ func (q *Queries) ListFeatures(ctx context.Context, arg ListFeaturesParams) ([]F
 			&i.UpdatedAt,
 			&i.Priority,
 			&i.BranchSlug,
+			&i.Mode,
+			&i.BudgetTokens,
+			&i.BudgetRuns,
+			&i.BudgetSeconds,
+			&i.FailureTolerance,
 		); err != nil {
 			return nil, err
 		}
@@ -322,6 +382,104 @@ func (q *Queries) ListFeatures(ctx context.Context, arg ListFeaturesParams) ([]F
 		return nil, err
 	}
 	return items, nil
+}
+
+const listInReviewIssuesWithMergedPRs = `-- name: ListInReviewIssuesWithMergedPRs :many
+SELECT DISTINCT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.feature_id, i.repo_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.milestone_id
+FROM issue i
+JOIN feature f ON f.id = i.feature_id
+JOIN issue_pull_request ipr ON ipr.issue_id = i.id
+JOIN github_pull_request gpr ON gpr.id = ipr.pull_request_id
+WHERE f.status = 'in_review'
+  AND gpr.state = 'merged'
+`
+
+// Returns issues belonging to in_review Initiatives that have at least one
+// merged linked PR. Used by the PR-merge poller to advance stale Initiatives
+// that were not caught by the GitHub webhook (local dev without webhook endpoint).
+func (q *Queries) ListInReviewIssuesWithMergedPRs(ctx context.Context) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listInReviewIssuesWithMergedPRs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.FeatureID,
+			&i.RepoID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.MilestoneID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setFeatureStatus = `-- name: SetFeatureStatus :one
+UPDATE feature SET status = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug, mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance
+`
+
+type SetFeatureStatusParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Status string      `json:"status"`
+}
+
+// Focused status write for the Initiative status state machine. Callers must
+// validate the transition via internal/initiative before calling.
+func (q *Queries) SetFeatureStatus(ctx context.Context, arg SetFeatureStatusParams) (Feature, error) {
+	row := q.db.QueryRow(ctx, setFeatureStatus, arg.ID, arg.Status)
+	var i Feature
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.BranchSlug,
+		&i.Mode,
+		&i.BudgetTokens,
+		&i.BudgetRuns,
+		&i.BudgetSeconds,
+		&i.FailureTolerance,
+	)
+	return i, err
 }
 
 const updateFeature = `-- name: UpdateFeature :one
@@ -334,21 +492,31 @@ UPDATE feature SET
     lead_type = $7,
     lead_id = $8,
     branch_slug = $9,
+    mode = COALESCE($10::text, mode),
+    budget_tokens = COALESCE($11::bigint, budget_tokens),
+    budget_runs = COALESCE($12::int, budget_runs),
+    budget_seconds = COALESCE($13::bigint, budget_seconds),
+    failure_tolerance = COALESCE($14::int, failure_tolerance),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, branch_slug, mode, budget_tokens, budget_runs, budget_seconds, failure_tolerance
 `
 
 type UpdateFeatureParams struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       pgtype.Text `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	BranchSlug  pgtype.Text `json:"branch_slug"`
+	ID               pgtype.UUID `json:"id"`
+	Title            pgtype.Text `json:"title"`
+	Description      pgtype.Text `json:"description"`
+	Icon             pgtype.Text `json:"icon"`
+	Status           pgtype.Text `json:"status"`
+	Priority         pgtype.Text `json:"priority"`
+	LeadType         pgtype.Text `json:"lead_type"`
+	LeadID           pgtype.UUID `json:"lead_id"`
+	BranchSlug       pgtype.Text `json:"branch_slug"`
+	Mode             pgtype.Text `json:"mode"`
+	BudgetTokens     pgtype.Int8 `json:"budget_tokens"`
+	BudgetRuns       pgtype.Int4 `json:"budget_runs"`
+	BudgetSeconds    pgtype.Int8 `json:"budget_seconds"`
+	FailureTolerance pgtype.Int4 `json:"failure_tolerance"`
 }
 
 func (q *Queries) UpdateFeature(ctx context.Context, arg UpdateFeatureParams) (Feature, error) {
@@ -362,6 +530,11 @@ func (q *Queries) UpdateFeature(ctx context.Context, arg UpdateFeatureParams) (F
 		arg.LeadType,
 		arg.LeadID,
 		arg.BranchSlug,
+		arg.Mode,
+		arg.BudgetTokens,
+		arg.BudgetRuns,
+		arg.BudgetSeconds,
+		arg.FailureTolerance,
 	)
 	var i Feature
 	err := row.Scan(
@@ -377,6 +550,11 @@ func (q *Queries) UpdateFeature(ctx context.Context, arg UpdateFeatureParams) (F
 		&i.UpdatedAt,
 		&i.Priority,
 		&i.BranchSlug,
+		&i.Mode,
+		&i.BudgetTokens,
+		&i.BudgetRuns,
+		&i.BudgetSeconds,
+		&i.FailureTolerance,
 	)
 	return i, err
 }

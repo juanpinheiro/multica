@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -270,39 +269,6 @@ func TestCreateIssue_AssignToPrivateAgentForbidsPlainMember(t *testing.T) {
 	}
 }
 
-// TestCreateChatSession_PrivateAgentForbidsPlainMember verifies that members
-// who can't access the private agent cannot start a chat session against it.
-// The chat handler reads workspace context from middleware, so we set it
-// explicitly via middleware.SetMemberContext before invoking the handler
-// (the test harness doesn't run the real middleware chain).
-func TestCreateChatSession_PrivateAgentForbidsPlainMember(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	agentID, _, memberID := privateAgentTestFixture(t)
-
-	// Load the plain member's row so we can build a realistic context.
-	memberRow, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.MustParseUUID(memberID),
-		WorkspaceID: util.MustParseUUID(testWorkspaceID),
-	})
-	if err != nil {
-		t.Fatalf("load plain member row: %v", err)
-	}
-
-	body := map[string]any{
-		"agent_id": agentID,
-		"title":    "should be denied",
-	}
-	w := httptest.NewRecorder()
-	req := newRequestAs(memberID, "POST", "/api/chat/sessions", body)
-	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, memberRow))
-	testHandler.CreateChatSession(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("CreateChatSession as plain member: expected 403, got %d: %s", w.Code, w.Body.String())
-	}
-}
 
 // TestGetAgent_RejectsForgedAgentIDHeader is the regression test for the
 // #2359 review finding "X-Agent-ID can be forged by a plain member to bypass
@@ -329,54 +295,6 @@ func TestGetAgent_RejectsForgedAgentIDHeader(t *testing.T) {
 	}
 }
 
-// TestListChatMessages_PrivateAgentForbidsAfterAccessRevoked is the regression
-// test for the #2359 review finding "chat history read path doesn't re-gate".
-// A member who created a chat session is later denied access to the agent
-// (here simulated by the member never being on the allowlist for a private
-// agent owned by someone else; the equivalent of an after-the-fact ownership
-// transfer). The session row still names them as creator, but the read
-// endpoints must refuse to surface the transcript.
-func TestListChatMessages_PrivateAgentForbidsAfterAccessRevoked(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	agentID, _, memberID := privateAgentTestFixture(t)
-
-	// Insert a chat session row directly with the plain member as creator,
-	// bypassing CreateChatSession's own gate. This represents a session
-	// that existed before the member lost access (or before the gate
-	// landed).
-	var sessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		VALUES ($1, $2, $3, 'pre-revocation session', 'active')
-		RETURNING id
-	`, testWorkspaceID, agentID, memberID).Scan(&sessionID); err != nil {
-		t.Fatalf("seed chat session: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
-	})
-
-	memberRow, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
-		UserID:      util.MustParseUUID(memberID),
-		WorkspaceID: util.MustParseUUID(testWorkspaceID),
-	})
-	if err != nil {
-		t.Fatalf("load plain member row: %v", err)
-	}
-
-	w := httptest.NewRecorder()
-	req := newRequestAs(memberID, "GET", "/api/chat/sessions/"+sessionID+"/messages", nil)
-	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, memberRow))
-	req = withURLParam(req, "sessionId", sessionID)
-	testHandler.ListChatMessages(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("ListChatMessages on stale session: expected 403, got %d: %s", w.Code, w.Body.String())
-	}
-}
 
 // TestMentionAgent_RejectsCrossWorkspaceAgentUUID is the regression test for
 // the #2359 review finding "@mention path doesn't constrain the mentioned

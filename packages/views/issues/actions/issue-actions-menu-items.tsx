@@ -13,7 +13,6 @@ import {
   MoreHorizontal,
   Pin,
   PinOff,
-  Plus,
   Trash2,
   UserMinus,
 } from "lucide-react";
@@ -100,7 +99,6 @@ export function IssueActionsMenuItems({
     updateField,
     togglePin,
     copyLink,
-    openCreateSubIssue,
     openSetParent,
     openAddChild,
     openDeleteConfirm,
@@ -189,10 +187,9 @@ export function IssueActionsMenuItems({
       </P.Sub>
 
       {/* Assignee — closes this menu and hands off to the shared
-          AssigneePicker (members + agents + squads, with search and
-          permission checks). Keeps a single source of truth for the
-          assignee UX across detail sidebar, board cards, and right-click /
-          3-dot menus. */}
+          AssigneePicker (members + agents, with search and permission checks).
+          Keeps a single source of truth for the assignee UX across detail
+          sidebar, board cards, and right-click / 3-dot menus. */}
       <P.Item onClick={onOpenAssignee}>
         <UserMinus className="h-3.5 w-3.5" />
         {t(($) => $.actions.assignee)}
@@ -281,10 +278,6 @@ export function IssueActionsMenuItems({
           {t(($) => $.actions.more)}
         </P.SubTrigger>
         <P.SubContent>
-          <P.Item onClick={openCreateSubIssue}>
-            <Plus className="h-3.5 w-3.5" />
-            {t(($) => $.actions.create_sub_issue)}
-          </P.Item>
           <P.Item onClick={openSetParent}>
             <ArrowUp className="h-3.5 w-3.5" />
             {t(($) => $.actions.set_parent_issue)}

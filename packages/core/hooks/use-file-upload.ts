@@ -14,7 +14,6 @@ export type UploadResult = Attachment & { link: string };
 export interface UploadContext {
   issueId?: string;
   commentId?: string;
-  chatSessionId?: string;
 }
 
 export function useFileUpload(
@@ -34,7 +33,6 @@ export function useFileUpload(
         const att: Attachment = await api.uploadFile(file, {
           issueId: ctx?.issueId,
           commentId: ctx?.commentId,
-          chatSessionId: ctx?.chatSessionId,
         });
         return { ...att, link: att.url };
       } finally {

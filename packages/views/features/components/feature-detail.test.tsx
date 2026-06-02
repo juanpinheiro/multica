@@ -171,6 +171,20 @@ vi.mock("./feature-resources-section", () => ({
   FeatureResourcesSection: () => <div data-testid="resources-section" />,
 }));
 
+vi.mock("./feature-milestones-section", () => ({
+  FeatureMilestonesSection: () => <div data-testid="milestones-section" />,
+}));
+
+vi.mock("./feature-board", () => ({
+  FeatureBoardView: () => (
+    <div>
+      <div data-testid="board-column-in_progress" />
+      <div data-testid="board-column-todo" />
+      <div data-testid="board-column-done" />
+    </div>
+  ),
+}));
+
 vi.mock("./feature-issue-metrics", () => ({
   getFeatureIssueMetrics: () => ({ totalCount: 0, completedCount: 0 }),
 }));
@@ -232,11 +246,16 @@ const mockFeature = vi.hoisted((): { value: Feature } => ({
     title: "Auth v2",
     description: "## Overview\n\nThis feature redesigns authentication.",
     icon: "🔐",
-    status: "planned",
+    status: "draft",
     priority: "high",
     lead_type: null,
     lead_id: null,
     branch_slug: null,
+    mode: "hitl",
+    budget_tokens: 0,
+    budget_runs: 0,
+    budget_seconds: 0,
+    failure_tolerance: 3,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     issue_count: 2,
@@ -269,6 +288,14 @@ vi.mock("@tanstack/react-query", async () => {
       if (key[0] === "features" && key[2] === "issues") {
         return { data: mockIssuesResponse.value, isLoading: false };
       }
+      // milestones for the initiative — return empty by default
+      if (key[0] === "milestones" && key[2] === "feature") {
+        return { data: [], isLoading: false };
+      }
+      // feature issue list for the board — return empty by default
+      if (key[0] === "issues" && key[2] === "list" && key[3] === "feature") {
+        return { data: [], isLoading: false };
+      }
       return { data: undefined, isLoading: false };
     },
   };
@@ -300,36 +327,44 @@ describe("FeatureDetail", () => {
     expect(editor.compareDocumentPosition(issuesHeading)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
-  it("shows approve button when status is planned", () => {
+  it("shows approve button when status is draft", () => {
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
     expect(screen.getByTestId("approve-button")).toBeInTheDocument();
   });
 
-  it("hides approve button when status is in_progress", () => {
-    mockFeature.value = { ...mockFeature.value, status: "in_progress" };
+  it("hides approve button when status is running", () => {
+    mockFeature.value = { ...mockFeature.value, status: "running" };
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
     expect(screen.queryByTestId("approve-button")).not.toBeInTheDocument();
-    mockFeature.value = { ...mockFeature.value, status: "planned" };
+    mockFeature.value = { ...mockFeature.value, status: "draft" };
   });
 
-  it("clicking approve fires update mutation with in_progress status", async () => {
-    mockFeature.value = { ...mockFeature.value, status: "planned" };
+  it("clicking approve fires update mutation with ready status", async () => {
+    mockFeature.value = { ...mockFeature.value, status: "draft" };
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
     fireEvent.click(screen.getByTestId("approve-button"));
     await waitFor(() => {
       expect(mockUpdateFeature).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "feature-1", status: "in_progress" }),
+        expect.objectContaining({ id: "feature-1", status: "ready" }),
       );
     });
   });
 
-  it("splits issues into Ready now and Blocked sections", () => {
+  it("renders the Milestones section heading", () => {
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
-    expect(screen.getByText("Ready now")).toBeInTheDocument();
-    expect(screen.getByText("Blocked")).toBeInTheDocument();
-    expect(screen.getByText("Add login page")).toBeInTheDocument();
-    expect(screen.getByText("Add OAuth provider")).toBeInTheDocument();
-    expect(screen.getByText(/blocked by MUL-1/i)).toBeInTheDocument();
+    expect(screen.getByText("Milestones")).toBeInTheDocument();
+  });
+
+  it("renders the Issues section heading above the board", () => {
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.getByText("Issues")).toBeInTheDocument();
+  });
+
+  it("renders board columns for each status", () => {
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.getByTestId("board-column-in_progress")).toBeInTheDocument();
+    expect(screen.getByTestId("board-column-todo")).toBeInTheDocument();
+    expect(screen.getByTestId("board-column-done")).toBeInTheDocument();
   });
 
   it("shows feature branch in header when branch_slug is set", () => {
@@ -385,44 +420,6 @@ describe("FeatureDetail", () => {
   });
 
 
-  it("groups issues by repo when repo_name is set on multiple repos", () => {
-    mockIssuesResponse.value = {
-      ready_now: [
-        { id: "i1", identifier: "MUL-1", title: "Backend task", status: "todo", priority: "high", repo_id: "r1", repo_name: "backend" },
-        { id: "i3", identifier: "MUL-3", title: "Frontend task", status: "todo", priority: "medium", repo_id: "r2", repo_name: "frontend" },
-      ],
-      blocked: [],
-      pull_requests: [],
-    };
-    renderWithI18n(<FeatureDetail featureId="feature-1" />);
-    const headers = screen.getAllByTestId("repo-group-header");
-    expect(headers).toHaveLength(2);
-    const texts = headers.map((h) => h.textContent);
-    expect(texts).toContain("backend");
-    expect(texts).toContain("frontend");
-    mockIssuesResponse.value = {
-      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Add login page", status: "todo", priority: "high" }],
-      blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
-      pull_requests: [],
-    };
-  });
-
-  it("does not show repo group headers when all issues share one repo", () => {
-    mockIssuesResponse.value = {
-      ready_now: [
-        { id: "i1", identifier: "MUL-1", title: "Backend task", status: "todo", priority: "high", repo_id: "r1", repo_name: "backend" },
-      ],
-      blocked: [],
-      pull_requests: [],
-    };
-    renderWithI18n(<FeatureDetail featureId="feature-1" />);
-    expect(screen.queryByTestId("repo-group-header")).not.toBeInTheDocument();
-    mockIssuesResponse.value = {
-      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Add login page", status: "todo", priority: "high" }],
-      blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
-      pull_requests: [],
-    };
-  });
 
   it("shows one PR badge per repo for multi-repo features", () => {
     mockIssuesResponse.value = {
@@ -445,30 +442,9 @@ describe("FeatureDetail", () => {
     };
   });
 
-  it("does not render a New Issue button in the empty state", () => {
-    mockIssuesResponse.value = { ready_now: [], blocked: [], pull_requests: [] };
+  it("does not render a New Issue button", () => {
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
     expect(screen.queryByRole("button", { name: /new issue/i })).not.toBeInTheDocument();
-    mockIssuesResponse.value = {
-      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Add login page", status: "todo", priority: "high" }],
-      blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
-      pull_requests: [],
-    };
-  });
-
-  it("shows in_progress issues with running indicator", () => {
-    mockIssuesResponse.value = {
-      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Running task", status: "in_progress", priority: "high" }],
-      blocked: [],
-      pull_requests: [],
-    };
-    renderWithI18n(<FeatureDetail featureId="feature-1" />);
-    expect(screen.getByText("running")).toBeInTheDocument();
-    mockIssuesResponse.value = {
-      ready_now: [{ id: "i1", identifier: "MUL-1", title: "Add login page", status: "todo", priority: "high" }],
-      blocked: [{ id: "i2", identifier: "MUL-2", title: "Add OAuth provider", status: "backlog", priority: "medium", blocked_by: ["MUL-1"] }],
-      pull_requests: [],
-    };
   });
 
   it("shows in-place exec mode indicator when workspace mode is in_place", () => {
@@ -500,5 +476,19 @@ describe("FeatureDetail", () => {
   it("renders feature title as last breadcrumb segment", () => {
     renderWithI18n(<FeatureDetail featureId="feature-1" />);
     expect(screen.getByText("Auth v2")).toBeInTheDocument();
+  });
+
+  it("shows HITL mode indicator for hitl initiative", () => {
+    mockFeature.value = { ...mockFeature.value, mode: "hitl" };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.getByTestId("initiative-mode-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("initiative-mode-indicator")).toHaveTextContent("HITL");
+  });
+
+  it("shows AFK mode indicator for afk initiative", () => {
+    mockFeature.value = { ...mockFeature.value, mode: "afk" };
+    renderWithI18n(<FeatureDetail featureId="feature-1" />);
+    expect(screen.getByTestId("initiative-mode-indicator")).toHaveTextContent("AFK");
+    mockFeature.value = { ...mockFeature.value, mode: "hitl" };
   });
 });

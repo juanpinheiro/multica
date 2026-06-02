@@ -1,10 +1,6 @@
 "use client";
 
 import { useModalStore } from "@multica/core/modals";
-import { CreateWorkspaceModal } from "./create-workspace";
-import { CreateIssueDialog } from "./create-issue-dialog";
-import { CreateFeatureModal } from "./create-feature";
-import { CreateSquadModal } from "./create-squad";
 import { SetParentIssueModal } from "./set-parent-issue";
 import { AddChildIssueModal } from "./add-child-issue";
 import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
@@ -16,18 +12,6 @@ export function ModalRegistry() {
   const close = useModalStore((s) => s.close);
 
   switch (modal) {
-    case "create-workspace":
-      return <CreateWorkspaceModal onClose={close} />;
-    // Both modal types open the same shell so the in-modal mode switch is
-    // instant — only the inner panel swaps, the Dialog Root stays mounted.
-    case "create-issue":
-      return <CreateIssueDialog onClose={close} initialMode="manual" data={data} />;
-    case "quick-create-issue":
-      return <CreateIssueDialog onClose={close} initialMode="agent" data={data} />;
-    case "create-feature":
-      return <CreateFeatureModal onClose={close} />;
-    case "create-squad":
-      return <CreateSquadModal onClose={close} />;
     case "issue-set-parent":
       return <SetParentIssueModal onClose={close} data={data} />;
     case "issue-add-child":

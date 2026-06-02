@@ -1,4 +1,4 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
+export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue } from "./issue";
 export type {
   Agent,
   AgentStatus,
@@ -54,18 +54,15 @@ export type {
 } from "./agent";
 export type { Workspace, Repo, Member, MemberRole, User, MemberWithUser } from "./workspace";
 export type { InboxItem, InboxSeverity, InboxItemType } from "./inbox";
-export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
-export type { Comment, CommentType, CommentAuthorType, Reaction } from "./comment";
+export type { Comment, CommentType, CommentAuthorType } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
 export type {
   TimelineEntry,
   AssigneeFrequencyEntry,
 } from "./activity";
-export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
 export type { Attachment } from "./attachment";
-export type { ChatSession, ChatMessage, ChatPendingTask, PendingChatTaskItem, PendingChatTasksResponse, SendChatMessageResponse } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {
   Feature,
@@ -84,6 +81,26 @@ export type {
   FeaturePRSummary,
   FeatureIssuesResponse,
 } from "./feature";
+export type {
+  Milestone,
+  MilestoneValidationStatus,
+  ListMilestonesResponse,
+} from "./milestone";
+export type {
+  Handoff,
+  HandoffCommandResult,
+  HandoffState,
+  ListHandoffsResponse,
+} from "./handoff";
+export type {
+  DodAssertion,
+  DodAssertionStatus,
+  ListDodAssertionsResponse,
+} from "./dod";
+export type {
+  DecisionLogEntry,
+  ListDecisionLogResponse,
+} from "./decision-log";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
   GitHubInstallation,
@@ -116,21 +133,3 @@ export type {
   WebhookSignatureStatus,
   ListWebhookDeliveriesResponse,
 } from "./autopilot";
-export type {
-  Squad,
-  SquadMember,
-  SquadMemberType,
-  SquadMemberPreview,
-  SquadActivityLog,
-  SquadActivityOutcome,
-  CreateSquadRequest,
-  UpdateSquadRequest,
-  AddSquadMemberRequest,
-  RemoveSquadMemberRequest,
-  UpdateSquadMemberRoleRequest,
-  CreateSquadActivityLogRequest,
-  SquadMemberStatusValue,
-  SquadActiveIssueBrief,
-  SquadMemberStatus,
-  SquadMemberStatusListResponse,
-} from "./squad";

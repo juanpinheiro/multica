@@ -20,7 +20,6 @@ export interface UseIssueActionsResult {
   updateField: (updates: Partial<UpdateIssueRequest>) => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
-  openCreateSubIssue: () => void;
   openSetParent: () => void;
   openAddChild: () => void;
   openDeleteConfirm: (opts?: { onDeletedNavigateTo?: string }) => void;
@@ -58,7 +57,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueStatus = issue?.status ?? null;
   const issueIdentifier = issue?.identifier ?? null;
-  const issueProjectId = issue?.feature_id ?? null;
 
   const updateField = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
@@ -109,15 +107,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     }
   }, [paths, issueId, navigation, t]);
 
-  const openCreateSubIssue = useCallback(() => {
-    if (!issueId) return;
-    openModal("create-issue", {
-      parent_issue_id: issueId,
-      parent_issue_identifier: issueIdentifier,
-      ...(issueProjectId ? { feature_id: issueProjectId } : {}),
-    });
-  }, [openModal, issueId, issueIdentifier, issueProjectId]);
-
   const openSetParent = useCallback(() => {
     if (!issueId) return;
     openModal("issue-set-parent", { issueId });
@@ -145,7 +134,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     updateField,
     togglePin,
     copyLink,
-    openCreateSubIssue,
     openSetParent,
     openAddChild,
     openDeleteConfirm,

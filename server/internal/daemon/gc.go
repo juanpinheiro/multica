@@ -181,12 +181,8 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 	switch meta.Kind {
 	case execenv.GCKindIssue:
 		return d.gcDecisionIssue(ctx, taskDir, meta)
-	case execenv.GCKindChat:
-		return d.gcDecisionChat(ctx, taskDir, meta)
 	case execenv.GCKindAutopilotRun:
 		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
-	case execenv.GCKindQuickCreate:
-		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
 	default:
 		// Unknown kind: fall back to mtime-based orphan cleanup so a future
 		// daemon writing a kind we don't recognize doesn't get insta-wiped.
@@ -262,56 +258,6 @@ func (d *Daemon) gcDecisionIssue(ctx context.Context, taskDir string, meta *exec
 	return gcActionSkip
 }
 
-func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	if meta.ChatSessionID == "" {
-		d.logger.Warn("gc: skipping meta with empty chat_session_id", "dir", filepath.Base(taskDir))
-		return gcActionSkip
-	}
-	status, err := d.client.GetChatSessionGCCheck(ctx, meta.ChatSessionID)
-	if err != nil {
-		if isAccessNotFound(err) {
-			// 404 means the chat_session row is gone — DeleteChatSession is
-			// a real DELETE, so a hard delete propagates here as soon as
-			// the user clicks the button. This is the strongest reclaim
-			// signal we get and it's exactly acceptance criterion #3:
-			// reclaim within one GC cycle (≤ GCInterval), not 72h.
-			//
-			// We don't gate on mtime: every chat_session_id in a meta file
-			// was written by this daemon under its current token, so there
-			// is no cross-workspace probe to defend against.
-			d.logger.Info("gc: eligible for cleanup",
-				"dir", filepath.Base(taskDir),
-				"kind", "chat",
-				"chat_session", meta.ChatSessionID,
-				"reason", "session not accessible (hard-deleted)",
-			)
-			return gcActionClean
-		}
-		return gcActionSkip
-	}
-
-	switch status.Status {
-	case "active":
-		// An active chat session must never be reclaimed by mtime — that
-		// would silently kill a user's idle session and break "PriorWorkDir"
-		// resume on their next message. This is the explicit short-circuit
-		// the issue body called out as verifyable behavior #2.
-		return gcActionSkip
-	case "archived":
-		if time.Since(status.UpdatedAt) > d.cfg.GCTTL {
-			d.logger.Info("gc: eligible for cleanup",
-				"dir", filepath.Base(taskDir),
-				"kind", "chat",
-				"chat_session", meta.ChatSessionID,
-				"status", status.Status,
-				"updated_at", status.UpdatedAt.Format(time.RFC3339),
-			)
-			return gcActionClean
-		}
-	}
-	return gcActionSkip
-}
-
 func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
 	if meta.AutopilotRunID == "" {
 		d.logger.Warn("gc: skipping meta with empty autopilot_run_id", "dir", filepath.Base(taskDir))
@@ -365,40 +311,6 @@ func isAutopilotRunTerminal(status string) bool {
 	default:
 		return false
 	}
-}
-
-func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	if meta.TaskID == "" {
-		d.logger.Warn("gc: skipping meta with empty task_id", "dir", filepath.Base(taskDir))
-		return gcActionSkip
-	}
-	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
-	if err != nil {
-		if isAccessNotFound(err) {
-			// Task row was hard-deleted, or token can't see it. Either way,
-			// fall back to mtime-gated orphan to stay safe across scoped
-			// tokens — same reasoning as the issue path.
-			return d.orphanByMTime(taskDir, "task not accessible")
-		}
-		return gcActionSkip
-	}
-
-	// Quick-create workdirs are not reused by the issue task that
-	// LinkTaskToIssue eventually attaches — that issue gets its own
-	// envRoot. So as soon as the quick-create task itself reaches a
-	// terminal state we can reclaim the directory immediately, without
-	// waiting for GCTTL. If the user wants to revisit, the linked issue
-	// has the agent's output already.
-	if isAgentTaskTerminal(status.Status) {
-		d.logger.Info("gc: eligible for cleanup",
-			"dir", filepath.Base(taskDir),
-			"kind", "quick_create",
-			"task", meta.TaskID,
-			"status", status.Status,
-		)
-		return gcActionClean
-	}
-	return gcActionSkip
 }
 
 // isAgentTaskTerminal reports whether a value of agent_task_queue.status

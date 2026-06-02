@@ -1,11 +1,5 @@
 export { useIssueSelectionStore } from "./selection-store";
 export {
-  useCreateModeStore,
-  openCreateIssueWithPreference,
-  type CreateMode,
-} from "./create-mode-store";
-export { useIssueDraftStore } from "./draft-store";
-export {
   useRecentIssuesStore,
   selectRecentIssues,
   type RecentIssueEntry,
@@ -18,11 +12,6 @@ export {
 export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
 export { useCommentDraftStore, type CommentDraftKey } from "./comment-draft-store";
-export {
-  myIssuesViewStore,
-  type MyIssuesViewState,
-  type MyIssuesScope,
-} from "./my-issues-view-store";
 export {
   actorIssuesViewStore,
   type ActorIssuesViewState,

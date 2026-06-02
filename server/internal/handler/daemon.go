@@ -18,9 +18,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/decisionlog"
 	"github.com/multica-ai/multica/server/internal/feature"
 	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/workspace/execmode"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1205,32 +1205,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.Mode, _ = execmode.Normalize(ws.Mode)
 			}
 
-			// Squad-leader briefing injection: when the issue is assigned
-			// to a squad and the claiming agent is that squad's current
-			// leader, append a full briefing (Operating Protocol + Roster
-			// + user Instructions) to the agent's own Instructions. We
-			// append (not replace) so per-agent instructions remain
-			// authoritative for general behavior; the squad briefing
-			// stacks on top as task-specific squad context.
-			if resp.Agent != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && issue.AssigneeID.Valid {
-				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-					ID:          issue.AssigneeID,
-					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-					if strings.TrimSpace(resp.Agent.Instructions) == "" {
-						resp.Agent.Instructions = briefing
-					} else {
-						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-					}
-					slog.Debug("injected squad leader briefing",
-						"squad_id", uuidToString(squad.ID),
-						"squad_name", squad.Name,
-						"leader_agent_id", resp.Agent.ID,
-					)
-				}
-			}
-
 			var projectRepos []RepoData
 			var featureForBranch *feature.Feature
 			if issue.FeatureID.Valid {
@@ -1338,6 +1312,29 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+
+			// For validator Runs, load the Milestone's DoD assertions so the agent
+			// knows exactly what to check. Best-effort: a query failure is logged
+			// but does not block the claim.
+			if task.Role == taskRoleValidator && issue.MilestoneID.Valid {
+				if assertions, err := h.Queries.ListDodAssertionsByMilestone(r.Context(), issue.MilestoneID); err == nil {
+					out := make([]ValidatorAssertionData, len(assertions))
+					for i, a := range assertions {
+						out[i] = ValidatorAssertionData{
+							ID:       uuidToString(a.ID),
+							Text:     a.Text,
+							Position: a.Position,
+						}
+					}
+					resp.ValidatorAssertions = out
+				} else {
+					slog.Warn("claim: failed to load DoD assertions for validator run",
+						"task_id", uuidToString(task.ID),
+						"milestone_id", uuidToString(issue.MilestoneID),
+						"error", err,
+					)
+				}
+			}
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1396,68 +1393,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Chat task: populate workspace/session info from the chat_session table.
-	if task.ChatSessionID.Valid {
-		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
-			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
-			resp.ChatSessionID = uuidToString(cs.ID)
-			if repos := h.workspaceRepoData(r.Context(), cs.WorkspaceID); len(repos) > 0 {
-				resp.Repos = repos
-			}
-			if !task.ForceFreshSession {
-				// Resume chat sessions only when the stored pointer was produced
-				// by the same runtime as the claiming task. When the chat_session
-				// pointer is missing (legacy NULL runtime_id), stale (last task
-				// failed before reporting completion), or runtime-mismatched, fall
-				// back to the most recent task row that recorded a session_id —
-				// otherwise a single failed turn would silently drop the entire
-				// conversation memory on the next message. The fallback also
-				// requires runtime to match.
-				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = cs.SessionID.String
-				}
-				if cs.WorkDir.Valid {
-					resp.PriorWorkDir = cs.WorkDir.String
-				}
-				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-						resp.PriorSessionID = prior.SessionID.String
-					}
-					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-						resp.PriorWorkDir = prior.WorkDir.String
-					}
-				}
-			}
-			// Load the latest user message for the chat prompt, plus any
-			// attachments linked to that exact message. Without the structured
-			// attachment list the agent only sees the markdown URL in
-			// `ChatMessage` — fine for vision models inline but unusable when
-			// the agent wants to `multica attachment download <id>` (URL is
-			// signed and 30-min expiring on private CDN).
-			if msgs, err := h.Queries.ListChatMessages(r.Context(), cs.ID); err == nil && len(msgs) > 0 {
-				for i := len(msgs) - 1; i >= 0; i-- {
-					if msgs[i].Role == "user" {
-						resp.ChatMessage = msgs[i].Content
-						if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
-							ChatMessageID: msgs[i].ID,
-							WorkspaceID:   parseUUID(resp.WorkspaceID),
-						}); attErr == nil && len(atts) > 0 {
-							resp.ChatMessageAttachments = make([]ChatAttachmentMeta, len(atts))
-							for j, a := range atts {
-								resp.ChatMessageAttachments[j] = ChatAttachmentMeta{
-									ID:          uuidToString(a.ID),
-									Filename:    a.Filename,
-									ContentType: a.ContentType,
-								}
-							}
-						}
-						break
-					}
-				}
-			}
-		}
-	}
-
 	// Autopilot run_only task: resolve workspace from autopilot_run →
 	// autopilot, and include the autopilot instructions because there is no
 	// issue for the agent to fetch.
@@ -1487,104 +1422,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
-	// there so the isolation check below has something to compare.
-	hasQuickCreate := false
-	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
-		var qc service.QuickCreateContext
-		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
-			hasQuickCreate = true
-			resp.QuickCreatePrompt = qc.Prompt
-			resp.WorkspaceID = qc.WorkspaceID
-			if qc.ParentIssueID != "" {
-				resp.QuickCreateParentIssueID = qc.ParentIssueID
-			}
-
-			// When the user picked a project in the modal, surface its title
-			// and resources to the daemon so the agent has the same context
-			// it would for an issue-bound task: the prompt template can name
-			// the project, and `multica repo checkout` sees the project's
-			// github_repo resources instead of the workspace fallback.
-			var projectRepos []RepoData
-			if qc.FeatureID != "" {
-				projectUUID, err := util.ParseUUID(qc.FeatureID)
-				if err == nil {
-					resp.FeatureID = qc.FeatureID
-					if proj, err := h.Queries.GetFeature(r.Context(), projectUUID); err == nil {
-						resp.FeatureTitle = proj.Title
-					}
-					if rows := h.listFeatureResourcesForFeature(r.Context(), projectUUID); len(rows) > 0 {
-						out := make([]FeatureResourceData, 0, len(rows))
-						for _, row := range rows {
-							label := ""
-							if row.Label.Valid {
-								label = row.Label.String
-							}
-							ref := json.RawMessage(row.ResourceRef)
-							if len(ref) == 0 {
-								ref = json.RawMessage("{}")
-							}
-							out = append(out, FeatureResourceData{
-								ID:           uuidToString(row.ID),
-								ResourceType: row.ResourceType,
-								ResourceRef:  ref,
-								Label:        label,
-							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL})
-								}
-							}
-						}
-						resp.FeatureResources = out
-					}
-				}
-			}
-
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if repos := h.workspaceRepoData(r.Context(), parseUUID(qc.WorkspaceID)); len(repos) > 0 {
-				resp.Repos = repos
-			}
-
-			// Squad-leader briefing injection for quick-create tasks. When
-			// the user picked a squad in the modal, the task runs on the
-			// squad's leader agent (resolved by the handler). Surface the
-			// same Operating Protocol + Roster + user Instructions that
-			// issue-bound squad tasks see, so the leader can decide to
-			// delegate before opening the issue.
-			if resp.Agent != nil && qc.SquadID != "" {
-				wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID)
-				squadUUID, sqErr := util.ParseUUID(qc.SquadID)
-				if wsErr == nil && sqErr == nil {
-					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-						ID:          squadUUID,
-						WorkspaceID: wsUUID,
-					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
-						if strings.TrimSpace(resp.Agent.Instructions) == "" {
-							resp.Agent.Instructions = briefing
-						} else {
-							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-						}
-						// Surface the squad identity to the daemon so the
-						// quick-create prompt defaults the new issue's
-						// assignee to the squad, not the leader agent.
-						resp.SquadID = uuidToString(squad.ID)
-						resp.SquadName = squad.Name
-						slog.Debug("injected squad leader briefing for quick-create",
-							"squad_id", uuidToString(squad.ID),
-							"squad_name", squad.Name,
-							"leader_agent_id", resp.Agent.ID,
-						)
-					}
-				}
-			}
-		}
-	}
-
 	// Workspace isolation check: the daemon uses this response's workspace_id
 	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
 	// empty value would make the CLI silently fall back to the user-global
@@ -1601,9 +1438,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			"runtime_workspace", runtimeWorkspaceID,
 			"resolved_workspace", resp.WorkspaceID,
 			"has_issue", task.IssueID.Valid,
-			"has_chat", task.ChatSessionID.Valid,
 			"has_autopilot_run", task.AutopilotRunID.Valid,
-			"has_quick_create", hasQuickCreate,
 		)
 		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
 			slog.Error("task claim: cancel after workspace check failed",
@@ -1615,10 +1450,9 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
 	// system prompt that workspace owners set in Settings → General. Inject it
-	// into the brief regardless of task kind (issue / chat / autopilot /
-	// quick-create) so every agent running in the workspace sees the same
-	// shared context. Empty string when the owner hasn't set one; the daemon
-	// skips rendering the heading in that case.
+	// into the brief regardless of task kind so every agent running in the
+	// workspace sees the same shared context. Empty string when the owner
+	// hasn't set one; the daemon skips rendering the heading in that case.
 	if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(resp.WorkspaceID)); err == nil {
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String
@@ -1787,12 +1621,31 @@ func (h *Handler) ReportTaskProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// HandoffInput is the structured output a worker Run may include when it
+// completes an Issue. All fields are optional; an absent Handoff means the
+// agent did not produce a structured summary for this Run.
+type HandoffInput struct {
+	Done        []string              `json:"done"`
+	LeftUndone  []string              `json:"left_undone"`
+	Commands    []handoffCommandInput `json:"commands"`
+	Discoveries []string              `json:"discoveries"`
+}
+
+// handoffCommandInput mirrors handoff.CommandResult for JSON decoding.
+type handoffCommandInput struct {
+	Command  string `json:"command"`
+	ExitCode int    `json:"exit_code"`
+}
+
 // CompleteTask marks a running task as completed.
 type TaskCompleteRequest struct {
-	PRURL     string `json:"pr_url"`
-	Output    string `json:"output"`
-	SessionID string `json:"session_id"` // Claude session ID for future resumption
-	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	PRURL         string              `json:"pr_url"`
+	Output        string              `json:"output"`
+	SessionID     string              `json:"session_id"` // Claude session ID for future resumption
+	WorkDir       string              `json:"work_dir"`   // working directory used during execution
+	Handoff       *HandoffInput       `json:"handoff,omitempty"`
+	Validation    *ValidationInput    `json:"validation,omitempty"`
+	Retrospective *decisionlog.Output `json:"retrospective,omitempty"`
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -1817,6 +1670,9 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.writeHandoffOnCompletion(r.Context(), task, req.Handoff)
+	h.recordValidationOnCompletion(r.Context(), task, req.Validation)
+	h.recordRetrospectiveOnCompletion(r.Context(), task, req.Retrospective)
 	h.emitIssueExecutedOnFirstCompletion(r, task)
 
 	// Best-effort revoke of any agent task token minted at claim time.
@@ -1992,12 +1848,6 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			workspaceID = uuidToString(issue.WorkspaceID)
 		}
 	}
-	if workspaceID == "" && task.ChatSessionID.Valid {
-		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
-			workspaceID = uuidToString(cs.WorkspaceID)
-		}
-	}
-
 	for _, msg := range req.Messages {
 		// Redact sensitive information before persisting or broadcasting.
 		msg.Content = redact.Text(msg.Content)
@@ -2282,34 +2132,6 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetChatSessionGCCheck returns the status and updated_at of a chat session
-// for the daemon GC loop. A 404 here means the session was hard-deleted
-// (DeleteChatSession in chat.go runs a real DELETE), which the daemon treats
-// as an immediate-clean signal — the user's explicit delete is the strongest
-// reclaim authorization we can get.
-//
-// Same anti-enumeration shape as GetIssueGCCheck: workspace mismatch returns
-// the same 404 so a scoped daemon token can't probe other workspaces.
-func (h *Handler) GetChatSessionGCCheck(w http.ResponseWriter, r *http.Request) {
-	sessionID := chi.URLParam(r, "sessionId")
-	sessionUUID, ok := parseUUIDOrBadRequest(w, sessionID, "session_id")
-	if !ok {
-		return
-	}
-	session, err := h.Queries.GetChatSession(r.Context(), sessionUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "chat session not found")
-		return
-	}
-	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(session.WorkspaceID)) {
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     session.Status,
-		"updated_at": session.UpdatedAt.Time,
-	})
-}
-
 // GetAutopilotRunGCCheck returns the status and completed_at of an autopilot
 // run for the daemon GC loop. autopilot_run has no updated_at column; the
 // daemon uses completed_at as the TTL anchor for terminal runs, and treats
@@ -2343,10 +2165,7 @@ func (h *Handler) GetAutopilotRunGCCheck(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// GetTaskGCCheck returns the agent_task_queue status for quick-create cleanup.
-// Quick-create tasks have no parent record (no issue_id at WriteGCMeta time,
-// no chat session, no autopilot run) so the daemon keys GC directly on the
-// task row itself.
+// GetTaskGCCheck returns the agent_task_queue status for GC cleanup.
 func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	task, ok := h.requireDaemonTaskAccess(w, r, taskID)

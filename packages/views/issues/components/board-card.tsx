@@ -16,9 +16,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
 import { featureListOptions } from "@multica/core/features/queries";
+import { milestoneListOptions } from "@multica/core/milestones/queries";
 import { issueDetailOptions } from "@multica/core/issues/queries";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { taskMessagesOptions } from "@multica/core/chat/queries";
+import { agentTaskSnapshotOptions, taskMessagesOptions } from "@multica/core/agents";
 import {
   deriveLiveness,
   deriveActivityCounters,
@@ -84,7 +84,7 @@ function useHolderIssueKey(task: AgentTask | null, snapshot: AgentTask[], wsId: 
   return holderIssue?.identifier ?? null;
 }
 
-function useIssueLiveState(
+export function useIssueLiveState(
   issueId: string,
   wsId: string,
   issueStatus?: IssueStatus,
@@ -271,6 +271,13 @@ export const BoardCardContent = memo(function BoardCardContent({
     enabled: storeProperties.feature && !!issue.feature_id,
   });
   const feature = issue.feature_id ? features.find((p) => p.id === issue.feature_id) : undefined;
+  const { data: milestones = [] } = useQuery({
+    ...milestoneListOptions(wsId),
+    enabled: storeProperties.feature && !!issue.milestone_id,
+  });
+  const milestone = issue.milestone_id
+    ? milestones.find((m) => m.id === issue.milestone_id)
+    : undefined;
   const labels = issue.labels ?? [];
 
   const updateIssueMutation = useUpdateIssue();
@@ -298,6 +305,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showStartDate = storeProperties.startDate && issue.start_date;
   const showDueDate = storeProperties.dueDate && issue.due_date;
   const showFeature = storeProperties.feature && feature;
+  const showMilestone = storeProperties.feature && milestone;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
 
@@ -404,13 +412,21 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: feature + labels */}
-      {(showFeature || showLabels) && (
+      {/* Chip row: feature + milestone + labels */}
+      {(showFeature || showMilestone || showLabels) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showFeature && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]">
               <FeatureIcon feature={feature} size="sm" />
               <span className="truncate">{feature!.title}</span>
+            </span>
+          )}
+          {showMilestone && (
+            <span
+              data-testid="milestone-chip"
+              className="inline-flex items-center rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]"
+            >
+              <span className="truncate">{milestone!.title}</span>
             </span>
           )}
           {showLabels && labels.map((label) => (

@@ -18,6 +18,10 @@ import (
 // format: events are newline-delimited JSON objects with a "type" field.
 type cursorBackend struct {
 	cfg Config
+	// resultTeardownGrace overrides defaultResultTeardownGrace. Zero means use
+	// the default; tests set a small value to keep the hung-after-result path
+	// fast.
+	resultTeardownGrace time.Duration
 }
 
 func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -88,6 +92,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stepUsage := make(map[string]TokenUsage)
 		resultUsage := make(map[string]TokenUsage)
 		hasResultUsage := false
+		resultSeen := false
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -154,6 +159,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.Usage != nil {
 					hasResultUsage = true
 				}
+				// The result is the authoritative completion signal. Tear the
+				// process down proactively so a CLI that emits its result and
+				// then hangs resolves now instead of blocking the reader until
+				// the idle watchdog.
+				if !resultSeen {
+					resultSeen = true
+					scheduleResultTeardown(runCtx, cancel, resolveResultTeardownGrace(b.resultTeardownGrace))
+				}
 
 			case "error":
 				errMsg := cursorErrorText(&evt)
@@ -198,15 +211,20 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
 
-		if runCtx.Err() == context.DeadlineExceeded {
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("cursor-agent timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
+		// A run that emitted a result has already recorded its real disposition.
+		// Don't let the teardown cancel — or a non-zero exit from the force-kill
+		// that follows it — clobber that into aborted/failed.
+		if !resultSeen {
+			if runCtx.Err() == context.DeadlineExceeded {
+				finalStatus = "timeout"
+				finalError = fmt.Sprintf("cursor-agent timed out after %s", timeout)
+			} else if runCtx.Err() == context.Canceled {
+				finalStatus = "aborted"
+				finalError = "execution cancelled"
+			} else if exitErr != nil && finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("cursor-agent exited with error: %v", exitErr)
+			}
 		}
 
 		b.cfg.Logger.Info("cursor-agent finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())

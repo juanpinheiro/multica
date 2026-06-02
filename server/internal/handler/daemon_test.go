@@ -1765,7 +1765,7 @@ func TestClaimTask_FeatureGithubReposOverrideWorkspaceRepos(t *testing.T) {
 	// workspace's repos list.
 	var featureID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO feature (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO feature (workspace_id, title, status) VALUES ($1, $2, 'running') RETURNING id
 	`, testWorkspaceID, "Claim feature repo override").Scan(&featureID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -1863,7 +1863,7 @@ func TestClaimTask_FeatureWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 
 	var featureID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO feature (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO feature (workspace_id, title, status) VALUES ($1, $2, 'running') RETURNING id
 	`, testWorkspaceID, "Claim feature without repos").Scan(&featureID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -2800,274 +2800,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
-func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
 
-	ctx := context.Background()
-
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
-
-	var skipSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'runtime guard skip chat', 'old-chat-session', '/tmp/old-chat-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, oldRuntimeID).Scan(&skipSessionID); err != nil {
-		t.Fatalf("setup: create skip chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, skipSessionID) })
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, completed_at,
-			session_id, work_dir
-		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-chat-session', '/tmp/old-chat-workdir')
-	`, agentID, oldRuntimeID, skipSessionID); err != nil {
-		t.Fatalf("setup: create old-runtime chat task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority
-		)
-		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, skipSessionID); err != nil {
-		t.Fatalf("setup: create current-runtime chat task: %v", err)
-	}
-
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorSessionID != "" {
-		t.Fatalf("chat runtime mismatch: expected empty PriorSessionID, got %q", task.PriorSessionID)
-	}
-	if task.PriorWorkDir != "/tmp/old-chat-workdir" {
-		t.Fatalf("chat runtime mismatch: expected PriorWorkDir='/tmp/old-chat-workdir', got %q", task.PriorWorkDir)
-	}
-	if _, err := testPool.Exec(ctx, `
-		UPDATE agent_task_queue
-		SET status = 'completed', completed_at = now()
-		WHERE chat_session_id = $1 AND status IN ('dispatched', 'running')
-	`, skipSessionID); err != nil {
-		t.Fatalf("setup: complete claimed skip chat task: %v", err)
-	}
-
-	var resumeSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'runtime guard resume chat', 'same-chat-session', '/tmp/same-chat-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&resumeSessionID); err != nil {
-		t.Fatalf("setup: create resume chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, resumeSessionID) })
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority
-		)
-		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, resumeSessionID); err != nil {
-		t.Fatalf("setup: create same-runtime chat task: %v", err)
-	}
-
-	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorSessionID != "same-chat-session" {
-		t.Fatalf("chat runtime match: expected PriorSessionID='same-chat-session', got %q", task.PriorSessionID)
-	}
-	if task.PriorWorkDir != "/tmp/same-chat-workdir" {
-		t.Fatalf("chat runtime match: expected PriorWorkDir='/tmp/same-chat-workdir', got %q", task.PriorWorkDir)
-	}
-}
-
-func TestClaimTask_ChatForceFreshSessionSkipsPriorSession(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'force fresh chat', 'chat-pointer-session', '/tmp/chat-pointer-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, completed_at,
-			session_id, work_dir
-		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'task-row-session', '/tmp/task-row-workdir')
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create prior chat task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, force_fresh_session
-		)
-		VALUES ($1, $2, $3, 'queued', 0, TRUE)
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create force-fresh chat task: %v", err)
-	}
-
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorSessionID != "" {
-		t.Fatalf("force fresh chat: expected empty PriorSessionID, got %q", task.PriorSessionID)
-	}
-	if task.PriorWorkDir != "" {
-		t.Fatalf("force fresh chat: expected empty PriorWorkDir, got %q", task.PriorWorkDir)
-	}
-}
-
-// Locks the legacy-row fallback: chat_session.runtime_id IS NULL (e.g. a row
-// the migration left untouched because no prior task matched the cs pointer)
-// but a completed task on the claiming runtime exists. ClaimTaskByRuntime
-// must recover the session from the task row, not start a fresh conversation.
-func TestClaimTask_ChatLegacyNullRuntimeFallsBackToTaskRow(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-
-	var legacySessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'runtime guard legacy chat', NULL, NULL, NULL)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&legacySessionID); err != nil {
-		t.Fatalf("setup: create legacy chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, legacySessionID) })
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, completed_at,
-			session_id, work_dir
-		)
-		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'legacy-fallback-session', '/tmp/legacy-fallback-workdir')
-	`, agentID, runtimeID, legacySessionID); err != nil {
-		t.Fatalf("setup: create matching-runtime prior task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority
-		)
-		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, legacySessionID); err != nil {
-		t.Fatalf("setup: create current chat task: %v", err)
-	}
-
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorSessionID != "legacy-fallback-session" {
-		t.Fatalf("legacy fallback: expected PriorSessionID='legacy-fallback-session', got %q", task.PriorSessionID)
-	}
-	if task.PriorWorkDir != "/tmp/legacy-fallback-workdir" {
-		t.Fatalf("legacy fallback: expected PriorWorkDir='/tmp/legacy-fallback-workdir', got %q", task.PriorWorkDir)
-	}
-}
-
-// TestGetChatSessionGCCheck verifies the chat session gc-check endpoint
-// matches the same anti-enumeration shape as GetIssueGCCheck: cross-workspace
-// daemon tokens get 404, same-workspace tokens get the live status.
-func TestGetChatSessionGCCheck(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
-
-	var sessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		VALUES ($1, $2, $3, 'gc-check fixture', 'active')
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&sessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	defer testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID)
-
-	// Cross-workspace daemon token must 404 with no oracle.
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
-		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
-	req = withURLParam(req, "sessionId", sessionID)
-	testHandler.GetChatSessionGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Same-workspace daemon token sees the live row.
-	w = httptest.NewRecorder()
-	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
-		testWorkspaceID, "legit-daemon")
-	req = withURLParam(req, "sessionId", sessionID)
-	testHandler.GetChatSessionGCCheck(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Status    string `json:"status"`
-		UpdatedAt string `json:"updated_at"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Status != "active" {
-		t.Fatalf("expected status %q, got %q", "active", resp.Status)
-	}
-	if resp.UpdatedAt == "" {
-		t.Fatal("expected updated_at to be set")
-	}
-
-	// Hard-deleted session: 404 — exactly what the daemon needs to reclaim
-	// the workdir on the next GC pass after a user runs DeleteChatSession.
-	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID); err != nil {
-		t.Fatalf("delete chat session: %v", err)
-	}
-	w = httptest.NewRecorder()
-	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
-		testWorkspaceID, "legit-daemon")
-	req = withURLParam(req, "sessionId", sessionID)
-	testHandler.GetChatSessionGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("hard-deleted session: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
-}
 
 // TestGetAutopilotRunGCCheck verifies the autopilot-run gc-check endpoint:
 // 200 with status+completed_at on success, 404 on cross-workspace probe.
@@ -3155,24 +2888,27 @@ func TestGetTaskGCCheck(t *testing.T) {
 		t.Fatalf("setup: get agent: %v", err)
 	}
 
-	// Quick-create-shaped task: no issue_id, no chat_session_id, no run id.
-	// context.type is set so ResolveTaskWorkspaceID can recover workspace.
-	quickContext, _ := json.Marshal(map[string]any{
-		"type":         "quick_create",
-		"prompt":       "fixture",
-		"requester_id": testUserID,
-		"workspace_id": testWorkspaceID,
-	})
+	// Issue-backed completed task.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'gc-check fixture', 'in_progress', 'none', $2, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1), 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("setup: create issue: %v", err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, status, priority, context, completed_at
+			agent_id, runtime_id, issue_id, status, priority, completed_at
 		)
-		VALUES ($1, $2, 'completed', 0, $3, NOW())
+		VALUES ($1, $2, $3, 'completed', 0, NOW())
 		RETURNING id
-	`, agentID, runtimeID, quickContext).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create quick-create task: %v", err)
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
 	}
 	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 
@@ -3494,83 +3230,6 @@ func TestDaemonRegister_DeviceNameDedup_EmptyDeviceNameIsNoop(t *testing.T) {
 // quick-create task includes a parent_issue_id in its context, the claim
 // handler surfaces it as quick_create_parent_issue_id in the response so the
 // daemon can instruct the agent to pass --parent to multica issue create.
-func TestClaimTask_QuickCreate_SurfacesParentIssueID(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("get agent: %v", err)
-	}
-
-	// Create a parent issue to reference.
-	var parentIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'quick-create parent', 'todo', 'none', $2, 'member',
-			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&parentIssueID); err != nil {
-		t.Fatalf("create parent issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parentIssueID) })
-
-	quickContext, _ := json.Marshal(map[string]any{
-		"type":            "quick_create",
-		"prompt":          "create a sub-task",
-		"requester_id":    testUserID,
-		"workspace_id":    testWorkspaceID,
-		"parent_issue_id": parentIssueID,
-	})
-
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
-		VALUES ($1, $2, 'queued', 3, $3)
-		RETURNING id
-	`, agentID, runtimeID, quickContext).Scan(&taskID); err != nil {
-		t.Fatalf("create quick-create task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
-
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
-		testWorkspaceID, "quick-create-parent-test-daemon")
-	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Task *struct {
-			QuickCreatePrompt        string `json:"quick_create_prompt"`
-			QuickCreateParentIssueID string `json:"quick_create_parent_issue_id"`
-		} `json:"task"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
-	if resp.Task == nil {
-		t.Fatal("expected task in response")
-	}
-	if resp.Task.QuickCreatePrompt != "create a sub-task" {
-		t.Errorf("quick_create_prompt = %q, want %q", resp.Task.QuickCreatePrompt, "create a sub-task")
-	}
-	if resp.Task.QuickCreateParentIssueID != parentIssueID {
-		t.Errorf("quick_create_parent_issue_id = %q, want %q", resp.Task.QuickCreateParentIssueID, parentIssueID)
-	}
-}
-
-// TestReportTaskMessagesStampsLastActivity locks in the heartbeat data source:
-// reporting a task:message stamps agent_task_queue.last_activity_at, and the
-// workspace snapshot surfaces it. A task with no message yet reads as null.
 func TestReportTaskMessagesStampsLastActivity(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires database")

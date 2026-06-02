@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/decisionlog"
 	"github.com/multica-ai/multica/server/internal/workspace/inplace"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -1661,11 +1662,7 @@ func (d *Daemon) runRuntimePoller(
 			continue
 		}
 
-		taskTarget := task.IssueID
-		if taskTarget == "" && task.ChatSessionID != "" {
-			taskTarget = "chat:" + shortID(task.ChatSessionID)
-		}
-		d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
+		d.logger.Info("task received", "task", shortID(task.ID), "target", task.IssueID)
 		taskWG.Add(1)
 		d.activeTasks.Add(1)
 		go func(t Task, slot int) {
@@ -1755,11 +1752,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 	}
-	if task.ChatSessionID != "" {
-		taskLog.Info("picked chat task", "chat_session", shortID(task.ChatSessionID), "agent", agentName, "provider", provider)
-	} else {
-		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
-	}
+	taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	taskLog.Debug("task context",
 		"workspace_id", task.WorkspaceID,
 		"runtime_id", task.RuntimeID,
@@ -1931,7 +1924,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
 		if err := retryTerminalCallback(ctx, func() error {
-			return d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir)
+			return d.client.CompleteTask(ctx, taskID, result.Comment, result.BranchName, result.SessionID, result.WorkDir, result.Handoff, result.Validation, result.Retrospective)
 		}, taskLog); err != nil {
 			taskLog.Error("complete task failed, falling back to fail", "error", err)
 			if failErr := retryTerminalCallback(ctx, func() error {
@@ -1959,32 +1952,18 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 }
 
 // gcMetaForTask classifies a finished task and produces a GCMeta of the right
-// kind. The discriminator order matters: a task carrying both an issue_id
-// and a chat_session_id (theoretical, not produced today) should be treated
-// as a chat task because the chat session is the longer-lived parent record.
-//
-// Returns ok=false when the task has no recognizable parent (e.g. an
+// kind. Returns ok=false when the task has no recognizable parent (e.g. an
 // internal task with no IDs at all). The caller skips writing a meta file
 // in that case so the directory falls back to mtime-based orphan cleanup.
 func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	meta := execenv.GCMeta{WorkspaceID: task.WorkspaceID}
 	switch {
-	case task.ChatSessionID != "":
-		meta.Kind = execenv.GCKindChat
-		meta.ChatSessionID = task.ChatSessionID
 	case task.AutopilotRunID != "":
 		meta.Kind = execenv.GCKindAutopilotRun
 		meta.AutopilotRunID = task.AutopilotRunID
 	case task.IssueID != "":
 		meta.Kind = execenv.GCKindIssue
 		meta.IssueID = task.IssueID
-	case task.QuickCreatePrompt != "":
-		// Quick-create tasks reach WriteGCMeta before the server runs
-		// LinkTaskToIssue, so IssueID is always empty here. Persist the
-		// task ID instead and let the GC loop ask the server for terminal
-		// state via the task gc-check endpoint.
-		meta.Kind = execenv.GCKindQuickCreate
-		meta.TaskID = task.ID
 	default:
 		return execenv.GCMeta{}, false
 	}
@@ -2037,26 +2016,30 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
+	agentSkills := convertSkillsForEnv(skills)
+	if task.Role == "validator" {
+		agentSkills = append(agentSkills, buildValidatorSkill(task.ValidatorAssertions, provider))
+	}
+	if task.Role == "retrospective" {
+		agentSkills = append(agentSkills, buildRetrospectiveSkill())
+	}
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		AgentID:                          agentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
-		AgentSkills:                      convertSkillsForEnv(skills),
+		AgentSkills:                      agentSkills,
 		Repos:                            convertReposForEnv(task.Repos),
 		FeatureID:                        task.FeatureID,
 		FeatureTitle:                     task.FeatureTitle,
 		FeatureResources:                 convertFeatureResourcesForEnv(task.FeatureResources),
-		ChatSessionID:                    task.ChatSessionID,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
 		AutopilotDescription:             task.AutopilotDescription,
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:                task.QuickCreatePrompt,
-		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		WorkspaceContext:                 task.WorkspaceContext,
@@ -2201,13 +2184,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	if task.AutopilotID != "" {
 		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
-	}
-	// Quick-create marker — when set, the multica CLI's `issue create`
-	// command stamps the new issue with origin_type=quick_create +
-	// origin_id=<task_id> so the completion handler can find it
-	// deterministically (see GetIssueByOrigin).
-	if task.QuickCreatePrompt != "" {
-		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
 	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
@@ -2467,14 +2443,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				FailureReason: reason,
 			}, nil
 		}
-		return TaskResult{
+		tr := TaskResult{
 			Status:    "completed",
 			Comment:   result.Output,
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
-		}, nil
+		}
+		if task.Role == "validator" {
+			tr.Validation = parseValidationOutput(result.Output)
+		}
+		if task.Role == "retrospective" {
+			tr.Retrospective = decisionlog.Parse(result.Output)
+		}
+		return tr, nil
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
 		// in sync even when the agent times out after building a session.
@@ -2540,9 +2523,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		// Forward SessionID/WorkDir on the blocked path: backends commonly
 		// emit a real session_id before failing (rate-limit, tool error,
-		// model reject, …). Without this the chat_session resume pointer
-		// would either be left stale or overwritten with NULL on the
-		// server, causing the next chat turn to lose context.
+		// model reject, …). Session ID is preserved on the task row via
+		// the daemon's UpdateAgentTaskSession call.
 		//
 		// Classify upstream API 400 invalid_request_error failures with a
 		// dedicated failure_reason so GetLastTaskSession excludes the

@@ -29,7 +29,6 @@ type TimelineEntry struct {
 	ParentID       *string              `json:"parent_id,omitempty"`
 	UpdatedAt      *string              `json:"updated_at,omitempty"`
 	CommentType    *string              `json:"comment_type,omitempty"`
-	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
 	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
 	ResolvedAt     *string              `json:"resolved_at,omitempty"`
 	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
@@ -154,8 +153,8 @@ func (h *Handler) mergeTimeline(r *http.Request, comments []db.Comment, activiti
 	return out
 }
 
-// commentsToEntries fetches reactions + attachments for the given comments in
-// one batch each and returns enriched TimelineEntry slices preserving order.
+// commentsToEntries fetches attachments for the given comments and returns
+// enriched TimelineEntry slices preserving order.
 func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []TimelineEntry {
 	if len(comments) == 0 {
 		return nil
@@ -164,7 +163,6 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 	for i, c := range comments {
 		ids[i] = c.ID
 	}
-	reactions := h.groupReactions(r, ids)
 	attachments := h.groupAttachments(r, ids)
 
 	out := make([]TimelineEntry, len(comments))
@@ -183,7 +181,6 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ParentID:       uuidToPtr(c.ParentID),
 			CreatedAt:      timestampToString(c.CreatedAt),
 			UpdatedAt:      &updatedAt,
-			Reactions:      reactions[cid],
 			Attachments:    attachments[cid],
 			ResolvedAt:     timestampToPtr(c.ResolvedAt),
 			ResolvedByType: textToPtr(c.ResolvedByType),

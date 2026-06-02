@@ -325,9 +325,6 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.AutopilotRunID != "" {
 		return renderAutopilotContext(ctx)
 	}
-	if ctx.QuickCreatePrompt != "" {
-		return renderQuickCreateContext(ctx)
-	}
 
 	var b strings.Builder
 
@@ -356,27 +353,6 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	return b.String()
 }
 
-// renderQuickCreateContext renders issue_context.md for quick-create tasks.
-// This file carries only task data (user input, skills). Behavioral rules
-// and guardrails live in AGENTS.md (runtime config) and the per-turn prompt
-// to avoid redundancy and conflicting instructions.
-func renderQuickCreateContext(ctx TaskContextForEnv) string {
-	var b strings.Builder
-	b.WriteString("# Quick Create\n\n")
-	b.WriteString("**Trigger:** Quick-create modal\n\n")
-	b.WriteString("## User input\n\n")
-	b.WriteString("> ")
-	b.WriteString(ctx.QuickCreatePrompt)
-	b.WriteString("\n\n")
-	if len(ctx.AgentSkills) > 0 {
-		b.WriteString("## Agent Skills\n\n")
-		for _, skill := range ctx.AgentSkills {
-			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
-}
 
 func renderAutopilotContext(ctx TaskContextForEnv) string {
 	var b strings.Builder

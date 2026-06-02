@@ -13,14 +13,11 @@ import enWorkspace from "./en/workspace.json";
 import enFeatures from "./en/features.json";
 import enAutopilots from "./en/autopilots.json";
 import enSkills from "./en/skills.json";
-import enChat from "./en/chat.json";
 import enModals from "./en/modals.json";
 import enRuntimes from "./en/runtimes.json";
 import enLayout from "./en/layout.json";
 import enUsage from "./en/usage.json";
 import enUi from "./en/ui.json";
-import enSquads from "./en/squads.json";
-
 // Single source of truth for the resource bundle.
 export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
   en: {
@@ -38,12 +35,10 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     features: enFeatures,
     autopilots: enAutopilots,
     skills: enSkills,
-    chat: enChat,
     modals: enModals,
     runtimes: enRuntimes,
     layout: enLayout,
     usage: enUsage,
     ui: enUi,
-    squads: enSquads,
   },
 };

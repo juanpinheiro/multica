@@ -75,16 +75,6 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 		assertRowExists(t, ctx, "skill", id)
 	})
 
-	t.Run("DeleteChatSession", func(t *testing.T) {
-		id := seedChatSession(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.UUIDToString(id)) })
-
-		if err := queries.DeleteChatSession(ctx, db.DeleteChatSessionParams{ID: id, WorkspaceID: wsB}); err != nil {
-			t.Fatalf("cross-workspace DeleteChatSession: expected nil error (no-op), got %v", err)
-		}
-		assertRowExists(t, ctx, "chat_session", id)
-	})
-
 	t.Run("UpdateIssueStatus", func(t *testing.T) {
 		id := seedIssue(t, ctx)
 		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, util.UUIDToString(id)) })
@@ -164,7 +154,7 @@ func seedFeature(t *testing.T, ctx context.Context) pgtype.UUID {
 	var s string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO feature (workspace_id, title, status, priority)
-		VALUES ($1, 'scope-guard test feature', 'planned', 'none')
+		VALUES ($1, 'scope-guard test feature', 'draft', 'none')
 		RETURNING id
 	`, testWorkspaceID).Scan(&s); err != nil {
 		t.Fatalf("seed feature: %v", err)
@@ -184,25 +174,6 @@ func seedSkill(t *testing.T, ctx context.Context) pgtype.UUID {
 		RETURNING id
 	`, testWorkspaceID, name, testUserID).Scan(&s); err != nil {
 		t.Fatalf("seed skill: %v", err)
-	}
-	return parseUUID(s)
-}
-
-func seedChatSession(t *testing.T, ctx context.Context) pgtype.UUID {
-	t.Helper()
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("find test agent: %v", err)
-	}
-	var s string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
-		VALUES ($1, $2, $3, 'scope-guard chat', (SELECT runtime_id FROM agent WHERE id = $2))
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&s); err != nil {
-		t.Fatalf("seed chat_session: %v", err)
 	}
 	return parseUUID(s)
 }

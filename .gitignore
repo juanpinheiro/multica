@@ -50,3 +50,7 @@ server/server
 data/
 .kilo
 .idea
+
+# Ephemeral e2e test artifacts (tokens, ids, watchers)
+.scratch/_e2e_*
+.scratch/_watch.mjs

@@ -227,20 +227,6 @@ func TestWorkspaceContextRenderedAcrossTaskKinds(t *testing.T) {
 			},
 		},
 		{
-			name: "chat",
-			ctx: TaskContextForEnv{
-				ChatSessionID:    "chat-1",
-				WorkspaceContext: wsContext,
-			},
-		},
-		{
-			name: "quick-create",
-			ctx: TaskContextForEnv{
-				QuickCreatePrompt: "create me an issue",
-				WorkspaceContext:  wsContext,
-			},
-		},
-		{
 			name: "autopilot run-only",
 			ctx: TaskContextForEnv{
 				AutopilotRunID:   "run-1",
@@ -488,14 +474,6 @@ func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 		name string
 		ctx  TaskContextForEnv
 	}{
-		{
-			name: "chat",
-			ctx:  TaskContextForEnv{ChatSessionID: "chat-1"},
-		},
-		{
-			name: "quick-create",
-			ctx:  TaskContextForEnv{QuickCreatePrompt: "create me an issue"},
-		},
 		{
 			name: "autopilot run-only",
 			ctx:  TaskContextForEnv{AutopilotRunID: "run-1"},

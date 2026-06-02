@@ -34,12 +34,9 @@ import (
 //
 // The comment is inserted directly via db.Queries (not through the
 // CreateComment HTTP handler) so it bypasses the generic on_comment trigger
-// path. When the parent has an agent or squad assignee, the comment body
-// embeds a single `mention://{agent,squad}/<id>` link that targets the
-// parent assignee — Bohan's product call on MUL-2538 ("system child-done
-// comment 无脑 mention parent assignee，member/squad/agent 都覆盖", later
-// narrowed to skip member assignees outright). To keep the platform in
-// control of side effects, the cmd/server notification + subscriber
+// path. When the parent has an agent assignee, the comment body embeds a
+// `mention://agent/<id>` link that targets the parent assignee. To keep the
+// platform in control of side effects, the cmd/server notification + subscriber
 // listeners still skip system comments wholesale, so smuggled mentions from
 // the child title cannot light up unrelated members. The parent assignee's
 // own trigger is fired explicitly by dispatchParentAssigneeTrigger below,
@@ -109,7 +106,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	}
 
 	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
-		"comment":             commentToResponse(comment, nil, nil),
+		"comment":             commentToResponse(comment, nil),
 		"issue_title":         parent.Title,
 		"issue_assignee_type": textToPtr(parent.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
@@ -163,27 +160,17 @@ func (h *Handler) buildParentAssigneeMention(ctx context.Context, parent db.Issu
 // Returns ok=false when the assignee row cannot be loaded; the caller
 // should then omit the mention entirely rather than emit a broken link.
 func (h *Handler) resolveAssigneeMentionLabel(ctx context.Context, workspaceID pgtype.UUID, assigneeType string, assigneeID pgtype.UUID) (string, bool) {
-	switch assigneeType {
-	case "agent":
-		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-			ID:          assigneeID,
-			WorkspaceID: workspaceID,
-		})
-		if err != nil {
-			return "", false
-		}
-		return sanitizeMentionLabel(agent.Name), true
-	case "squad":
-		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-			ID:          assigneeID,
-			WorkspaceID: workspaceID,
-		})
-		if err != nil {
-			return "", false
-		}
-		return sanitizeMentionLabel(squad.Name), true
+	if assigneeType != "agent" {
+		return "", false
 	}
-	return "", false
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          assigneeID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return "", false
+	}
+	return sanitizeMentionLabel(agent.Name), true
 }
 
 // sanitizeMentionLabel strips characters that would break the mention
@@ -201,61 +188,24 @@ func sanitizeMentionLabel(name string) string {
 
 // dispatchParentAssigneeTrigger fires the explicit side effect that pairs
 // with the @mention link in the system comment body — an agent task for
-// agent or squad-leader assignees. Member assignees never reach this code
-// path; notifyParentOfChildDone skips them outright. The generic comment
-// listener is intentionally bypassed (it short-circuits on
-// author_type='system'), so this is the single place where the platform
-// applies loop and idempotency guards for the child-done notification.
-//
-// Side-effect semantics (intentionally narrower than a normal @mention):
-//   - agent parent: one EnqueueTaskForMention on the parent assignee, same
-//     trigger surface as a real @-mention so dedupe and readiness checks
-//     match what users already rely on.
-//   - squad parent: one EnqueueTaskForSquadLeader on the squad LEADER only.
-//     Unlike a human @squad mention, this does NOT fan out to squad members
-//     — child-done is a coordination signal, the leader decides whether
-//     and how to wake the rest of the squad. Documented here so reviewers
-//     don't read "system mention" as inheriting the full member fan-out.
-//   - notification_preference is not consulted: this is a platform routing
-//     signal targeted at the assignee that already owns the parent, not a
-//     general notification. Per-user mute settings are evaluated by the
-//     downstream agent_task / inbox pipeline once the task is dispatched.
-//   - notification_listeners.go short-circuits on author_type='system', so
-//     subscriber emails and member-inbox rows from smuggled mentions in the
-//     child title are inert — only the explicit dispatch below runs.
-//
-// Guards applied here:
-//   - No-op when the parent has no assignee row.
-//   - Loop guard: skip when the agent that effectively "owns" the child
-//     (its agent assignee, or the leader of its squad assignee) is the same
-//     agent the parent would trigger (the parent agent itself, or the
-//     parent squad's leader). Without this an agent that drives both child
-//     and parent immediately re-runs on the parent and can post another
-//     child, looping — including the cross-squad case where two different
-//     squads share a leader.
-//   - Idempotency: HasPendingTaskForIssueAndAgent dedupes rapid-fire enqueues
-//     for the same parent (e.g. two children finishing back-to-back).
-//   - Readiness: archived agents / missing runtimes are silently skipped
-//     so a closed-out agent does not surface as a phantom assignee.
+// agent assignees. Member assignees never reach this code path;
+// notifyParentOfChildDone skips them outright. The generic comment listener
+// is intentionally bypassed (it short-circuits on author_type='system'), so
+// this is the single place where the platform applies loop and idempotency
+// guards for the child-done notification.
 func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent, child db.Issue, systemComment db.Comment) {
-	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
+	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid || parent.AssigneeType.String != "agent" {
 		return
 	}
-
-	switch parent.AssigneeType.String {
-	case "agent":
-		h.triggerChildDoneAgent(ctx, parent, child, systemComment.ID)
-	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, child, systemComment.ID)
-	}
+	h.triggerChildDoneAgent(ctx, parent, child, systemComment.ID)
 }
 
-// triggerChildDoneAgent enqueues a mention-style task for the parent's
-// agent assignee, applying the self-trigger guard documented on
-// dispatchParentAssigneeTrigger.
+// triggerChildDoneAgent enqueues a mention-style task for the parent's agent
+// assignee. Skips if the child's agent assignee is the same as the parent's
+// (self-loop guard).
 func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
-	if owner := h.effectiveChildAgentOwner(ctx, child); owner.Valid &&
-		uuidToString(owner) == uuidToString(parent.AssigneeID) {
+	if child.AssigneeType.Valid && child.AssigneeType.String == "agent" && child.AssigneeID.Valid &&
+		uuidToString(child.AssigneeID) == uuidToString(parent.AssigneeID) {
 		return
 	}
 
@@ -281,96 +231,4 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent, child db.Is
 			"parent_id", uuidToString(parent.ID),
 			"agent_id", uuidToString(parent.AssigneeID))
 	}
-}
-
-// triggerChildDoneSquad enqueues a leader-role task for the parent's squad
-// assignee, applying the self-trigger guard against:
-//   - same squad on both sides (the leader already observed the child via
-//     its own coordination cycle), and
-//   - same effective leader on both sides — child agent == leader, or
-//     child squad's leader == this squad's leader (the cross-squad shared
-//     leader loop).
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent, child db.Issue, triggerCommentID pgtype.UUID) {
-	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          parent.AssigneeID,
-		WorkspaceID: parent.WorkspaceID,
-	})
-	if err != nil {
-		return
-	}
-
-	// Same-squad child → the leader has already observed the work via its
-	// own coordination cycle on the child; firing again on the parent would
-	// just re-trigger the same leader run with no new signal.
-	if childAssigneeIsSquad(child, parent.AssigneeID) {
-		return
-	}
-	// Shared-leader loop: child driven directly by the parent squad's leader,
-	// or by another squad whose leader is the same agent.
-	if owner := h.effectiveChildAgentOwner(ctx, child); owner.Valid &&
-		uuidToString(owner) == uuidToString(squad.LeaderID) {
-		return
-	}
-
-	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return
-	}
-
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: parent.ID,
-		AgentID: squad.LeaderID,
-	})
-	if err != nil || hasPending {
-		return
-	}
-
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, triggerCommentID); err != nil {
-		slog.Warn("child done: enqueue parent squad leader task failed",
-			"error", err,
-			"parent_id", uuidToString(parent.ID),
-			"squad_id", uuidToString(squad.ID),
-			"leader_id", uuidToString(squad.LeaderID))
-	}
-}
-
-// effectiveChildAgentOwner returns the agent identity that effectively
-// "owns" the child issue from the perspective of the child-done trigger:
-//
-//   - child agent assignee → that agent
-//   - child squad assignee → that squad's leader (the agent that would
-//     actually act on a leader task and is the entry point for any squad
-//     work; a shared leader across two squads is the loop vector the
-//     callers above defend against)
-//   - anything else (member assignee, no assignee, missing squad row) →
-//     invalid UUID, signalling "no shared owner to compare against"
-//
-// Callers compare this against the agent they are about to trigger; equality
-// means we'd be enqueueing the same agent that just finished the child,
-// which is the loop case.
-func (h *Handler) effectiveChildAgentOwner(ctx context.Context, child db.Issue) pgtype.UUID {
-	if !child.AssigneeType.Valid || !child.AssigneeID.Valid {
-		return pgtype.UUID{}
-	}
-	switch child.AssigneeType.String {
-	case "agent":
-		return child.AssigneeID
-	case "squad":
-		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-			ID:          child.AssigneeID,
-			WorkspaceID: child.WorkspaceID,
-		})
-		if err != nil {
-			return pgtype.UUID{}
-		}
-		return squad.LeaderID
-	}
-	return pgtype.UUID{}
-}
-
-func childAssigneeIsSquad(child db.Issue, squadID pgtype.UUID) bool {
-	if !child.AssigneeType.Valid || child.AssigneeType.String != "squad" || !child.AssigneeID.Valid {
-		return false
-	}
-	return uuidToString(child.AssigneeID) == uuidToString(squadID)
 }

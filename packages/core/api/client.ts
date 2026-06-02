@@ -24,10 +24,7 @@ import type {
   AgentRunCount,
   AgentRuntime,
   InboxItem,
-  IssueSubscriber,
   Comment,
-  Reaction,
-  IssueReaction,
   Workspace,
   Repo,
   MemberWithUser,
@@ -55,15 +52,16 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
-  ChatSession,
-  ChatMessage,
-  ChatPendingTask,
-  PendingChatTasksResponse,
-  SendChatMessageResponse,
   Feature,
   CreateFeatureRequest,
   UpdateFeatureRequest,
   ListFeaturesResponse,
+  ListHandoffsResponse,
+  ListDecisionLogResponse,
+  ListDodAssertionsResponse,
+  ListMilestonesResponse,
+  Milestone,
+  DodAssertion,
   FeatureResource,
   CreateFeatureResourceRequest,
   ListFeatureResourcesResponse,
@@ -88,14 +86,9 @@ import type {
   ListAutopilotRunsResponse,
   ListWebhookDeliveriesResponse,
   WebhookDelivery,
-  NotificationPreferenceResponse,
-  NotificationPreferences,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   GitHubConnectResponse,
-  Squad,
-  SquadMember,
-  SquadMemberStatusListResponse,
 } from "../types";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
@@ -121,9 +114,12 @@ import {
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_FEATURES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
-  EMPTY_SQUAD,
-  EMPTY_SQUAD_LIST,
-  EMPTY_SQUAD_MEMBER_STATUS_LIST,
+  EMPTY_LIST_HANDOFFS_RESPONSE,
+  EMPTY_LIST_DECISION_LOG_RESPONSE,
+  EMPTY_LIST_DOD_ASSERTIONS_RESPONSE,
+  EMPTY_LIST_MILESTONES_RESPONSE,
+  EMPTY_MILESTONE,
+  EMPTY_DOD_ASSERTION,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
@@ -133,16 +129,18 @@ import {
   GroupedIssuesResponseSchema,
   ListFeaturesResponseSchema,
   ListIssuesResponseSchema,
+  ListHandoffsResponseSchema,
+  ListDecisionLogResponseSchema,
+  ListDodAssertionsResponseSchema,
+  ListMilestonesResponseSchema,
+  MilestoneSchema,
+  DodAssertionSchema,
   ListWebhookDeliveriesResponseSchema,
   RepoListSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
-  SquadSchema,
-  SquadListSchema,
-  SquadMemberStatusListResponseSchema,
-  SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
@@ -361,7 +359,6 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.feature_id) search.set("feature_id", params.feature_id);
-    if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
     }
@@ -388,7 +385,6 @@ export class ApiClient {
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.feature_id) search.set("feature_id", params.feature_id);
-    if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.metadata && Object.keys(params.metadata).length > 0) {
       search.set("metadata", JSON.stringify(params.metadata));
     }
@@ -434,18 +430,6 @@ export class ApiClient {
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
     return this.fetch("/api/issues", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async quickCreateIssue(data: {
-    agent_id?: string;
-    squad_id?: string;
-    prompt: string;
-    feature_id?: string | null;
-  }): Promise<{ task_id: string }> {
-    return this.fetch("/api/issues/quick-create", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -537,62 +521,6 @@ export class ApiClient {
 
   async unresolveComment(commentId: string): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}/resolve`, { method: "DELETE" });
-  }
-
-  async addReaction(commentId: string, emoji: string): Promise<Reaction> {
-    return this.fetch(`/api/comments/${commentId}/reactions`, {
-      method: "POST",
-      body: JSON.stringify({ emoji }),
-    });
-  }
-
-  async removeReaction(commentId: string, emoji: string): Promise<void> {
-    await this.fetch(`/api/comments/${commentId}/reactions`, {
-      method: "DELETE",
-      body: JSON.stringify({ emoji }),
-    });
-  }
-
-  async addIssueReaction(issueId: string, emoji: string): Promise<IssueReaction> {
-    return this.fetch(`/api/issues/${issueId}/reactions`, {
-      method: "POST",
-      body: JSON.stringify({ emoji }),
-    });
-  }
-
-  async removeIssueReaction(issueId: string, emoji: string): Promise<void> {
-    await this.fetch(`/api/issues/${issueId}/reactions`, {
-      method: "DELETE",
-      body: JSON.stringify({ emoji }),
-    });
-  }
-
-  // Subscribers
-  async listIssueSubscribers(issueId: string): Promise<IssueSubscriber[]> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/subscribers`);
-    return parseWithFallback(raw, SubscribersListSchema, [], {
-      endpoint: "GET /api/issues/:id/subscribers",
-    });
-  }
-
-  async subscribeToIssue(issueId: string, userId?: string, userType?: string): Promise<void> {
-    const body: Record<string, string> = {};
-    if (userId) body.user_id = userId;
-    if (userType) body.user_type = userType;
-    await this.fetch(`/api/issues/${issueId}/subscribe`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  async unsubscribeFromIssue(issueId: string, userId?: string, userType?: string): Promise<void> {
-    const body: Record<string, string> = {};
-    if (userId) body.user_id = userId;
-    if (userType) body.user_type = userType;
-    await this.fetch(`/api/issues/${issueId}/unsubscribe`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
   }
 
   // Agents
@@ -1042,18 +970,6 @@ export class ApiClient {
     return this.fetch("/api/inbox/archive-completed", { method: "POST" });
   }
 
-  // Notification preferences
-  async getNotificationPreferences(): Promise<NotificationPreferenceResponse> {
-    return this.fetch("/api/notification-preferences");
-  }
-
-  async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
-    return this.fetch("/api/notification-preferences", {
-      method: "PUT",
-      body: JSON.stringify({ preferences }),
-    });
-  }
-
   // App Config
   async getConfig(): Promise<{
     cdn_domain: string;
@@ -1158,13 +1074,12 @@ export class ApiClient {
   // File Upload & Attachments
   async uploadFile(
     file: File,
-    opts?: { issueId?: string; commentId?: string; chatSessionId?: string },
+    opts?: { issueId?: string; commentId?: string },
   ): Promise<Attachment> {
     const formData = new FormData();
     formData.append("file", file);
     if (opts?.issueId) formData.append("issue_id", opts.issueId);
     if (opts?.commentId) formData.append("comment_id", opts.commentId);
-    if (opts?.chatSessionId) formData.append("chat_session_id", opts.chatSessionId);
 
     const rid = createRequestId();
     const start = Date.now();
@@ -1189,69 +1104,6 @@ export class ApiClient {
     return parseWithFallback(raw, AttachmentResponseSchema, EMPTY_ATTACHMENT, {
       endpoint: "POST /api/upload-file",
     });
-  }
-
-  // Chat Sessions
-  async listChatSessions(params?: { status?: string }): Promise<ChatSession[]> {
-    const query = params?.status ? `?status=${params.status}` : "";
-    return this.fetch(`/api/chat/sessions${query}`);
-  }
-
-  async getChatSession(id: string): Promise<ChatSession> {
-    return this.fetch(`/api/chat/sessions/${id}`);
-  }
-
-  async createChatSession(data: { agent_id: string; title?: string }): Promise<ChatSession> {
-    return this.fetch("/api/chat/sessions", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteChatSession(id: string): Promise<void> {
-    await this.fetch(`/api/chat/sessions/${id}`, { method: "DELETE" });
-  }
-
-  async updateChatSession(id: string, data: { title: string }): Promise<ChatSession> {
-    return this.fetch(`/api/chat/sessions/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async listChatMessages(sessionId: string): Promise<ChatMessage[]> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/messages`);
-  }
-
-  async sendChatMessage(
-    sessionId: string,
-    content: string,
-    attachmentIds?: string[],
-  ): Promise<SendChatMessageResponse> {
-    const body: { content: string; attachment_ids?: string[] } = { content };
-    if (attachmentIds && attachmentIds.length > 0) {
-      body.attachment_ids = attachmentIds;
-    }
-    return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  async getPendingChatTask(sessionId: string): Promise<ChatPendingTask> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/pending-task`);
-  }
-
-  async listPendingChatTasks(): Promise<PendingChatTasksResponse> {
-    return this.fetch(`/api/chat/pending-tasks`);
-  }
-
-  async markChatSessionRead(sessionId: string): Promise<void> {
-    await this.fetch(`/api/chat/sessions/${sessionId}/read`, { method: "POST" });
-  }
-
-  async cancelTaskById(taskId: string): Promise<void> {
-    await this.fetch(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
@@ -1318,6 +1170,76 @@ export class ApiClient {
   async getFeature(id: string): Promise<Feature> {
     const raw = await this.fetch<unknown>(`/api/features/${id}`);
     return parseWithFallback(raw, FeatureSchema, EMPTY_FEATURE, { endpoint: `GET /api/features/${id}` });
+  }
+
+  async listMilestones(params?: { featureId?: string }): Promise<ListMilestonesResponse> {
+    const search = new URLSearchParams();
+    if (params?.featureId) search.set("feature_id", params.featureId);
+    const raw = await this.fetch<unknown>(`/api/milestones?${search}`);
+    return parseWithFallback(raw, ListMilestonesResponseSchema, EMPTY_LIST_MILESTONES_RESPONSE, {
+      endpoint: "GET /api/milestones",
+    });
+  }
+
+  // Control plane (MCP / UI): create a Milestone within an Initiative.
+  async createMilestone(data: { feature_id: string; title: string; position?: number }): Promise<Milestone> {
+    const raw = await this.fetch<unknown>("/api/milestones", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, MilestoneSchema, EMPTY_MILESTONE, { endpoint: "POST /api/milestones" });
+  }
+
+  // Control plane: edit a Milestone's title and/or ordering position.
+  async updateMilestone(id: string, data: { title?: string; position?: number }): Promise<Milestone> {
+    const raw = await this.fetch<unknown>(`/api/milestones/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, MilestoneSchema, EMPTY_MILESTONE, { endpoint: `PATCH /api/milestones/${id}` });
+  }
+
+  // Control plane: write a Definition-of-Done assertion under a Milestone.
+  async createDodAssertion(milestoneId: string, data: { text: string; position?: number }): Promise<DodAssertion> {
+    const raw = await this.fetch<unknown>(`/api/milestones/${milestoneId}/dod`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, DodAssertionSchema, EMPTY_DOD_ASSERTION, {
+      endpoint: `POST /api/milestones/${milestoneId}/dod`,
+    });
+  }
+
+  async listHandoffs(issueId: string): Promise<ListHandoffsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/handoffs`);
+    return parseWithFallback(raw, ListHandoffsResponseSchema, EMPTY_LIST_HANDOFFS_RESPONSE, {
+      endpoint: `GET /api/issues/${issueId}/handoffs`,
+    });
+  }
+
+  // The Decision Log of an Initiative: the architectural decisions a
+  // retrospective Run recorded at the Initiative boundary, newest first.
+  async listDecisionLog(featureId: string): Promise<ListDecisionLogResponse> {
+    const raw = await this.fetch<unknown>(`/api/features/${featureId}/decisions`);
+    return parseWithFallback(raw, ListDecisionLogResponseSchema, EMPTY_LIST_DECISION_LOG_RESPONSE, {
+      endpoint: `GET /api/features/${featureId}/decisions`,
+    });
+  }
+
+  // The DoD assertions of a Milestone, each with its latest validation status.
+  async listMilestoneDoD(milestoneId: string): Promise<ListDodAssertionsResponse> {
+    const raw = await this.fetch<unknown>(`/api/milestones/${milestoneId}/dod`);
+    return parseWithFallback(raw, ListDodAssertionsResponseSchema, EMPTY_LIST_DOD_ASSERTIONS_RESPONSE, {
+      endpoint: `GET /api/milestones/${milestoneId}/dod`,
+    });
+  }
+
+  // The per-Issue Acceptance Criteria view: the DoD assertions of the Issue's Milestone.
+  async listIssueDoD(issueId: string): Promise<ListDodAssertionsResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/dod`);
+    return parseWithFallback(raw, ListDodAssertionsResponseSchema, EMPTY_LIST_DOD_ASSERTIONS_RESPONSE, {
+      endpoint: `GET /api/issues/${issueId}/dod`,
+    });
   }
 
   async getFeatureIssues(id: string): Promise<FeatureIssuesResponse> {
@@ -1436,66 +1358,6 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
-  }
-
-  // Squads
-  async listSquads(): Promise<Squad[]> {
-    const raw = await this.fetch<unknown>(`/api/squads`);
-    return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
-      endpoint: "GET /api/squads",
-    }) as Squad[];
-  }
-
-  async getSquad(id: string): Promise<Squad> {
-    const raw = await this.fetch<unknown>(`/api/squads/${id}`);
-    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
-      endpoint: "GET /api/squads/:id",
-    }) as Squad;
-  }
-
-  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
-    const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
-    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
-      endpoint: "POST /api/squads",
-    }) as Squad;
-  }
-
-  async updateSquad(id: string, data: { name?: string; description?: string; instructions?: string; leader_id?: string; avatar_url?: string }): Promise<Squad> {
-    const raw = await this.fetch<unknown>(`/api/squads/${id}`, { method: "PUT", body: JSON.stringify(data) });
-    return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
-      endpoint: "PUT /api/squads/:id",
-    }) as Squad;
-  }
-
-  async deleteSquad(id: string): Promise<void> {
-    await this.fetch(`/api/squads/${id}`, { method: "DELETE" });
-  }
-
-  async listSquadMembers(squadId: string): Promise<SquadMember[]> {
-    return this.fetch(`/api/squads/${squadId}/members`);
-  }
-
-  async addSquadMember(squadId: string, data: { member_type: string; member_id: string; role?: string }): Promise<SquadMember> {
-    return this.fetch(`/api/squads/${squadId}/members`, { method: "POST", body: JSON.stringify(data) });
-  }
-
-  async removeSquadMember(squadId: string, data: { member_type: string; member_id: string }): Promise<void> {
-    await this.fetch(`/api/squads/${squadId}/members`, { method: "DELETE", body: JSON.stringify(data) });
-  }
-
-  async updateSquadMemberRole(squadId: string, data: { member_type: string; member_id: string; role: string }): Promise<SquadMember> {
-    return this.fetch(`/api/squads/${squadId}/members/role`, { method: "PATCH", body: JSON.stringify(data) });
-  }
-
-  // Per-squad members status snapshot: one row per member with derived
-  // working/idle/offline/unstable plus the issues each agent is currently
-  // running. Parsed with a lenient schema so a new server-side status
-  // value or extra field can't white-screen the Squad page (#2143).
-  async getSquadMemberStatus(squadId: string): Promise<SquadMemberStatusListResponse> {
-    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/members/status`);
-    return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
-      endpoint: "GET /api/squads/:id/members/status",
-    }) as SquadMemberStatusListResponse;
   }
 
   // Autopilots

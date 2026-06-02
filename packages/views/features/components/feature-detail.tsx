@@ -1,14 +1,17 @@
 "use client";
 
-import { useMemo, useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, GitBranch, Layers2, Link2, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { toast } from "sonner";
-import type { FeatureStatus, FeaturePriority, FeatureIssueSummary, FeatureBlockedIssueSummary, FeaturePRSummary } from "@multica/core/types";
+import type { FeatureStatus, FeaturePriority, FeaturePRSummary } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { featureDetailOptions, featureIssuesOptions } from "@multica/core/features/queries";
+import { FeatureMilestonesSection } from "./feature-milestones-section";
+import { DecisionLogSection } from "./decision-log-section";
+import { FeatureBoardView } from "./feature-board";
 import { useUpdateFeature, useDeleteFeature } from "@multica/core/features/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
@@ -17,12 +20,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { FEATURE_STATUS_ORDER, FEATURE_STATUS_CONFIG, FEATURE_PRIORITY_ORDER } from "@multica/core/features/config";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
-import { StatusIcon } from "../../issues/components/status-icon";
 import { FeatureResourcesSection } from "./feature-resources-section";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -84,154 +85,6 @@ function PropRow({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Issue pipeline — repo-grouped ready/blocked view
-// ---------------------------------------------------------------------------
-
-type RepoGroup = {
-  repoName: string | null;
-  readyNow: FeatureIssueSummary[];
-  blocked: FeatureBlockedIssueSummary[];
-};
-
-function groupIssuesByRepo(
-  readyNow: FeatureIssueSummary[],
-  blocked: FeatureBlockedIssueSummary[],
-): RepoGroup[] {
-  const order: (string | null)[] = [];
-  const byRepo = new Map<string | null, RepoGroup>();
-
-  function getOrCreate(name: string | null): RepoGroup {
-    if (!byRepo.has(name)) {
-      order.push(name);
-      byRepo.set(name, { repoName: name, readyNow: [], blocked: [] });
-    }
-    return byRepo.get(name)!;
-  }
-
-  for (const issue of readyNow) {
-    getOrCreate(issue.repo_name ?? null).readyNow.push(issue);
-  }
-  for (const issue of blocked) {
-    getOrCreate(issue.repo_name ?? null).blocked.push(issue);
-  }
-
-  const named = order.filter((n): n is string => n !== null).sort((a, b) => a.localeCompare(b));
-  const hasNull = order.includes(null);
-  return [...named, ...(hasNull ? [null] : [])].map((name) => byRepo.get(name)!);
-}
-
-function IssueRow({ issue, blockedBy }: { issue: FeatureIssueSummary; blockedBy?: string[] }) {
-  const statusCfg = STATUS_CONFIG[issue.status] ?? STATUS_CONFIG.backlog;
-  return (
-    <div className="flex items-start gap-2 rounded-md px-2 py-1.5 -mx-2 hover:bg-accent/40 transition-colors">
-      <StatusIcon status={issue.status} className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs font-medium text-muted-foreground shrink-0">{issue.identifier}</span>
-          <span className="text-xs truncate">{issue.title}</span>
-          {issue.status === "in_progress" && (
-            <span className={cn("ml-auto shrink-0 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium", statusCfg.hoverBg, "text-foreground")}>
-              running
-            </span>
-          )}
-        </div>
-        {blockedBy && blockedBy.length > 0 && (
-          <p className="mt-0.5 text-[11px] text-muted-foreground">
-            blocked by {blockedBy.join(", ")}
-          </p>
-        )}
-      </div>
-      <PriorityIcon priority={issue.priority} />
-    </div>
-  );
-}
-
-function IssueSection({
-  title,
-  issues,
-  blockedMap,
-}: {
-  title: string;
-  issues: FeatureIssueSummary[];
-  blockedMap?: Map<string, string[]>;
-}) {
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 mb-1">
-        <span className="text-xs font-medium text-muted-foreground">{title}</span>
-        <span className="text-xs text-muted-foreground/60">({issues.length})</span>
-      </div>
-      {issues.map((issue) => (
-        <IssueRow
-          key={issue.id}
-          issue={issue}
-          blockedBy={blockedMap?.get(issue.id)}
-        />
-      ))}
-    </div>
-  );
-}
-
-function FeatureIssuePipelineView({
-  readyNow,
-  blocked,
-}: {
-  readyNow: FeatureIssueSummary[];
-  blocked: FeatureBlockedIssueSummary[];
-}) {
-  const { t } = useT("features");
-
-  const blockedMap = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const b of blocked) {
-      m.set(b.id, b.blocked_by);
-    }
-    return m;
-  }, [blocked]);
-
-  if (readyNow.length === 0 && blocked.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center gap-2 py-8 text-muted-foreground">
-        <p className="text-sm">{t(($) => $.detail.empty_issues_title)}</p>
-        <p className="text-xs">{t(($) => $.detail.empty_issues_hint)}</p>
-      </div>
-    );
-  }
-
-  const groups = groupIssuesByRepo(readyNow, blocked);
-  const showRepoHeaders = groups.length > 1;
-
-  return (
-    <div className="space-y-6">
-      {groups.map((group) => (
-        <div key={group.repoName ?? "__unassigned__"}>
-          {showRepoHeaders && (
-            <div
-              className="text-xs font-semibold text-muted-foreground mb-2"
-              data-testid="repo-group-header"
-            >
-              {group.repoName ?? "Unassigned"}
-            </div>
-          )}
-          <div className="space-y-4">
-            <IssueSection
-              title={t(($) => $.detail.section_ready_now)}
-              issues={group.readyNow}
-            />
-            {group.blocked.length > 0 && (
-              <IssueSection
-                title={t(($) => $.detail.section_blocked)}
-                issues={group.blocked}
-                blockedMap={blockedMap}
-              />
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // PR header badge
@@ -354,7 +207,9 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
 
   const handleApprove = useCallback(() => {
     if (!feature) return;
-    updateFeatureMut.mutate({ id: feature.id, status: "in_progress" });
+    // Approving a draft Initiative flips it to 'ready' — the trigger the
+    // execution plane claims (ADR-0003).
+    updateFeatureMut.mutate({ id: feature.id, status: "ready" });
   }, [feature, updateFeatureMut]);
 
   if (isLoading) {
@@ -375,8 +230,6 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
   const issueMetrics = getFeatureIssueMetrics(feature);
   const statusCfg = FEATURE_STATUS_CONFIG[feature.status];
   const prs: FeaturePRSummary[] = featureIssues?.pull_requests ?? [];
-  const readyNow: FeatureIssueSummary[] = featureIssues?.ready_now ?? [];
-  const blocked: FeatureBlockedIssueSummary[] = featureIssues?.blocked ?? [];
 
   const sidebarContent = (
     <div className="space-y-5">
@@ -560,6 +413,27 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
               </Tooltip>
             </PropRow>
           )}
+          <PropRow label={t(($) => $.detail.mode_label)}>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    data-testid="initiative-mode-indicator"
+                    className="inline-flex items-center gap-1 text-xs text-foreground"
+                  >
+                    {feature.mode === "afk"
+                      ? t(($) => $.detail.mode_afk)
+                      : t(($) => $.detail.mode_hitl)}
+                  </span>
+                }
+              />
+              <TooltipContent>
+                {feature.mode === "afk"
+                  ? t(($) => $.detail.mode_afk_tooltip)
+                  : t(($) => $.detail.mode_hitl_tooltip)}
+              </TooltipContent>
+            </Tooltip>
+          </PropRow>
         </div>}
       </div>
 
@@ -704,8 +578,8 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
             {/* Main scrollable content */}
             <div className="flex-1 overflow-y-auto">
               <div className="px-6 py-5 max-w-3xl space-y-6">
-                {/* Approve button — only when planned */}
-                {feature.status === "planned" && (
+                {/* Approve button — flips a draft Initiative to ready */}
+                {feature.status === "draft" && (
                   <Button
                     data-testid="approve-button"
                     onClick={handleApprove}
@@ -725,13 +599,22 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
                   debounceMs={1500}
                 />
 
-                {/* Issues pipeline */}
+                {/* Milestones + DoD */}
+                <div>
+                  <h3 className="text-sm font-medium mb-3">{t(($) => $.detail.section_milestones)}</h3>
+                  <FeatureMilestonesSection featureId={featureId} />
+                </div>
+
+                {/* Issues board — status columns with live-Run layer */}
                 <div>
                   <h3 className="text-sm font-medium mb-3">{t(($) => $.detail.section_issues)}</h3>
-                  <FeatureIssuePipelineView
-                    readyNow={readyNow}
-                    blocked={blocked}
-                  />
+                  <FeatureBoardView featureId={featureId} />
+                </div>
+
+                {/* Decision Log — architectural decisions recorded by the retrospective Run */}
+                <div>
+                  <h3 className="text-sm font-medium mb-3">{t(($) => $.detail.section_decisions)}</h3>
+                  <DecisionLogSection featureId={featureId} />
                 </div>
               </div>
             </div>
