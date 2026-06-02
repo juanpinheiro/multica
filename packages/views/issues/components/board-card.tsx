@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, memo } from "react";
+import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, AgentTask, UpdateIssueRequest, IssueStatus } from "@multica/core/types";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -16,6 +16,17 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
 import { featureListOptions } from "@multica/core/features/queries";
+import { issueDetailOptions } from "@multica/core/issues/queries";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { taskMessagesOptions } from "@multica/core/chat/queries";
+import {
+  deriveLiveness,
+  deriveActivityCounters,
+  type Liveness,
+  type LivenessPhase,
+  type ActivityCounters,
+} from "@multica/core/tasks";
+import { cn } from "@multica/ui/lib/utils";
 import { FeatureIcon } from "../../features/components/feature-icon";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
@@ -26,6 +37,189 @@ import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useT } from "../../i18n";
+
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
+function parseHolderTaskId(waitReason: string | null | undefined): string | null {
+  if (!waitReason) return null;
+  return waitReason.match(UUID_RE)?.[0] ?? null;
+}
+
+function pickLiveTask(tasks: AgentTask[], issueId: string): AgentTask | null {
+  let waiting: AgentTask | null = null;
+  for (const t of tasks) {
+    if (t.issue_id !== issueId) continue;
+    if (t.status === "running") return t;
+    if (t.status === "waiting_local_directory" && !waiting) waiting = t;
+  }
+  return waiting;
+}
+
+// Re-renders the caller ~once per second so heartbeat freshness and elapsed
+// time advance between server events. Inert when disabled (no live task) so a
+// dense board doesn't tick every card every second.
+function useNow(enabled: boolean, intervalMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [enabled, intervalMs]);
+  return now;
+}
+
+function useHolderIssueKey(task: AgentTask | null, snapshot: AgentTask[], wsId: string): string | null {
+  const holderTaskId = useMemo(
+    () => (task?.status === "waiting_local_directory" ? parseHolderTaskId(task.wait_reason) : null),
+    [task],
+  );
+  const holderIssueId = useMemo(() => {
+    if (!holderTaskId) return null;
+    return snapshot.find((t) => t.id === holderTaskId)?.issue_id || null;
+  }, [holderTaskId, snapshot]);
+  const { data: holderIssue } = useQuery({
+    ...issueDetailOptions(wsId, holderIssueId ?? ""),
+    enabled: !!holderIssueId,
+  });
+  return holderIssue?.identifier ?? null;
+}
+
+function useIssueLiveState(
+  issueId: string,
+  wsId: string,
+  issueStatus?: IssueStatus,
+): { liveness: Liveness | null; counters: ActivityCounters | null } {
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const task = useMemo(() => pickLiveTask(snapshot, issueId), [snapshot, issueId]);
+  const { data: messages = [] } = useQuery(taskMessagesOptions(task?.id ?? ""));
+  const holderKey = useHolderIssueKey(task, snapshot, wsId);
+  const now = useNow(task !== null);
+  const liveness = useMemo(
+    () => (task ? deriveLiveness(task, now, { issueStatus, holderKey }) : null),
+    [task, now, issueStatus, holderKey],
+  );
+  const counters = useMemo(
+    () => (task ? deriveActivityCounters(messages, task.started_at, now) : null),
+    [messages, task, now],
+  );
+  return { liveness, counters };
+}
+
+const PHASES: LivenessPhase[] = ["claim", "run", "push", "pr"];
+
+function formatElapsed(ms: number): string {
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h ${mins % 60}m`;
+}
+
+export function BoardCardLiveLayer({
+  liveness,
+  counters = null,
+}: {
+  liveness: Liveness | null;
+  counters?: ActivityCounters | null;
+}) {
+  if (!liveness?.active) return null;
+
+  const currentIdx = PHASES.indexOf(liveness.phase);
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div data-testid="phase-stepper" className="flex items-center gap-1">
+        {PHASES.map((phase, idx) => {
+          const isActive = phase === liveness.phase;
+          const isReached = idx < currentIdx;
+          return (
+            <span key={phase} className="flex items-center gap-1">
+              <span
+                data-testid={`phase-step-${phase}`}
+                aria-current={isActive ? "step" : undefined}
+                className={cn(
+                  "text-[10px] leading-none",
+                  isActive && "text-brand font-medium",
+                  isReached && "text-muted-foreground/60",
+                  !isActive && !isReached && "text-muted-foreground/35",
+                )}
+              >
+                {phase}
+              </span>
+              {idx < PHASES.length - 1 && (
+                <span aria-hidden="true" className="text-[9px] text-muted-foreground/25">›</span>
+              )}
+            </span>
+          );
+        })}
+      </div>
+      <div
+        data-testid="task-progress-shimmer"
+        className="relative h-0.5 overflow-hidden rounded-full bg-muted"
+      >
+        <span className="absolute inset-y-0 w-1/3 rounded-full bg-brand animate-task-progress-sweep" />
+      </div>
+      {liveness.waiting ? (
+        <WaitingBlock waiting={liveness.waiting} />
+      ) : (
+        <Heartbeat heartbeat={liveness.heartbeat} quietMs={liveness.quietMs} />
+      )}
+      {counters && (
+        <div
+          data-testid="activity-counters"
+          className="flex items-center gap-1.5 text-[10px] leading-none text-muted-foreground tabular-nums"
+        >
+          <span>{formatElapsed(counters.elapsedMs)}</span>
+          {counters.activityCount > 0 && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>
+                {counters.activityCount}{" "}
+                {counters.activityCount === 1 ? "action" : "actions"}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WaitingBlock({ waiting }: { waiting: NonNullable<Liveness["waiting"]> }) {
+  return (
+    <div
+      data-testid="waiting-block"
+      className="rounded-md border border-warning/25 bg-warning/10 px-2 py-1 space-y-0.5"
+    >
+      <div className="flex items-center gap-1.5 text-[10px] leading-none">
+        <span className="size-1.5 shrink-0 rounded-full bg-warning" />
+        <span className="font-medium text-warning">waiting</span>
+        {waiting.holderKey && (
+          <span className="text-warning/80">· {waiting.holderKey}</span>
+        )}
+      </div>
+      <p className="pl-3 text-[10px] leading-snug text-warning/70 truncate">{waiting.reason}</p>
+    </div>
+  );
+}
+
+function Heartbeat({ heartbeat, quietMs }: { heartbeat: Liveness["heartbeat"]; quietMs: number }) {
+  const quiet = heartbeat === "quiet";
+  return (
+    <div data-testid="heartbeat" className="flex items-center gap-1.5 text-[10px] leading-none">
+      <span
+        className={cn(
+          "size-1.5 rounded-full",
+          quiet ? "bg-warning" : "bg-brand animate-pulse",
+        )}
+      />
+      <span className={cn("tabular-nums", quiet ? "text-warning" : "text-muted-foreground")}>
+        {quiet ? `quiet ${Math.floor(quietMs / 1000)}s` : "now"}
+      </span>
+    </div>
+  );
+}
 
 function formatDate(date: string): string {
   return new Date(date).toLocaleDateString("en-US", {
@@ -71,6 +265,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const wsId = useWorkspaceId();
+  const { liveness, counters } = useIssueLiveState(issue.id, wsId, issue.status);
   const { data: features = [] } = useQuery({
     ...featureListOptions(wsId),
     enabled: storeProperties.feature && !!issue.feature_id,
@@ -181,7 +376,10 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showRightMeta = !!showStartDate || !!showDueDate || !!showChildProgress || showUpdatedHint;
 
   return (
-    <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
+    <div className={cn(
+      "rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent",
+      liveness?.active && "ring-1 ring-brand/40 border-brand/30",
+    )}>
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -302,6 +500,7 @@ export const BoardCardContent = memo(function BoardCardContent({
           )}
         </div>
       )}
+      <BoardCardLiveLayer liveness={liveness} counters={counters} />
     </div>
   );
 });

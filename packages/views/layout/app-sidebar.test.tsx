@@ -1,7 +1,12 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
+import layout from "../locales/en/layout.json";
 import { AppSidebar } from "./app-sidebar";
+
+vi.mock("../i18n", () => ({
+  useT: () => ({ t: (selector: (m: typeof layout) => string) => selector(layout) }),
+}));
 
 const { detail, deletePin, pins } = vi.hoisted(() => ({
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
@@ -49,7 +54,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
 }));
 vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: () => null,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -147,5 +152,38 @@ describe("PinRow", () => {
     detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
+  });
+});
+
+function precedes(before: HTMLElement, after: HTMLElement): boolean {
+  return Boolean(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING);
+}
+
+describe("AppSidebar chrome", () => {
+  it("leads with the Multica brand mark", () => {
+    render(<AppSidebar />);
+    expect(screen.getByRole("img", { name: /multica/i })).toBeInTheDocument();
+  });
+
+  it("renders the reduced nav in order", () => {
+    render(<AppSidebar />);
+    const order = ["Issues", "Inbox", "Features", "Agents", "Autopilot", "Skills", "Usage", "Settings"];
+    for (const label of order) expect(screen.getByText(label)).toBeInTheDocument();
+    order.slice(1).forEach((label, i) => {
+      expect(precedes(screen.getByText(order[i]!), screen.getByText(label))).toBe(true);
+    });
+  });
+
+  it("drops the dead operator chrome", () => {
+    render(<AppSidebar />);
+    expect(screen.queryByText("My Issues")).toBeNull();
+    expect(screen.queryByText("New Issue")).toBeNull();
+    expect(screen.queryByText("Squads")).toBeNull();
+    expect(screen.queryByText("Runtimes")).toBeNull();
+  });
+
+  it("offers no create-workspace path in the project switcher", () => {
+    render(<AppSidebar />);
+    expect(screen.queryByText("Create workspace")).toBeNull();
   });
 });

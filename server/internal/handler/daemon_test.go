@@ -3567,3 +3567,83 @@ func TestClaimTask_QuickCreate_SurfacesParentIssueID(t *testing.T) {
 		t.Errorf("quick_create_parent_issue_id = %q, want %q", resp.Task.QuickCreateParentIssueID, parentIssueID)
 	}
 }
+
+// TestReportTaskMessagesStampsLastActivity locks in the heartbeat data source:
+// reporting a task:message stamps agent_task_queue.last_activity_at, and the
+// workspace snapshot surfaces it. A task with no message yet reads as null.
+func TestReportTaskMessagesStampsLastActivity(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires database")
+	}
+	ctx := context.Background()
+
+	// An issue gives the task a workspace to resolve through.
+	w := httptest.NewRecorder()
+	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "Heartbeat activity issue",
+		"status": "in_progress",
+	}))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issue.ID) })
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issue.ID)
+
+	// Before any message: no activity stamped.
+	var before *time.Time
+	if err := testPool.QueryRow(ctx, `SELECT last_activity_at FROM agent_task_queue WHERE id = $1`, taskID).Scan(&before); err != nil {
+		t.Fatalf("read last_activity_at: %v", err)
+	}
+	if before != nil {
+		t.Fatalf("expected last_activity_at nil before any message, got %v", *before)
+	}
+
+	w = httptest.NewRecorder()
+	body := TaskMessageBatchRequest{Messages: []TaskMessageRequest{{Seq: 1, Type: "tool_use", Tool: "Edit"}}}
+	req := newRequest("POST", "/api/daemon/tasks/"+taskID+"/messages", body)
+	req = withURLParams(req, "taskId", taskID)
+	testHandler.ReportTaskMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReportTaskMessages: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var after *time.Time
+	if err := testPool.QueryRow(ctx, `SELECT last_activity_at FROM agent_task_queue WHERE id = $1`, taskID).Scan(&after); err != nil {
+		t.Fatalf("read last_activity_at after: %v", err)
+	}
+	if after == nil {
+		t.Fatal("expected last_activity_at to be stamped after a task:message")
+	}
+	if time.Since(*after) > time.Minute {
+		t.Fatalf("last_activity_at not recent: %v", *after)
+	}
+
+	// The workspace snapshot must carry the stamped value.
+	w = httptest.NewRecorder()
+	testHandler.ListWorkspaceAgentTaskSnapshot(w, newRequest("GET", "/api/agent-task-snapshot", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("snapshot: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var snapshot []AgentTaskResponse
+	json.NewDecoder(w.Body).Decode(&snapshot)
+	var found *AgentTaskResponse
+	for i := range snapshot {
+		if snapshot[i].ID == taskID {
+			found = &snapshot[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("task not present in workspace snapshot")
+	}
+	if found.LastActivityAt == nil {
+		t.Fatal("snapshot did not surface last_activity_at")
+	}
+}

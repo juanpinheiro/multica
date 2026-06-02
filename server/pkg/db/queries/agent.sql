@@ -458,6 +458,14 @@ SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running');
 
+-- name: StampTaskActivity :exec
+-- Records the agent's last observed activity when the daemon reports a
+-- task:message. Drives the live card's heartbeat / "quiet" detection. Scoped
+-- to active tasks so a late-arriving message can't stamp a finished run.
+UPDATE agent_task_queue
+SET last_activity_at = now()
+WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
+
 -- name: RecoverOrphanedTasksForRuntime :many
 -- Called by the daemon at startup. Atomically fails any dispatched/running
 -- task that the prior incarnation of this runtime owned but did not
@@ -588,9 +596,10 @@ ORDER BY priority DESC, created_at ASC;
 -- banner shows up the moment a task is enqueued — not only after a runtime
 -- claims it. The queued window can be long when the runtime is offline or
 -- busy on a prior task, and a silent UI during that window looks like the
--- platform never received the trigger.
+-- platform never received the trigger. Includes 'waiting_local_directory' so a
+-- parked in-place task stays visible (active work, just blocked on the umbrella).
 SELECT * FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running')
+WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC;
 
 -- name: GetWorkspaceAgentRunCounts :many
@@ -636,7 +645,10 @@ ORDER BY atq.agent_id, bucket;
 
 -- name: ListWorkspaceAgentTaskSnapshot :many
 -- Returns the tasks needed to derive each agent's current presence:
---   - All active tasks (queued / dispatched / running) — for working signal + counts
+--   - All active tasks (queued / dispatched / running / waiting_local_directory)
+--     — for working signal + counts and the board's live execution layer (a
+--     parked in-place task is active work and must surface so the UI can show
+--     its waiting_local_directory block)
 --   - Each agent's most recent OUTCOME task (completed / failed) — for sticky
 --     failed signal
 -- The front-end picks "active wins, else latest outcome" — see derive-presence.ts.
@@ -655,7 +667,7 @@ ORDER BY atq.agent_id, bucket;
 SELECT atq.* FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('queued', 'dispatched', 'running')
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 
 UNION ALL
 

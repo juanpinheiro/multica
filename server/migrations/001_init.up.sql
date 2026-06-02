@@ -605,6 +605,7 @@ CREATE TABLE public.agent_task_queue (
     force_fresh_session boolean DEFAULT false NOT NULL,
     is_leader_task boolean DEFAULT false NOT NULL,
     wait_reason text,
+    last_activity_at timestamp with time zone,
     CONSTRAINT agent_task_queue_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'dispatched'::text, 'running'::text, 'waiting_local_directory'::text, 'completed'::text, 'failed'::text, 'cancelled'::text])))
 );
 

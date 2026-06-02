@@ -13,8 +13,10 @@ import (
 )
 
 // TestListWorkspaceAgentTaskSnapshot covers the agent presence snapshot endpoint:
-// every active task (queued/dispatched/running) PLUS each agent's most recent
-// OUTCOME task (completed/failed only). Cancelled tasks are excluded by design
+// every active task (queued/dispatched/running/waiting_local_directory) PLUS each
+// agent's most recent OUTCOME task (completed/failed only). A parked in-place task
+// (waiting_local_directory) is active work and MUST surface so the board's live
+// layer can render its waiting block. Cancelled tasks are excluded by design
 // from the outcome half — they're a procedural signal, not an outcome, and
 // must NOT mask a prior failure.
 //
@@ -48,6 +50,7 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 		{agentA, "queued", "", "A.queued"},
 		{agentA, "dispatched", "", "A.dispatched"},
 		{agentA, "running", "", "A.running"},
+		{agentA, "waiting_local_directory", "", "A.waiting"},
 		{agentA, "failed", "now() - interval '10 minutes'", "A.old_failed"},
 		{agentA, "completed", "now() - interval '30 seconds'", "A.latest_completed"},
 
@@ -111,10 +114,11 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 	wantCounts := map[key]int{
 		// Agent A: 3 actives + the latest outcome (completed). The older
 		// failed must be excluded by DISTINCT ON.
-		{agentA, "queued"}:     1,
-		{agentA, "dispatched"}: 1,
-		{agentA, "running"}:    1,
-		{agentA, "completed"}:  1,
+		{agentA, "queued"}:                  1,
+		{agentA, "dispatched"}:              1,
+		{agentA, "running"}:                 1,
+		{agentA, "waiting_local_directory"}: 1,
+		{agentA, "completed"}:               1,
 		// Agent B: just the failed outcome.
 		{agentB, "failed"}: 1,
 		// Agent C: the failed outcome must survive the temporally newer

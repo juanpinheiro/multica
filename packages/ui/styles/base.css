@@ -149,6 +149,18 @@
   animation: nav-progress-sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 
+/* Indeterminate task progress shimmer — a brand-tinted slug sweeps across the
+ * 2px bar at the bottom of live board cards. Duration slightly faster than the
+ * nav bar to read as "active work happening inside the card, right now". */
+@keyframes task-progress-sweep {
+  0% { transform: translateX(-200%); }
+  100% { transform: translateX(600%); }
+}
+
+.animate-task-progress-sweep {
+  animation: task-progress-sweep 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 /* Border beam: a brand-tinted highlight sweeps continuously around the
  * element's rounded border, drawing the eye to a CTA that would otherwise
  * blend into the chrome (e.g. the "switch to agent" affordance in manual

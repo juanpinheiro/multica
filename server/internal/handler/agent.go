@@ -176,6 +176,7 @@ type AgentTaskResponse struct {
 	DispatchedAt            *string               `json:"dispatched_at"`
 	StartedAt               *string               `json:"started_at"`
 	CompletedAt             *string               `json:"completed_at"`
+	LastActivityAt          *string               `json:"last_activity_at"` // agent's last observed activity; drives the live card heartbeat. Null until the first task:message
 	Result                  any                   `json:"result"`
 	Error                   *string               `json:"error"`
 	FailureReason           string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
@@ -304,6 +305,7 @@ func taskToResponse(t db.AgentTaskQueue) AgentTaskResponse {
 		DispatchedAt:     timestampToPtr(t.DispatchedAt),
 		StartedAt:        timestampToPtr(t.StartedAt),
 		CompletedAt:      timestampToPtr(t.CompletedAt),
+		LastActivityAt:   timestampToPtr(t.LastActivityAt),
 		Result:           result,
 		Error:            textToPtr(t.Error),
 		FailureReason:    failureReason,
