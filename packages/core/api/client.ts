@@ -1226,6 +1226,20 @@ export class ApiClient {
     });
   }
 
+  // Cross-Initiative Decision Log: every decision recorded in the workspace,
+  // newest first. Backs the workspace-wide Decisions surface.
+  async listWorkspaceDecisions(params?: { limit?: number; offset?: number }): Promise<ListDecisionLogResponse> {
+    const search = new URLSearchParams();
+    if (params?.limit !== undefined) search.set("limit", String(params.limit));
+    if (params?.offset !== undefined) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    const path = qs ? `/api/decisions?${qs}` : "/api/decisions";
+    const raw = await this.fetch<unknown>(path);
+    return parseWithFallback(raw, ListDecisionLogResponseSchema, EMPTY_LIST_DECISION_LOG_RESPONSE, {
+      endpoint: `GET ${path}`,
+    });
+  }
+
   // The DoD assertions of a Milestone, each with its latest validation status.
   async listMilestoneDoD(milestoneId: string): Promise<ListDodAssertionsResponse> {
     const raw = await this.fetch<unknown>(`/api/milestones/${milestoneId}/dod`);

@@ -583,7 +583,7 @@ describe("IssueDetail (shared)", () => {
     const projectLink = await screen.findByText("Marketing site refresh");
     // The whole project segment is a single AppLink pointing at the project
     // detail route under the active workspace slug.
-    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/features/p-1");
+    expect(projectLink.closest("a")).toHaveAttribute("href", "/test/initiatives/p-1");
   });
 
   it("shows an Unknown feature placeholder when the feature query fails", async () => {

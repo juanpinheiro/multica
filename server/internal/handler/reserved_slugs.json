@@ -6,8 +6,7 @@
       "description": "Top-level routes in apps/web/app/ that exist before the user enters a workspace.",
       "slugs": [
         "login",
-        "auth",
-        "workspaces"
+        "auth"
       ]
     },
     {
@@ -29,11 +28,13 @@
         "agents",
         "attachments",
         "autopilots",
+        "decisions",
         "inbox",
+        "initiatives",
         "issues",
+        "live",
         "members",
         "my-issues",
-        "features",
         "runtimes",
         "settings",
         "skills",

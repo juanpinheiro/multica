@@ -349,7 +349,7 @@ export function InboxPage() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => replace(wsPaths.featureDetail(selectedInitiativeFeatureId))}
+            onClick={() => replace(wsPaths.initiativeDetail(selectedInitiativeFeatureId))}
           >
             <FolderKanban className="mr-1.5 h-3.5 w-3.5" />
             {t(($) => $.labels.view_initiative)}

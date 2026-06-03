@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { paths, isGlobalPath } from "./paths";
-import { RESERVED_SLUGS } from "./reserved-slugs";
+import { paths } from "./paths";
 
 // C4 — link-handler's WORKSPACE_ROUTE_SEGMENTS must match paths.workspace's
 // parameterless method names. We can't import WORKSPACE_ROUTE_SEGMENTS here
@@ -17,9 +16,11 @@ describe("paths.workspace() shape", () => {
     expect(new Set(parameterlessRoutes)).toEqual(
       new Set([
         "root",
+        "live",
+        "initiatives",
+        "decisions",
         "usage",
         "issues",
-        "features",
         "autopilots",
         "agents",
         "inbox",
@@ -34,9 +35,11 @@ describe("paths.workspace() shape", () => {
   it("each parameterless route emits /{slug}/{segment}", () => {
     const ws = paths.workspace("acme");
     const expectedSegments: Array<[string, string]> = [
+      ["live", "live"],
+      ["initiatives", "initiatives"],
+      ["decisions", "decisions"],
       ["usage", "usage"],
       ["issues", "issues"],
-      ["features", "features"],
       ["autopilots", "autopilots"],
       ["agents", "agents"],
       ["inbox", "inbox"],
@@ -50,37 +53,6 @@ describe("paths.workspace() shape", () => {
       const fn = wsAsAny[method];
       expect(typeof fn).toBe("function");
       expect(fn!()).toBe(`/acme/${segment}`);
-    }
-  });
-});
-
-// C5 — invariants between the global/reserved lists.
-describe("global path / reserved slug consistency", () => {
-  // If a path is "global" (never workspace-scoped), the slug name underlying it
-  // must be reserved — otherwise a user could create a workspace with that slug
-  // and shadow the global route's URL space.
-  //
-  // GLOBAL_PREFIXES from paths.ts is private — we re-derive the list from
-  // probing isGlobalPath. Order matters: keep this list in sync with paths.ts.
-  const globalPrefixes = ["/workspaces/"];
-
-  it("isGlobalPath agrees with the canonical global prefix list", () => {
-    for (const prefix of globalPrefixes) {
-      expect(isGlobalPath(prefix)).toBe(true);
-    }
-    expect(isGlobalPath("/acme/issues")).toBe(false);
-    expect(isGlobalPath("/")).toBe(false);
-  });
-
-  it("every global prefix's first path segment is a reserved slug", () => {
-    for (const prefix of globalPrefixes) {
-      const firstSegment = prefix.split("/").filter(Boolean)[0];
-      if (!firstSegment) continue;
-      expect(
-        RESERVED_SLUGS.has(firstSegment),
-        `'${firstSegment}' is a global path prefix but not a reserved slug — ` +
-          `a workspace could be created with this slug and shadow the global route`,
-      ).toBe(true);
     }
   });
 });

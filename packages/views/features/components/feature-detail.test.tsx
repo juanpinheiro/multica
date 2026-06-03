@@ -31,8 +31,8 @@ const mockCurrentWorkspace = vi.hoisted((): { value: { id: string; name: string;
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => mockCurrentWorkspace.value,
   useWorkspacePaths: () => ({
-    features: () => "/test/features",
-    featureDetail: (id: string) => `/test/features/${id}`,
+    initiatives: () => "/test/initiatives",
+    initiativeDetail: (id: string) => `/test/initiatives/${id}`,
   }),
 }));
 

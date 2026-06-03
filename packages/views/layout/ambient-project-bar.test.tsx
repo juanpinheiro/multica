@@ -4,7 +4,7 @@ import { AmbientProjectBar } from "./ambient-project-bar";
 
 const { workspace } = vi.hoisted(() => ({
   workspace: {
-    current: null as { name: string; mode?: "worktree" | "in_place" } | null,
+    current: null as { name: string; slug: string; mode?: "worktree" | "in_place" } | null,
   },
 }));
 
@@ -20,7 +20,7 @@ describe("AmbientProjectBar", () => {
   });
 
   it("renders workspace name in worktree mode", () => {
-    workspace.current = { name: "Acme", mode: "worktree" };
+    workspace.current = { name: "Acme", slug: "acme", mode: "worktree" };
     render(<AmbientProjectBar />);
     expect(screen.getByText("Acme")).toBeInTheDocument();
     const modeTag = screen.getByTestId("ambient-mode-tag");
@@ -29,7 +29,7 @@ describe("AmbientProjectBar", () => {
   });
 
   it("renders in_place mode with amber styling", () => {
-    workspace.current = { name: "Acme", mode: "in_place" };
+    workspace.current = { name: "Acme", slug: "acme", mode: "in_place" };
     render(<AmbientProjectBar />);
     const modeTag = screen.getByTestId("ambient-mode-tag");
     expect(modeTag).toHaveTextContent("in_place");
@@ -37,7 +37,7 @@ describe("AmbientProjectBar", () => {
   });
 
   it("treats absent mode as worktree", () => {
-    workspace.current = { name: "Acme" };
+    workspace.current = { name: "Acme", slug: "acme" };
     render(<AmbientProjectBar />);
     const modeTag = screen.getByTestId("ambient-mode-tag");
     expect(modeTag).toHaveTextContent("worktree");
@@ -45,8 +45,14 @@ describe("AmbientProjectBar", () => {
   });
 
   it("shows manifest provenance hint", () => {
-    workspace.current = { name: "Acme", mode: "worktree" };
+    workspace.current = { name: "Acme", slug: "acme", mode: "worktree" };
     render(<AmbientProjectBar />);
     expect(screen.getByText(/via \.multica/i)).toBeInTheDocument();
+  });
+
+  it("renders the branch from the workspace slug", () => {
+    workspace.current = { name: "Acme", slug: "acme", mode: "worktree" };
+    render(<AmbientProjectBar />);
+    expect(screen.getByTestId("ambient-branch")).toHaveTextContent("acme");
   });
 });

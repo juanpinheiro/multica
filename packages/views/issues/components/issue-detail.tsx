@@ -1523,7 +1523,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               ) : (
                 <Skeleton className="h-3.5 w-20 shrink-0" />
               ),
-              href: breadcrumbProject ? paths.featureDetail(breadcrumbProject.id) : undefined,
+              href: breadcrumbProject ? paths.initiativeDetail(breadcrumbProject.id) : undefined,
               className: breadcrumbProject ? "max-w-72" : undefined,
             } satisfies BreadcrumbSegment] : []),
             ...(parentIssue ? [{ label: parentIssue.identifier, href: paths.issueDetail(parentIssue.id), className: "shrink-0" } satisfies BreadcrumbSegment] : []),

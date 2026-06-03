@@ -1,6 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "@multica/core/api";
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import layout from "../locales/en/layout.json";
 import { AppSidebar } from "./app-sidebar";
 
@@ -8,22 +7,9 @@ vi.mock("../i18n", () => ({
   useT: () => ({ t: (selector: (m: typeof layout) => string) => selector(layout) }),
 }));
 
-const { detail, deletePin, pins } = vi.hoisted(() => ({
-  detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
-  deletePin: vi.fn(),
-  pins: {
-    current: [
-      {
-        id: "pin-1",
-        workspace_id: "ws-1",
-        user_id: "user-1",
-        item_type: "issue" as const,
-        item_id: "issue-1",
-        position: 0,
-        created_at: "2026-05-06T00:00:00Z",
-      },
-    ],
-  },
+const { tasks, pins } = vi.hoisted(() => ({
+  tasks: { current: [] as Array<{ id: string; status: string }> },
+  pins: { current: [] as Array<Record<string, unknown>> },
 }));
 
 vi.mock("@dnd-kit/core", () => ({
@@ -37,6 +23,7 @@ vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useSortable: () => ({ attributes: {}, listeners: {}, setNodeRef: vi.fn() }),
   verticalListSortingStrategy: vi.fn(),
+  arrayMove: <T,>(arr: T[]) => arr,
 }));
 vi.mock("@dnd-kit/utilities", () => ({ CSS: { Transform: { toString: () => undefined } } }));
 vi.mock("@multica/ui/components/ui/sidebar", () => ({
@@ -69,29 +56,28 @@ vi.mock("@multica/ui/components/ui/collapsible", () => ({
 vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+  TooltipTrigger: ({ children, render }: { children?: React.ReactNode; render?: React.ReactNode }) =>
+    render ? <>{render}</> : <button type="button">{children}</button>,
 }));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
-vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
-  useNavigation: () => ({ pathname: "/acme/issues", push: vi.fn() }),
+  useNavigation: () => ({ pathname: "/acme/live", push: vi.fn() }),
 }));
 vi.mock("../features/components/feature-icon", () => ({ FeatureIcon: () => <span /> }));
-vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
-vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "user-1" } }),
 }));
 vi.mock("@multica/core/paths", () => ({
-  paths: { workspace: (slug: string) => ({ issues: () => `/${slug}/issues` }) },
-  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
+  paths: { workspace: (slug: string) => ({ live: () => `/${slug}/live` }) },
+  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme", mode: "worktree" }),
   useWorkspacePaths: () => ({
+    live: () => "/acme/live",
+    initiatives: () => "/acme/initiatives",
+    decisions: () => "/acme/decisions",
     inbox: () => "/acme/inbox",
-    myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
-    features: () => "/acme/projects",
     autopilots: () => "/acme/autopilots",
     agents: () => "/acme/agents",
     usage: () => "/acme/usage",
@@ -99,85 +85,85 @@ vi.mock("@multica/core/paths", () => ({
     skills: () => "/acme/skills",
     settings: () => "/acme/settings",
     issueDetail: (id: string) => `/acme/issues/${id}`,
-    projectDetail: (id: string) => `/acme/features/${id}`,
+    initiativeDetail: (id: string) => `/acme/initiatives/${id}`,
   }),
 }));
 vi.mock("@multica/core/api", async (importOriginal) => ({ ...(await importOriginal<typeof import("@multica/core/api")>()), api: {} }));
 vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: unknown[]) => items, inboxKeys: { list: () => ["inbox"] } }));
-vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
-vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
-vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
+vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: vi.fn() }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
 vi.mock("@multica/core/features/queries", () => ({ featureDetailOptions: () => ({ queryKey: ["feature"] }) }));
-vi.mock("@multica/core/runtimes/hooks", () => ({ useMyRuntimesNeedUpdate: () => false }));
-vi.mock("@multica/core/workspace/queries", () => ({
-  workspaceListOptions: () => ({ queryKey: ["workspaces"] }),
-}));
+vi.mock("@multica/core/agents/queries", () => ({ agentTaskSnapshotOptions: () => ({ queryKey: ["task-snapshot"] }) }));
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useMutation: () => ({ isPending: false, mutate: vi.fn() }),
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
-    if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "task-snapshot") return { data: tasks.current };
     return { data: [] };
   },
+  useQueries: () => [],
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
 }));
-
-describe("PinRow", () => {
-  beforeEach(() => {
-    deletePin.mockReset();
-    detail.current = { isPending: false, isError: false, data: null, error: null };
-  });
-
-  it("unpins missing details", async () => {
-    detail.current = { isPending: false, isError: true, data: null, error: new ApiError("missing", 404, "Not Found") };
-    render(<AppSidebar />);
-    await waitFor(() => expect(deletePin).toHaveBeenCalledTimes(1));
-  });
-
-  it("ignores non-404 errors", async () => {
-    detail.current = { isPending: false, isError: true, data: null, error: new ApiError("error", 500, "Server Error") };
-    render(<AppSidebar />);
-    await waitFor(() => expect(deletePin).not.toHaveBeenCalled());
-  });
-
-  it("renders loaded details", async () => {
-    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
-    render(<AppSidebar />);
-    expect(await screen.findByText("MUL-123 Keep this pin")).toBeInTheDocument();
-  });
-});
 
 function precedes(before: HTMLElement, after: HTMLElement): boolean {
   return Boolean(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING);
 }
 
 describe("AppSidebar chrome", () => {
-  it("leads with the Multica brand mark", () => {
+  it("renders the project header with workspace name, branch and mode", () => {
+    tasks.current = [];
     render(<AppSidebar />);
-    expect(screen.getByRole("img", { name: /multica/i })).toBeInTheDocument();
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    expect(screen.getByText("acme")).toBeInTheDocument();
+    expect(screen.getByText("worktree")).toBeInTheDocument();
   });
 
-  it("renders the reduced nav in order", () => {
+  it("renders the primary nav in order: Live, Initiatives, Decisions, Inbox", () => {
+    tasks.current = [];
     render(<AppSidebar />);
-    const order = ["Issues", "Inbox", "Features", "Agents", "Autopilot", "Skills", "Usage", "Settings"];
+    const order = ["Live", "Initiatives", "Decisions", "Inbox"];
     for (const label of order) expect(screen.getByText(label)).toBeInTheDocument();
     order.slice(1).forEach((label, i) => {
       expect(precedes(screen.getByText(order[i]!), screen.getByText(label))).toBe(true);
     });
   });
 
-  it("drops the dead operator chrome", () => {
+  it("renders the Workbench section with Agents, Costs, Skills, Runtimes, Autopilot", () => {
+    tasks.current = [];
     render(<AppSidebar />);
+    const order = ["Agents", "Costs", "Skills", "Runtimes", "Autopilot"];
+    for (const label of order) expect(screen.getByText(label)).toBeInTheDocument();
+    order.slice(1).forEach((label, i) => {
+      expect(precedes(screen.getByText(order[i]!), screen.getByText(label))).toBe(true);
+    });
+    // Sanity: Workbench label is present.
+    expect(screen.getByText("Workbench")).toBeInTheDocument();
+  });
+
+  it("drops the workspace switcher dropdown and other dead chrome", () => {
+    tasks.current = [];
+    render(<AppSidebar />);
+    expect(screen.queryByText("Workspaces")).toBeNull();
     expect(screen.queryByText("My Issues")).toBeNull();
     expect(screen.queryByText("New Issue")).toBeNull();
     expect(screen.queryByText("Squads")).toBeNull();
-    expect(screen.queryByText("Runtimes")).toBeNull();
+    expect(screen.queryByText("Create workspace")).toBeNull();
   });
 
-  it("offers no create-workspace path in the project switcher", () => {
+  it("shows the agents-active count in the footer when tasks are running", () => {
+    tasks.current = [
+      { id: "t1", status: "running" },
+      { id: "t2", status: "running" },
+      { id: "t3", status: "queued" },
+    ];
     render(<AppSidebar />);
-    expect(screen.queryByText("Create workspace")).toBeNull();
+    expect(screen.getByText(/2 agents active/i)).toBeInTheDocument();
+  });
+
+  it("shows Idle in the footer when no tasks are running", () => {
+    tasks.current = [];
+    render(<AppSidebar />);
+    expect(screen.getByText(/idle/i)).toBeInTheDocument();
   });
 });

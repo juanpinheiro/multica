@@ -94,3 +94,49 @@ func (q *Queries) ListDecisionLogByFeature(ctx context.Context, featureID pgtype
 	}
 	return items, nil
 }
+
+const listDecisionLogByWorkspace = `-- name: ListDecisionLogByWorkspace :many
+SELECT id, workspace_id, feature_id, run_id, title, decision, learning, adr_refs, context_terms, created_at FROM decision_log
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListDecisionLogByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int32       `json:"limit"`
+	Offset      int32       `json:"offset"`
+}
+
+// Returns a workspace's recorded decisions across every Initiative, newest first.
+// Backs the cross-Initiative Decisions view.
+func (q *Queries) ListDecisionLogByWorkspace(ctx context.Context, arg ListDecisionLogByWorkspaceParams) ([]DecisionLog, error) {
+	rows, err := q.db.Query(ctx, listDecisionLogByWorkspace, arg.WorkspaceID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DecisionLog{}
+	for rows.Next() {
+		var i DecisionLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.FeatureID,
+			&i.RunID,
+			&i.Title,
+			&i.Decision,
+			&i.Learning,
+			&i.AdrRefs,
+			&i.ContextTerms,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

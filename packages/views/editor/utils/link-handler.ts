@@ -5,8 +5,6 @@
  * (react-markdown link component), and link-hover-card (Open button).
  */
 
-import { isGlobalPath } from "@multica/core/paths";
-
 /**
  * Top-level workspace-scoped routes. Used to detect "/{route}/..." paths that
  * were authored without a workspace slug — we prepend the current slug so they
@@ -19,9 +17,11 @@ import { isGlobalPath } from "@multica/core/paths";
  * as intentional. Only "/issues/..." style paths get auto-prefixed.
  */
 const WORKSPACE_ROUTE_SEGMENTS = new Set([
+  "live",
+  "initiatives",
+  "decisions",
   "usage",
   "issues",
-  "features",
   "autopilots",
   "agents",
   "inbox",
@@ -42,7 +42,7 @@ const WORKSPACE_ROUTE_SEGMENTS = new Set([
 export function openLink(href: string, currentSlug?: string | null): void {
   if (href.startsWith("/")) {
     let path = href;
-    if (currentSlug && !isGlobalPath(path)) {
+    if (currentSlug) {
       const firstSegment = path.split("/")[1];
       if (firstSegment && WORKSPACE_ROUTE_SEGMENTS.has(firstSegment)) {
         // Path looks like /issues/abc (no slug) — prepend current slug.

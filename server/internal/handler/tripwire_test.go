@@ -16,6 +16,43 @@ func (f initiativeGateFixture) setFeatureTripwire(featureID string, runBudget, f
 	}
 }
 
+// setFeatureCostBudgets configures an Initiative's token and time caps. A zero
+// cap means "unlimited" and stays inert in the tripwire.
+func (f initiativeGateFixture) setFeatureCostBudgets(featureID string, tokenBudget, timeBudgetSeconds int64) {
+	f.t.Helper()
+	if _, err := testPool.Exec(f.ctx, `
+		UPDATE feature SET budget_tokens = $2, budget_seconds = $3 WHERE id = $1
+	`, featureID, tokenBudget, timeBudgetSeconds); err != nil {
+		f.t.Fatalf("set feature cost budgets: %v", err)
+	}
+}
+
+// recordTaskUsage inserts a task_usage row so the tripwire's token aggregation
+// has something to sum. Mirrors the columns the daemon writes per Run.
+func (f initiativeGateFixture) recordTaskUsage(taskID string, inputTokens, outputTokens int64) {
+	f.t.Helper()
+	if _, err := testPool.Exec(f.ctx, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
+		VALUES ($1, 'test', 'test-model', $2, $3, 0, 0, now())
+	`, taskID, inputTokens, outputTokens); err != nil {
+		f.t.Fatalf("record task usage: %v", err)
+	}
+}
+
+// completeTaskWithDuration marks a task terminal with explicit start/complete
+// timestamps so the tripwire's elapsed-seconds aggregation has a finite duration
+// to sum. The Run is completed `seconds` ago over a window of `seconds`.
+func (f initiativeGateFixture) completeTaskWithDuration(taskID string, seconds int) {
+	f.t.Helper()
+	if _, err := testPool.Exec(f.ctx, `
+		UPDATE agent_task_queue
+		SET status = 'completed', started_at = now() - make_interval(secs => $2), completed_at = now()
+		WHERE id = $1
+	`, taskID, seconds); err != nil {
+		f.t.Fatalf("complete task with duration: %v", err)
+	}
+}
+
 // countTripwireInboxItems counts the tripwire alerts raised for an Initiative.
 func (f initiativeGateFixture) countTripwireInboxItems(featureID string) int {
 	f.t.Helper()
@@ -118,5 +155,92 @@ func TestTripwire_FailureTolerance_PausesAndAlerts(t *testing.T) {
 	}
 	if got := f.countTripwireInboxItems(featureID); got != 1 {
 		t.Fatalf("tripwire inbox items = %d, want 1", got)
+	}
+}
+
+// TestTripwire_TokenBudget_PausesAndAlerts: an Initiative whose accumulated
+// task_usage tokens reach its cap is moved to blocked and the human pinged,
+// proving the token aggregation in loadTripwireState reaches the pure rule.
+func TestTripwire_TokenBudget_PausesAndAlerts(t *testing.T) {
+	f := newInitiativeGateFixture(t)
+
+	agent := f.makeAgent(fmt.Sprintf("tw-tok-%d", time.Now().UnixNano()))
+	featureID := f.makeFeature("running")
+	f.setFeatureTripwire(featureID, 0, 0) // run + failure tripwires off — isolate tokens
+	f.setFeatureCostBudgets(featureID, 1_000, 0)
+	issueID := f.makeIssue(featureID, "tw-tok")
+	taskID := f.enqueueQueuedTask(agent, issueID)
+	f.recordTaskUsage(taskID, 600, 500) // 1_100 ≥ 1_000 → over cap
+
+	f.markIssueDone(issueID)
+	issue := f.loadIssue(issueID)
+	prev := issue
+	prev.Status = "in_progress"
+	testHandler.orchestrateOnIssueDone(f.ctx, prev, issue)
+
+	if got := f.featureStatus(featureID); got != "blocked" {
+		t.Fatalf("feature status = %q, want blocked (token budget tripped)", got)
+	}
+	if got := f.countTripwireInboxItems(featureID); got != 1 {
+		t.Fatalf("tripwire inbox items = %d, want 1", got)
+	}
+}
+
+// TestTripwire_TimeBudget_PausesAndAlerts: an Initiative whose total terminal
+// run-time reaches its time cap is moved to blocked, proving the elapsed-
+// seconds aggregation in loadTripwireState reaches the pure rule.
+func TestTripwire_TimeBudget_PausesAndAlerts(t *testing.T) {
+	f := newInitiativeGateFixture(t)
+
+	agent := f.makeAgent(fmt.Sprintf("tw-time-%d", time.Now().UnixNano()))
+	featureID := f.makeFeature("running")
+	f.setFeatureTripwire(featureID, 0, 0) // run + failure tripwires off — isolate time
+	f.setFeatureCostBudgets(featureID, 0, 10)
+	issueID := f.makeIssue(featureID, "tw-time")
+	taskID := f.enqueueQueuedTask(agent, issueID)
+	f.completeTaskWithDuration(taskID, 15) // 15s ≥ 10s → over cap
+
+	f.markIssueDone(issueID)
+	issue := f.loadIssue(issueID)
+	prev := issue
+	prev.Status = "in_progress"
+	testHandler.orchestrateOnIssueDone(f.ctx, prev, issue)
+
+	if got := f.featureStatus(featureID); got != "blocked" {
+		t.Fatalf("feature status = %q, want blocked (time budget tripped)", got)
+	}
+	if got := f.countTripwireInboxItems(featureID); got != 1 {
+		t.Fatalf("tripwire inbox items = %d, want 1", got)
+	}
+}
+
+// TestTripwire_CostBudgets_UnderCap_DoesNotPause: when token and time usage are
+// under the caps, the Initiative keeps running. Guards against false trips that
+// would block real work.
+func TestTripwire_CostBudgets_UnderCap_DoesNotPause(t *testing.T) {
+	f := newInitiativeGateFixture(t)
+
+	agent := f.makeAgent(fmt.Sprintf("tw-under-%d", time.Now().UnixNano()))
+	featureID := f.makeFeature("running")
+	f.setFeatureTripwire(featureID, 0, 0)
+	f.setFeatureCostBudgets(featureID, 10_000, 3_600)
+	issueA := f.makeIssue(featureID, "tw-under-a")
+	issueB := f.makeIssue(featureID, "tw-under-b") // sibling keeps the Initiative active
+	taskID := f.enqueueQueuedTask(agent, issueA)
+	f.recordTaskUsage(taskID, 100, 100) //   200 ≪ 10_000
+	f.completeTaskWithDuration(taskID, 5) //   5 ≪ 3_600
+
+	f.markIssueDone(issueA)
+	issue := f.loadIssue(issueA)
+	prev := issue
+	prev.Status = "in_progress"
+	testHandler.orchestrateOnIssueDone(f.ctx, prev, issue)
+	_ = issueB
+
+	if got := f.featureStatus(featureID); got != "running" {
+		t.Fatalf("feature status = %q, want running (under cost caps)", got)
+	}
+	if got := f.countTripwireInboxItems(featureID); got != 0 {
+		t.Fatalf("tripwire inbox items = %d, want 0", got)
 	}
 }

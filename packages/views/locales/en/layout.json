@@ -1,12 +1,17 @@
 {
   "nav": {
     "inbox": "Inbox",
-    "issues": "Issues",
-    "features": "Features",
+    "live": "Live",
+    "initiatives": "Initiatives",
+    "decisions": "Decisions",
+    "issues": "Live",
+    "features": "Initiatives",
     "autopilots": "Autopilot",
     "agents": "Agents",
-    "usage": "Usage",
+    "costs": "Costs",
+    "usage": "Costs",
     "skills": "Skills",
+    "runtimes": "Runtimes",
     "settings": "Settings"
   },
   "help": {
@@ -22,6 +27,56 @@
     "unpin_tooltip": "Unpin",
     "workspaces_label": "Workspaces",
     "pinned_label": "Pinned",
+    "pinned_initiatives_label": "Pinned initiatives",
+    "workbench_label": "Workbench",
+    "agents_active_suffix": "agents active",
+    "no_agents_active": "Idle",
+    "pinned_group_running": "Running",
+    "pinned_group_in_review": "In review",
+    "pinned_group_pending": "Other",
+    "pinned_group_done": "Done",
     "unread_overflow": "99+"
+  },
+  "live_page": {
+    "kicker": "live activity",
+    "headline": "{{count}} agents at work",
+    "subhead": "across {{count}} initiatives.",
+    "empty_title": "Nothing happening right now",
+    "empty_hint": "Agent activity will appear here in real time as Claude Code dispatches Runs.",
+    "filter_all": "All activity",
+    "filter_running": "Live now",
+    "filter_decisions": "Decisions",
+    "filter_failures": "Failures",
+    "agent_started_message": "agent claimed the task",
+    "agent_activity_message": "agent in progress"
+  },
+  "decisions_page": {
+    "headline": "Decisions",
+    "subhead": "Captured by retrospective Runs at every Milestone closeout.",
+    "empty_title": "No decisions yet",
+    "empty_hint": "Decisions appear here as retrospective Runs review finished Initiatives and record what was learned."
+  },
+  "initiatives_page": {
+    "headline": "Initiatives",
+    "subhead": "Claude Code plans, agents execute. You watch.",
+    "counter_running": "running",
+    "counter_in_review": "in review",
+    "counter_blocked": "blocked",
+    "empty_title": "No initiatives yet",
+    "empty_hint": "Run /setup-multica in Claude Code or ask Claude to draft a PRD to seed your first initiative.",
+    "progress_milestones": "{{passed}}/{{total}} milestones",
+    "progress_issues": "{{done}}/{{total}} issues",
+    "agents_on_it": "{{count}} agents on it",
+    "no_activity": "no activity yet",
+    "blocked_indicator": "needs you",
+    "status": {
+      "draft": "Draft",
+      "ready": "Ready",
+      "running": "Running",
+      "in_review": "In review",
+      "done": "Done",
+      "blocked": "Blocked",
+      "cancelled": "Cancelled"
+    }
   }
 }

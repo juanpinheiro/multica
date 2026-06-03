@@ -2,11 +2,15 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/decisionlog"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -213,4 +217,214 @@ func TestDispatchRetrospective_EnqueuesOnceAtBoundary(t *testing.T) {
 	if count != 1 {
 		t.Errorf("after second dispatch, active retrospectives = %d, want 1 (deduped)", count)
 	}
+}
+
+// seedDecision inserts one decision_log row for a feature with the given title.
+// A retrospective task is materialised on demand so the row satisfies the
+// run_id foreign key.
+func (f decisionLogFixture) seedDecision(workspaceID, featureID, title string) {
+	f.t.Helper()
+	runID := seedDecisionRun(f.t, workspaceID, featureID)
+	if _, err := testPool.Exec(f.ctx, `
+		INSERT INTO decision_log (workspace_id, feature_id, run_id, title, decision, learning, adr_refs, context_terms)
+		VALUES ($1, $2, $3, $4, 'd', 'l', $5, $6)
+	`, workspaceID, featureID, runID, title, []string{"0004"}, []string{"Gate"}); err != nil {
+		f.t.Fatalf("seed decision %q: %v", title, err)
+	}
+	f.t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM decision_log WHERE workspace_id = $1 AND title = $2`, workspaceID, title)
+	})
+}
+
+// seedDecisionRun builds the minimal agent + issue + retrospective task chain
+// needed to satisfy decision_log.run_id. Used only by Decision Log tests.
+func seedDecisionRun(t *testing.T, workspaceID, featureID string) string {
+	t.Helper()
+	ctx := context.Background()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
+		RETURNING id
+	`, workspaceID, fmt.Sprintf("retro-seed-%d", time.Now().UnixNano()), handlerTestRuntimeID(t), testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("seed retro agent: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, feature_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES (
+			$1, $2, $3, 'done', 'none', $4, 'member',
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, workspaceID, featureID, fmt.Sprintf("retro-seed-issue-%d", time.Now().UnixNano()), testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("seed retro issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, role)
+		VALUES ($1, $2, $3, 'running', 0, 'retrospective')
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t), issueID).Scan(&taskID); err != nil {
+		t.Fatalf("seed retro task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	return taskID
+}
+
+func callListDecisionLogWorkspace(t *testing.T, workspaceID, rawQuery string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	url := "/api/decisions"
+	if rawQuery != "" {
+		url = url + "?" + rawQuery
+	}
+	req := newRequest("GET", url, nil)
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), workspaceID, db.Member{}))
+	testHandler.ListDecisionLogWorkspace(w, req)
+	return w
+}
+
+func decodeDecisionListBody(t *testing.T, w *httptest.ResponseRecorder) []decisionLogResponse {
+	t.Helper()
+	var body struct {
+		Decisions []decisionLogResponse `json:"decisions"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	return body.Decisions
+}
+
+func TestListDecisionLogWorkspace_EmptyReturnsEmptyList(t *testing.T) {
+	newDecisionLogFixture(t)
+
+	w := callListDecisionLogWorkspace(t, testWorkspaceID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if decisions := decodeDecisionListBody(t, w); len(decisions) != 0 {
+		t.Errorf("decisions = %d, want 0", len(decisions))
+	}
+}
+
+func TestListDecisionLogWorkspace_AcrossFeaturesNewestFirst(t *testing.T) {
+	f := newDecisionLogFixture(t)
+
+	featureA := f.makeFeature("in_review")
+	featureB := f.makeFeature("in_review")
+	f.seedDecision(testWorkspaceID, featureA, "first-decision")
+	time.Sleep(2 * time.Millisecond)
+	f.seedDecision(testWorkspaceID, featureB, "second-decision")
+
+	w := callListDecisionLogWorkspace(t, testWorkspaceID, "")
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	titles := titlesOf(decodeDecisionListBody(t, w))
+	if !containsBoth(titles, "first-decision", "second-decision") {
+		t.Fatalf("missing seeded decisions: %v", titles)
+	}
+	if firstIndex(titles, "second-decision") > firstIndex(titles, "first-decision") {
+		t.Errorf("expected newest first; got order: %v", titles)
+	}
+}
+
+func TestListDecisionLogWorkspace_PaginatesByLimitAndOffset(t *testing.T) {
+	f := newDecisionLogFixture(t)
+	feature := f.makeFeature("in_review")
+
+	for i := 0; i < 3; i++ {
+		f.seedDecision(testWorkspaceID, feature, fmt.Sprintf("paginated-%d-%d", time.Now().UnixNano(), i))
+		time.Sleep(1 * time.Millisecond)
+	}
+
+	limited := decodeDecisionListBody(t, callListDecisionLogWorkspace(t, testWorkspaceID, "limit=1"))
+	if len(limited) != 1 {
+		t.Fatalf("limit=1 returned %d rows", len(limited))
+	}
+
+	offset := decodeDecisionListBody(t, callListDecisionLogWorkspace(t, testWorkspaceID, "limit=1&offset=1"))
+	if len(offset) != 1 {
+		t.Fatalf("limit=1&offset=1 returned %d rows", len(offset))
+	}
+	if offset[0].ID == limited[0].ID {
+		t.Errorf("offset did not advance: same id %s", offset[0].ID)
+	}
+}
+
+func TestListDecisionLogWorkspace_IsolatesAcrossWorkspaces(t *testing.T) {
+	f := newDecisionLogFixture(t)
+
+	mine := f.makeFeature("in_review")
+	f.seedDecision(testWorkspaceID, mine, "mine-decision")
+
+	otherWorkspaceID := createOtherTestWorkspace(t)
+	otherFeature := seedFeatureInWorkspace(t, otherWorkspaceID)
+	f.seedDecision(otherWorkspaceID, otherFeature, "leaked-decision")
+
+	mineTitles := titlesOf(decodeDecisionListBody(t, callListDecisionLogWorkspace(t, testWorkspaceID, "")))
+	if !contains(mineTitles, "mine-decision") {
+		t.Errorf("mine workspace missing its own decision: %v", mineTitles)
+	}
+	if contains(mineTitles, "leaked-decision") {
+		t.Errorf("other workspace decision leaked: %v", mineTitles)
+	}
+}
+
+func seedFeatureInWorkspace(t *testing.T, workspaceID string) string {
+	t.Helper()
+	var id string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO feature (workspace_id, title, status)
+		VALUES ($1, $2, 'in_review')
+		RETURNING id
+	`, workspaceID, fmt.Sprintf("ws-isolation-%d", time.Now().UnixNano())).Scan(&id); err != nil {
+		t.Fatalf("create feature in other workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM feature WHERE id = $1`, id)
+	})
+	return id
+}
+
+func titlesOf(rows []decisionLogResponse) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.Title
+	}
+	return out
+}
+
+func contains(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if h == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func containsBoth(haystack []string, a, b string) bool {
+	return contains(haystack, a) && contains(haystack, b)
+}
+
+func firstIndex(haystack []string, needle string) int {
+	for i, h := range haystack {
+		if h == needle {
+			return i
+		}
+	}
+	return -1
 }

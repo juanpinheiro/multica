@@ -1466,6 +1466,46 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 	return i, err
 }
 
+const getFeatureTripwireUsage = `-- name: GetFeatureTripwireUsage :one
+SELECT
+    COALESCE((
+        SELECT SUM(tu.input_tokens + tu.output_tokens)
+        FROM task_usage tu
+        JOIN agent_task_queue atq ON atq.id = tu.task_id
+        JOIN issue i ON i.id = atq.issue_id
+        WHERE i.feature_id = $1
+    ), 0)::bigint AS tokens_used,
+    COALESCE((
+        SELECT SUM(EXTRACT(EPOCH FROM (atq.completed_at - atq.started_at)))
+        FROM agent_task_queue atq
+        JOIN issue i ON i.id = atq.issue_id
+        WHERE i.feature_id = $1
+          AND atq.started_at IS NOT NULL
+          AND atq.completed_at IS NOT NULL
+    ), 0)::bigint AS elapsed_seconds
+`
+
+type GetFeatureTripwireUsageRow struct {
+	TokensUsed     int64 `json:"tokens_used"`
+	ElapsedSeconds int64 `json:"elapsed_seconds"`
+}
+
+// Token consumption and elapsed run-time across every Run tied to an
+// Initiative — the inputs to the token and time tripwires (ADR-0005).
+//
+// The two aggregates are computed in independent subqueries to avoid the
+// row-multiplication that joining task_usage (one row per provider/model)
+// to agent_task_queue (one row per Run) would introduce — the run duration
+// would be counted once per usage row otherwise. Only terminal Runs with
+// both started_at and completed_at populated contribute to elapsed
+// seconds; queued / in-flight Runs have no finite duration.
+func (q *Queries) GetFeatureTripwireUsage(ctx context.Context, featureID pgtype.UUID) (GetFeatureTripwireUsageRow, error) {
+	row := q.db.QueryRow(ctx, getFeatureTripwireUsage, featureID)
+	var i GetFeatureTripwireUsageRow
+	err := row.Scan(&i.TokensUsed, &i.ElapsedSeconds)
+	return i, err
+}
+
 const getLastTaskSession = `-- name: GetLastTaskSession :one
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2

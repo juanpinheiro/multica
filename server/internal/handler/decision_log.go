@@ -4,10 +4,16 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/decisionlog"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+const (
+	decisionLogDefaultLimit = 50
+	decisionLogMaxLimit     = 200
 )
 
 const taskRoleRetrospective = "retrospective"
@@ -70,6 +76,54 @@ func (h *Handler) dispatchRetrospective(ctx context.Context, issue db.Issue) {
 	if _, err := h.TaskService.DispatchRetrospectiveRun(ctx, issue, issue.AssigneeID); err != nil {
 		slog.Warn("decision log: dispatch retrospective failed", "feature_id", uuidToString(issue.FeatureID), "error", err)
 	}
+}
+
+// ListDecisionLogWorkspace returns every recorded decision in the workspace,
+// across all Initiatives, newest first. Backs the cross-Initiative Decisions
+// view. Workspace is resolved from auth/middleware context.
+func (h *Handler) ListDecisionLogWorkspace(w http.ResponseWriter, r *http.Request) {
+	workspaceID := ctxWorkspaceID(r.Context())
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+
+	limit, offset := parseDecisionLogPagination(r)
+
+	rows, err := h.Queries.ListDecisionLogByWorkspace(r.Context(), db.ListDecisionLogByWorkspaceParams{
+		WorkspaceID: wsUUID,
+		Limit:       limit,
+		Offset:      offset,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list decision log")
+		return
+	}
+
+	resp := make([]decisionLogResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = decisionLogToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"decisions": resp})
+}
+
+func parseDecisionLogPagination(r *http.Request) (int32, int32) {
+	limit := int32(decisionLogDefaultLimit)
+	offset := int32(0)
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = int32(v)
+		}
+	}
+	if limit > decisionLogMaxLimit {
+		limit = decisionLogMaxLimit
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if v, err := strconv.Atoi(o); err == nil && v >= 0 {
+			offset = int32(v)
+		}
+	}
+	return limit, offset
 }
 
 // ListDecisionLog returns an Initiative's recorded decisions, newest first.

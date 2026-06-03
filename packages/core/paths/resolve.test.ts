@@ -18,14 +18,14 @@ function makeWs(slug: string): Workspace {
 }
 
 describe("resolvePostAuthDestination", () => {
-  it("workspace[0] → /<first.slug>/issues", () => {
+  it("workspace[0] → /<first.slug>/live", () => {
     const ws = [makeWs("acme"), makeWs("beta")];
     expect(resolvePostAuthDestination(ws)).toBe(
-      paths.workspace("acme").issues(),
+      paths.workspace("acme").live(),
     );
   });
 
-  it("no workspaces → /workspaces/new", () => {
-    expect(resolvePostAuthDestination([])).toBe(paths.newWorkspace());
+  it("no workspaces → /", () => {
+    expect(resolvePostAuthDestination([])).toBe(paths.root());
   });
 });

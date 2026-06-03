@@ -11,13 +11,13 @@ import { cn } from "@multica/ui/lib/utils";
 import { AppLink } from "../../navigation";
 import { useIssueLiveState, BoardCardLiveLayer } from "../../issues/components/board-card";
 
-function FeatureIssueCard({ issue }: { issue: Issue }) {
+function FeatureIssueCard({ issue, featureId }: { issue: Issue; featureId: string }) {
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { liveness, counters } = useIssueLiveState(issue.id, wsId, issue.status);
 
   return (
-    <AppLink href={p.issueDetail(issue.id)} className="block">
+    <AppLink href={p.initiativeIssue(featureId, issue.id)} className="block">
       <div
         className={cn(
           "rounded-lg border-[0.5px] border-border bg-card px-2.5 py-2 hover:bg-accent transition-colors",
@@ -32,7 +32,15 @@ function FeatureIssueCard({ issue }: { issue: Issue }) {
   );
 }
 
-function FeatureBoardColumn({ status, issues }: { status: IssueStatus; issues: Issue[] }) {
+function FeatureBoardColumn({
+  status,
+  issues,
+  featureId,
+}: {
+  status: IssueStatus;
+  issues: Issue[];
+  featureId: string;
+}) {
   const cfg = STATUS_CONFIG[status];
   return (
     <div data-testid={`board-column-${status}`} className="flex w-52 shrink-0 flex-col gap-1.5">
@@ -47,7 +55,7 @@ function FeatureBoardColumn({ status, issues }: { status: IssueStatus; issues: I
       </div>
       <div className="space-y-1.5">
         {issues.map((issue) => (
-          <FeatureIssueCard key={issue.id} issue={issue} />
+          <FeatureIssueCard key={issue.id} issue={issue} featureId={featureId} />
         ))}
       </div>
     </div>
@@ -70,7 +78,12 @@ export function FeatureBoardView({ featureId }: { featureId: string }) {
   return (
     <div className="flex gap-3 overflow-x-auto pb-2">
       {BOARD_STATUSES.map((status) => (
-        <FeatureBoardColumn key={status} status={status} issues={byStatus.get(status) ?? []} />
+        <FeatureBoardColumn
+          key={status}
+          status={status}
+          issues={byStatus.get(status) ?? []}
+          featureId={featureId}
+        />
       ))}
     </div>
   );

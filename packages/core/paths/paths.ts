@@ -4,7 +4,7 @@
  *
  * Two kinds of paths:
  *  - workspace-scoped: paths.workspace(slug).xxx() — carry workspace in URL
- *  - global: paths.newWorkspace() — pre-workspace routes
+ *  - global: paths.root() — the application root
  *
  * Why pure functions + builder pattern:
  *  - Changing a route shape (e.g. adding workspace slug prefix) becomes a single-file edit
@@ -17,12 +17,16 @@ const encode = (id: string) => encodeURIComponent(id);
 function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
   return {
-    root: () => `${ws}/issues`,
+    root: () => `${ws}/live`,
+    live: () => `${ws}/live`,
+    initiatives: () => `${ws}/initiatives`,
+    initiativeDetail: (id: string) => `${ws}/initiatives/${encode(id)}`,
+    initiativeIssue: (initiativeId: string, issueId: string) =>
+      `${ws}/initiatives/${encode(initiativeId)}/issues/${encode(issueId)}`,
+    decisions: () => `${ws}/decisions`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
     issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
-    features: () => `${ws}/features`,
-    featureDetail: (id: string) => `${ws}/features/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
@@ -40,20 +44,7 @@ function workspaceScoped(slug: string) {
 
 export const paths = {
   workspace: workspaceScoped,
-
-  // Global (pre-workspace) routes
-  newWorkspace: () => "/workspaces/new",
   root: () => "/",
 };
 
 export type WorkspacePaths = ReturnType<typeof workspaceScoped>;
-
-// Prefixes — not slug names — because we match against full URL paths.
-// A path is global if it equals or begins with any of these.
-// Note: `/workspaces/` (trailing slash) is the prefix — `workspaces` is reserved,
-// so any path starting with `/workspaces/...` is system-owned, not user-owned.
-const GLOBAL_PREFIXES = ["/workspaces/"];
-
-export function isGlobalPath(path: string): boolean {
-  return GLOBAL_PREFIXES.some((p) => path === p || path.startsWith(p));
-}

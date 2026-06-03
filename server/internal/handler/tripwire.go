@@ -49,10 +49,11 @@ func (h *Handler) pauseOnTripwire(ctx context.Context, issue db.Issue, status st
 	return true
 }
 
-// loadTripwireState assembles the pure tripwire snapshot from durable state. The
-// failure count and Run count come from real queries; token and wall-clock usage
-// are not yet recorded per Run, so they are sourced as 0 (their budgets stay
-// inert until that tracking lands — see issue notes).
+// loadTripwireState assembles the pure tripwire snapshot from durable state.
+// Failures and Runs come from dedicated counts; tokens and wall-clock seconds
+// are aggregated from task_usage and agent_task_queue terminal timestamps via
+// GetFeatureTripwireUsage so the token and time budgets actually trip once
+// usage crosses the cap (zero caps remain inert).
 func (h *Handler) loadTripwireState(ctx context.Context, feature db.Feature) (tripwire.State, bool) {
 	failures, err := h.Queries.MaxMilestoneValidationFailures(ctx, feature.ID)
 	if err != nil {
@@ -64,13 +65,20 @@ func (h *Handler) loadTripwireState(ctx context.Context, feature db.Feature) (tr
 		slog.Warn("tripwire: count runs failed", "feature_id", uuidToString(feature.ID), "error", err)
 		return tripwire.State{}, false
 	}
+	usage, err := h.Queries.GetFeatureTripwireUsage(ctx, feature.ID)
+	if err != nil {
+		slog.Warn("tripwire: get feature usage failed", "feature_id", uuidToString(feature.ID), "error", err)
+		return tripwire.State{}, false
+	}
 
 	return tripwire.State{
 		MaxMilestoneFailures: int(failures),
 		FailureTolerance:     int(feature.FailureTolerance),
+		TokensUsed:           usage.TokensUsed,
 		TokenBudget:          feature.BudgetTokens,
 		RunsUsed:             int(runs),
 		RunBudget:            int(feature.BudgetRuns),
+		ElapsedSeconds:       usage.ElapsedSeconds,
 		TimeBudget:           feature.BudgetSeconds,
 	}, true
 }

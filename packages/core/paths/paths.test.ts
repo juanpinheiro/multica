@@ -1,15 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { paths, isGlobalPath } from "./paths";
+import { paths } from "./paths";
 
 describe("paths.workspace(slug)", () => {
   const ws = paths.workspace("acme");
 
   it("builds workspace paths with slug prefix", () => {
+    expect(ws.root()).toBe("/acme/live");
+    expect(ws.live()).toBe("/acme/live");
+    expect(ws.initiatives()).toBe("/acme/initiatives");
+    expect(ws.initiativeDetail("init-1")).toBe("/acme/initiatives/init-1");
+    expect(ws.initiativeIssue("init-1", "issue-2")).toBe(
+      "/acme/initiatives/init-1/issues/issue-2",
+    );
+    expect(ws.decisions()).toBe("/acme/decisions");
     expect(ws.usage()).toBe("/acme/usage");
     expect(ws.issues()).toBe("/acme/issues");
     expect(ws.issueDetail("abc-123")).toBe("/acme/issues/abc-123");
-    expect(ws.features()).toBe("/acme/features");
-    expect(ws.featureDetail("p1")).toBe("/acme/features/p1");
     expect(ws.autopilots()).toBe("/acme/autopilots");
     expect(ws.autopilotDetail("a1")).toBe("/acme/autopilots/a1");
     expect(ws.agents()).toBe("/acme/agents");
@@ -28,19 +34,7 @@ describe("paths.workspace(slug)", () => {
 });
 
 describe("paths (global)", () => {
-  it("builds global paths without slug", () => {
-    expect(paths.newWorkspace()).toBe("/workspaces/new");
-  });
-});
-
-describe("isGlobalPath", () => {
-  it("returns true for pre-workspace routes", () => {
-    expect(isGlobalPath("/workspaces/new")).toBe(true);
-    expect(isGlobalPath("/workspaces/")).toBe(true);
-  });
-
-  it("returns false for workspace-scoped paths", () => {
-    expect(isGlobalPath("/acme/issues")).toBe(false);
-    expect(isGlobalPath("/")).toBe(false);
+  it("root returns /", () => {
+    expect(paths.root()).toBe("/");
   });
 });

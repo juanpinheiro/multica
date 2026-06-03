@@ -1,12 +1,12 @@
 {
   "title": "Search",
-  "description": "Search pages, issues, features, and members",
+  "description": "Search pages, issues, initiatives, and members",
   "placeholder": "Type a command or search...",
   "groups": {
     "pages": "Pages",
     "commands": "Commands",
     "members": "Members",
-    "features": "Features",
+    "features": "Initiatives",
     "issues": "Issues",
     "recent": "Recent"
   },
@@ -14,7 +14,7 @@
     "inbox": "Inbox",
     "my_issues": "My Issues",
     "issues": "Issues",
-    "features": "Features",
+    "initiatives": "Initiatives",
     "agents": "Agents",
     "runtimes": "Runtimes",
     "skills": "Skills",
@@ -34,7 +34,7 @@
   },
   "empty": {
     "no_results": "No results found.",
-    "type_to_search": "Type to search issues and features"
+    "type_to_search": "Type to search issues and initiatives"
   },
   "trigger": {
     "label": "Search..."

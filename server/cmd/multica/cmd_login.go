@@ -4,29 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 )
-
-// tryResolveAppURL returns the app URL if configured, or "" if not available.
-// Unlike resolveAppURL, it never calls os.Exit.
-func tryResolveAppURL(cmd *cobra.Command) string {
-	for _, key := range []string{"MULTICA_APP_URL", "FRONTEND_ORIGIN"} {
-		if val := strings.TrimSpace(os.Getenv(key)); val != "" {
-			return strings.TrimRight(val, "/")
-		}
-	}
-	profile := resolveProfile(cmd)
-	cfg, err := cli.LoadCLIConfigForProfile(profile)
-	if err == nil && cfg.AppURL != "" {
-		return strings.TrimRight(cfg.AppURL, "/")
-	}
-	return ""
-}
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
@@ -130,28 +113,14 @@ func autoWatchWorkspaces(cmd *cobra.Command) error {
 	return nil
 }
 
-// waitForWorkspaceCreation opens the web workspace-creation page and polls
-// until the user creates a workspace, returning the new workspace list.
-func waitForWorkspaceCreation(cmd *cobra.Command, client *cli.APIClient) ([]struct {
+// waitForWorkspaceCreation prompts the user to run /setup-multica in Claude
+// Code and polls until a workspace appears, returning the new workspace list.
+func waitForWorkspaceCreation(_ *cobra.Command, client *cli.APIClient) ([]struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 }, error) {
-	appURL := tryResolveAppURL(cmd)
-	if appURL == "" {
-		// No app URL available (e.g. token login without prior setup).
-		// Can't open the browser — tell the user to create a workspace manually.
-		fmt.Fprintln(os.Stderr, "\nNo workspaces found.")
-		fmt.Fprintln(os.Stderr, "Create a workspace in the web dashboard, then run 'multica login' again.")
-		return nil, nil
-	}
-
-	createWorkspaceURL := appURL + "/workspaces/new"
-
-	fmt.Fprintln(os.Stderr, "\nNo workspaces found. Opening workspace creation in your browser...")
-	if err := openBrowser(createWorkspaceURL); err != nil {
-		fmt.Fprintf(os.Stderr, "Could not open browser automatically.\n")
-	}
-	fmt.Fprintf(os.Stderr, "If the browser didn't open, visit:\n  %s\n", createWorkspaceURL)
+	fmt.Fprintln(os.Stderr, "\nNo workspaces found.")
+	fmt.Fprintln(os.Stderr, "Open this repo in Claude Code and run `/setup-multica` to create one.")
 	fmt.Fprintln(os.Stderr, "\nWaiting for workspace creation...")
 
 	// Poll until a workspace appears or timeout (5 minutes).

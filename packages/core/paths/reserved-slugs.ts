@@ -20,7 +20,6 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // workspace.
   "login",
   "auth",
-  "workspaces",
 
   // Backend API / health routes
   // `/api` covers all API traffic; `/ws` is the WebSocket endpoint; `/uploads`
@@ -41,11 +40,13 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "agents",
   "attachments",
   "autopilots",
+  "decisions",
   "inbox",
+  "initiatives",
   "issues",
+  "live",
   "members",
   "my-issues",
-  "features",
   "runtimes",
   "settings",
   "skills",

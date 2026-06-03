@@ -759,7 +759,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                       <Skeleton className="h-5 w-32" />
                     ) : feature ? (
                       <AppLink
-                        href={wsPaths.featureDetail(feature.id)}
+                        href={wsPaths.initiativeDetail(feature.id)}
                         className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
                       >
                         <FeatureIcon feature={feature} size="md" />

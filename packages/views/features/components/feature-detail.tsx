@@ -200,7 +200,7 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
     deleteFeatureMut.mutate(feature.id, {
       onSuccess: () => {
         toast.success(t(($) => $.detail.toast_feature_deleted));
-        router.push(wsPaths.features());
+        router.push(wsPaths.initiatives());
       },
     });
   }, [feature, deleteFeatureMut, router, wsPaths, t]);
@@ -483,7 +483,7 @@ export function FeatureDetail({ featureId }: { featureId: string }) {
               segments={[
                 {
                   label: workspaceName ?? t(($) => $.detail.breadcrumb_fallback),
-                  href: wsPaths.features(),
+                  href: wsPaths.initiatives(),
                 },
                 {
                   label: (

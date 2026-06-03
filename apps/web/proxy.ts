@@ -11,7 +11,9 @@ import {
 // links don't hit 404.
 const LEGACY_ROUTE_SEGMENTS = new Set([
   "issues",
-  "features",
+  "initiatives",
+  "live",
+  "decisions",
   "agents",
   "inbox",
   "my-issues",
@@ -49,7 +51,7 @@ export function proxy(req: NextRequest) {
   const firstSegment = pathname.split("/")[1] ?? "";
   if (LEGACY_ROUTE_SEGMENTS.has(firstSegment)) {
     const url = req.nextUrl.clone();
-    url.pathname = lastSlug ? `/${lastSlug}${pathname}` : "/workspaces/new";
+    url.pathname = lastSlug ? `/${lastSlug}${pathname}` : "/";
     return NextResponse.redirect(url);
   }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Layers2 } from "lucide-react";
+import { GitBranch, Layers2 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useCurrentWorkspace } from "@multica/core/paths";
 
@@ -29,6 +29,14 @@ export function AmbientProjectBar() {
   return (
     <div className="flex h-7 shrink-0 items-center gap-2 border-b border-border/50 bg-muted/20 px-4 text-xs text-muted-foreground">
       <span className="font-medium text-foreground">{workspace.name}</span>
+      <span aria-hidden>·</span>
+      <span
+        data-testid="ambient-branch"
+        className="inline-flex items-center gap-1 font-mono"
+      >
+        <GitBranch className="h-3 w-3" />
+        {workspace.slug}
+      </span>
       <span aria-hidden>·</span>
       <ModeTag mode={mode} />
       <span aria-hidden>·</span>

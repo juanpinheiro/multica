@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { AppLink, useNavigation } from "../navigation";
@@ -16,23 +16,23 @@ import {
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import {
-  Inbox,
-  ListTodo,
-  Bot,
-  ChevronDown,
-  ChevronRight,
-  Settings,
-  Check,
-  BookOpenText,
-  FolderKanban,
+  Activity,
   BarChart3,
+  BookOpenText,
+  Bot,
+  ChevronRight,
+  GitBranch,
+  Inbox,
+  Layers,
+  ScrollText,
+  Settings,
+  Sparkles,
+  Wrench,
   X,
   Zap,
 } from "lucide-react";
-import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
-import { StatusIcon } from "../issues/components/status-icon";
 import {
   Sidebar,
   SidebarContent,
@@ -46,52 +46,42 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@multica/ui/components/ui/sidebar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
-import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
-import { useQuery } from "@tanstack/react-query";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { inboxKeys, deduplicateInboxItems } from "@multica/core/inbox/queries";
-import { api, ApiError } from "@multica/core/api";
+import { api } from "@multica/core/api";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
-import { issueDetailOptions } from "@multica/core/issues/queries";
 import { featureDetailOptions } from "@multica/core/features/queries";
-import type { PinnedItem } from "@multica/core/types";
+import { agentTaskSnapshotOptions } from "@multica/core/agents/queries";
+import type { PinnedItem, AgentTask, Feature } from "@multica/core/types";
+import type { InitiativeStatus } from "@multica/core/initiative/status";
 import { FeatureIcon } from "../features/components/feature-icon";
 import { useT } from "../i18n";
 
 // Top-level nav items stay active when the user is on a child route
-// (e.g. "Projects" stays lit on /:slug/features/:id). Pinned items keep
-// strict equality elsewhere — a pinned project shouldn't highlight on
-// sub-pages of itself.
+// (e.g. "Initiatives" stays lit on /:slug/initiatives/:id).
 function isNavActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(href + "/");
 }
 
-// Stable empty arrays for query defaults. Using an inline `= []` default on
-// `useQuery` creates a new array reference on every render when `data` is
-// undefined (e.g. query disabled or loading) — which in turn breaks any
-// `useEffect`/`useMemo` that depends on the value, and can trigger infinite
-// re-render loops when the effect itself calls `setState`.
 const EMPTY_PINS: PinnedItem[] = [];
-const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
+const EMPTY_TASKS: AgentTask[] = [];
 
-// Nav items reference WorkspacePaths method names so they can be resolved
-// against the current workspace slug at render time (see NavItem). Labels
-// resolve at render via useT("layout"). Only parameterless paths are valid
-// nav destinations.
-type NavKey = "inbox" | "issues" | "features" | "autopilots" | "agents" | "usage" | "skills" | "settings";
-type NavLabelKey = NavKey;
+type NavKey =
+  | "live"
+  | "initiatives"
+  | "decisions"
+  | "inbox"
+  | "agents"
+  | "usage"
+  | "skills"
+  | "runtimes"
+  | "autopilots";
+type NavLabelKey = NavKey | "costs";
 
 interface NavEntry {
   key: NavKey;
@@ -99,39 +89,62 @@ interface NavEntry {
   icon: typeof Inbox;
 }
 
-// Execution and planning lead the rail; supporting surfaces follow below a gap.
+// Primary nav leads with day-to-day execution surfaces.
 const primaryNav: NavEntry[] = [
-  { key: "issues", labelKey: "issues", icon: ListTodo },
+  { key: "live", labelKey: "live", icon: Activity },
+  { key: "initiatives", labelKey: "initiatives", icon: Layers },
+  { key: "decisions", labelKey: "decisions", icon: ScrollText },
   { key: "inbox", labelKey: "inbox", icon: Inbox },
-  { key: "features", labelKey: "features", icon: FolderKanban },
 ];
 
-const secondaryNav: NavEntry[] = [
+// Workbench groups inventory / status surfaces below the primary execution row.
+const workbenchNav: NavEntry[] = [
   { key: "agents", labelKey: "agents", icon: Bot },
-  { key: "autopilots", labelKey: "autopilots", icon: Zap },
+  { key: "usage", labelKey: "costs", icon: BarChart3 },
   { key: "skills", labelKey: "skills", icon: BookOpenText },
-  { key: "usage", labelKey: "usage", icon: BarChart3 },
-  { key: "settings", labelKey: "settings", icon: Settings },
+  { key: "runtimes", labelKey: "runtimes", icon: Wrench },
+  { key: "autopilots", labelKey: "autopilots", icon: Zap },
 ];
 
-// The Multica brand mark (the favicon glyph), inlined so it adapts to the
-// active theme via semantic tokens rather than a fixed-color asset.
-function MulticaMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 100 100" role="img" aria-label="Multica" className={className}>
-      <rect width="100" height="100" rx="20" className="fill-foreground" />
-      <polygon
-        className="fill-background"
-        points="45,62.1 45,100 55,100 55,62.1 81.8,88.9 88.9,81.8 62.1,55 100,55 100,45 62.1,45 88.9,18.2 81.8,11.1 55,37.9 55,0 45,0 45,37.9 18.2,11.1 11.1,18.2 37.9,45 0,45 0,55 37.9,55 11.1,81.8 18.2,88.9"
-      />
-    </svg>
-  );
-}
+// Pinned-initiative status groups follow the prototype's ordering: running
+// first, then in_review, then everything else not yet done, then done.
+type PinGroup = {
+  labelKey: "pinned_group_running" | "pinned_group_in_review" | "pinned_group_pending" | "pinned_group_done";
+  statuses: InitiativeStatus[];
+};
+const PIN_GROUPS: PinGroup[] = [
+  { labelKey: "pinned_group_running", statuses: ["running"] },
+  { labelKey: "pinned_group_in_review", statuses: ["in_review"] },
+  { labelKey: "pinned_group_pending", statuses: ["draft", "ready", "blocked", "cancelled"] },
+  { labelKey: "pinned_group_done", statuses: ["done"] },
+];
 
-function BrandMark() {
+// Project header: brand mark, workspace name, branch (slug) + execution mode.
+// Replaces the workspace switcher dropdown — one Claude session targets one
+// workspace, so the chrome reflects identity, not selection.
+function ProjectHeader({
+  name,
+  branch,
+  mode,
+}: {
+  name: string;
+  branch: string | null;
+  mode: "worktree" | "in_place";
+}) {
   return (
-    <div className="flex items-center px-2 py-1">
-      <MulticaMark className="size-6 shrink-0" />
+    <div className="flex items-center gap-2 px-2 py-1.5">
+      <div className="grid size-7 shrink-0 place-items-center rounded-md bg-foreground text-background">
+        <Sparkles className="size-3.5" />
+      </div>
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold">{name}</div>
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <GitBranch className="size-3" />
+          {branch && <span className="truncate">{branch}</span>}
+          {branch && <span aria-hidden>·</span>}
+          <span className="font-mono">{mode}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -160,12 +173,10 @@ function NavItem({ item, badge }: { item: NavEntry; badge?: React.ReactNode }) {
 }
 
 /**
- * Presentational pin row. The `label` and `iconNode` are computed by the
- * parent `PinRow` from cached issue / project detail queries — keeping
- * this component dumb means the dnd-kit / navigation wiring lives in
- * one place and the data flow is explicit.
+ * Presentational pinned-initiative row. Drag wiring lives here; the
+ * `label` and `iconNode` come from the parent so this stays dumb.
  */
-function SortablePinItem({
+function SortableInitiativePin({
   pin,
   href,
   pathname,
@@ -242,17 +253,11 @@ function SortablePinItem({
   );
 }
 
-/**
- * Smart wrapper that resolves a pin's display data (label + status/icon)
- * from the issue / project detail query cache. Both queries are declared
- * unconditionally with `enabled` gates so the hook order stays stable
- * regardless of `pin.item_type`.
- *
- * Loading: render a flat skeleton so the sidebar height doesn't jump.
- * Missing (deleted item / 404): render nothing — the row hides itself
- * until the user unpins manually or a server-side cascade catches up.
- */
-function PinRow({
+// Resolves a feature pin's display data + status from the cached
+// featureDetailOptions query. Returns the feature so the parent can group
+// pins by current status. Renders nothing while loading / on miss to avoid
+// flashing into the wrong group.
+function FeaturePinRow({
   pin,
   href,
   pathname,
@@ -265,77 +270,30 @@ function PinRow({
   onUnpin: () => void;
   wsId: string;
 }) {
-  const isIssue = pin.item_type === "issue";
-  const issueQuery = useQuery({
-    ...issueDetailOptions(wsId, pin.item_id),
-    enabled: isIssue,
-  });
-  const featureQuery = useQuery({
-    ...featureDetailOptions(wsId, pin.item_id),
-    enabled: !isIssue,
-  });
-
-  const triggeredRef = useRef(false);
-  useEffect(() => {
-    const err = isIssue ? issueQuery.error : featureQuery.error;
-    if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
-      triggeredRef.current = true;
-      onUnpin();
-    }
-  }, [isIssue, issueQuery.error, onUnpin, featureQuery.error]);
-
-  if (isIssue) {
-    if (issueQuery.isPending) return <PinSkeleton />;
-    if (issueQuery.isError || !issueQuery.data) return null;
-    const issue = issueQuery.data;
-    const label = issue.identifier ? `${issue.identifier} ${issue.title}` : issue.title;
-    const iconNode = (
-      /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
-      <StatusIcon status={issue.status} className="!size-3.5 shrink-0" />
-    );
-    return (
-      <SortablePinItem
-        pin={pin}
-        href={href}
-        pathname={pathname}
-        onUnpin={onUnpin}
-        label={label}
-        iconNode={iconNode}
-      />
-    );
-  }
-
-  if (featureQuery.isPending) return <PinSkeleton />;
-  if (featureQuery.isError || !featureQuery.data) return null;
+  const featureQuery = useQuery(featureDetailOptions(wsId, pin.item_id));
+  if (featureQuery.isPending || featureQuery.isError || !featureQuery.data) return null;
   const feature = featureQuery.data;
-  const iconNode = <FeatureIcon feature={feature} size="sm" />;
   return (
-    <SortablePinItem
+    <SortableInitiativePin
       pin={pin}
       href={href}
       pathname={pathname}
       onUnpin={onUnpin}
       label={feature.title}
-      iconNode={iconNode}
+      iconNode={<FeatureIcon feature={feature} size="sm" />}
     />
   );
 }
 
-function PinSkeleton() {
-  return (
-    <SidebarMenuItem>
-      <div className="flex h-7 w-full items-center gap-2 px-2">
-        <div className="size-3.5 shrink-0 rounded-sm bg-sidebar-accent/40" />
-        <div className="h-3 w-24 rounded bg-sidebar-accent/40" />
-      </div>
-    </SidebarMenuItem>
-  );
+// Maps a feature's lifecycle status to its pin group.
+function findPinGroup(status: InitiativeStatus): PinGroup {
+  return PIN_GROUPS.find((g) => g.statuses.includes(status)) ?? PIN_GROUPS[2]!;
 }
 
 interface AppSidebarProps {
   /** Rendered above SidebarHeader (e.g. desktop traffic light spacer) */
   topSlot?: React.ReactNode;
-  /** Rendered in the header between workspace switcher and new-issue button (e.g. search trigger) */
+  /** Rendered in the header between project header and nav (e.g. search trigger) */
   searchSlot?: React.ReactNode;
   /** Extra className for SidebarHeader */
   headerClassName?: string;
@@ -349,7 +307,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const userId = useAuthStore((s) => s.user?.id);
   const workspace = useCurrentWorkspace();
   const p = useWorkspacePaths();
-  const { data: workspaces = EMPTY_WORKSPACES } = useQuery(workspaceListOptions());
 
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
@@ -365,23 +322,36 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     ...pinListOptions(wsId ?? "", userId ?? ""),
     enabled: !!wsId && !!userId,
   });
+  const { data: taskSnapshot = EMPTY_TASKS } = useQuery({
+    ...agentTaskSnapshotOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const runningAgentCount = useMemo(
+    () => taskSnapshot.filter((t) => t.status === "running").length,
+    [taskSnapshot],
+  );
+
   const deletePin = useDeletePin();
   const reorderPins = useReorderPins();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
 
-  // Local presentational copy of pinnedItems for drop-animation stability.
-  // Follows TQ at rest; frozen during a drag gesture so a mid-drag cache
-  // write (our own optimistic update, or a WS refetch) cannot reorder the
-  // DOM under dnd-kit while its drop animation is still interpolating.
-  const [localPinned, setLocalPinned] = useState<PinnedItem[]>(pinnedItems);
+  // Issue pins are dropped from the sidebar — issues are visited from their
+  // initiative now. Only feature pins survive into the new chrome.
+  const featurePins = useMemo(
+    () => pinnedItems.filter((pin) => pin.item_type === "feature"),
+    [pinnedItems],
+  );
+
+  // Local presentational copy of pins for drop-animation stability.
+  const [localPinned, setLocalPinned] = useState<PinnedItem[]>(featurePins);
   const isDraggingRef = useRef(false);
   useEffect(() => {
     if (!isDraggingRef.current) {
-      setLocalPinned(pinnedItems);
+      setLocalPinned(featurePins);
     }
-  }, [pinnedItems]);
+  }, [featurePins]);
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
@@ -405,54 +375,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
       <Sidebar variant="inset">
         {topSlot}
         <SidebarHeader className={cn("py-3", headerClassName)} style={headerStyle}>
-          {/* Brand mark leads the rail; project identity follows in the switcher */}
           <SidebarMenu>
             <SidebarMenuItem>
-              <BrandMark />
-            </SidebarMenuItem>
-          </SidebarMenu>
-          {/* Recent projects — navigation between known workspaces only */}
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuButton>
-                      <WorkspaceAvatar name={workspace?.name ?? "M"} size="sm" />
-                      <span className="flex-1 truncate font-medium">
-                        {workspace?.name ?? "Multica"}
-                      </span>
-                      <ChevronDown className="size-3 text-muted-foreground" />
-                    </SidebarMenuButton>
-                  }
-                />
-                <DropdownMenuContent
-                  className="w-auto min-w-56"
-                  align="start"
-                  side="bottom"
-                  sideOffset={4}
-                >
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
-                      {t(($) => $.sidebar.workspaces_label)}
-                    </DropdownMenuLabel>
-                    {workspaces.map((ws) => (
-                      <DropdownMenuItem
-                        key={ws.id}
-                        render={
-                          <AppLink href={paths.workspace(ws.slug).issues()} />
-                        }
-                      >
-                        <WorkspaceAvatar name={ws.name} size="sm" />
-                        <span className="flex-1 truncate">{ws.name}</span>
-                        {ws.id === workspace?.id && (
-                          <Check className="h-3.5 w-3.5 text-primary" />
-                        )}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <ProjectHeader
+                name={workspace?.name ?? "Multica"}
+                branch={workspace?.slug ?? null}
+                mode={workspace?.mode ?? "worktree"}
+              />
             </SidebarMenuItem>
           </SidebarMenu>
           {searchSlot && (
@@ -482,6 +411,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             </SidebarGroupContent>
           </SidebarGroup>
 
+          <SidebarGroup>
+            <SidebarGroupLabel>{t(($) => $.sidebar.workbench_label)}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {workbenchNav.map((item) => (
+                  <NavItem key={item.key} item={item} />
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
           {localPinned.length > 0 && (
             <Collapsible defaultOpen>
               <SidebarGroup className="group/pinned">
@@ -489,51 +429,165 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                   render={<CollapsibleTrigger />}
                   className="group/trigger cursor-pointer hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                 >
-                  <span>{t(($) => $.sidebar.pinned_label)}</span>
+                  <span>{t(($) => $.sidebar.pinned_initiatives_label)}</span>
                   <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
                   <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{localPinned.length}</span>
                 </SidebarGroupLabel>
                 <CollapsibleContent>
                   <SidebarGroupContent>
-                    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-                      <SortableContext items={localPinned.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-                        <SidebarMenu className="gap-0.5">
-                          {localPinned.map((pin: PinnedItem) => (
-                            <PinRow
-                              key={pin.id}
-                              pin={pin}
-                              href={pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.featureDetail(pin.item_id)}
-                              pathname={pathname}
-                              onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
-                              wsId={wsId ?? ""}
-                            />
-                          ))}
-                        </SidebarMenu>
-                      </SortableContext>
-                    </DndContext>
+                    <PinnedInitiativesByStatus
+                      pins={localPinned}
+                      pathname={pathname}
+                      wsId={wsId ?? ""}
+                      sensors={sensors}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                      onUnpin={(itemType, itemId) =>
+                        deletePin.mutate({ itemType, itemId })
+                      }
+                      featureHref={(id) => p.initiativeDetail(id)}
+                    />
                   </SidebarGroupContent>
                 </CollapsibleContent>
               </SidebarGroup>
             </Collapsible>
           )}
-
-          <SidebarGroup>
-            <SidebarGroupContent>
-              <SidebarMenu className="gap-0.5">
-                {secondaryNav.map((item) => (
-                  <NavItem key={item.key} item={item} />
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
         </SidebarContent>
 
         <SidebarFooter className="p-2">
-          <div className="flex justify-end">
-            <HelpLauncher />
+          <div className="flex items-center justify-between gap-2 px-2 py-1 text-[11px] text-muted-foreground">
+            <AgentsActiveIndicator count={runningAgentCount} suffix={t(($) => $.sidebar.agents_active_suffix)} idleLabel={t(($) => $.sidebar.no_agents_active)} />
+            <div className="flex items-center gap-1">
+              <SettingsLink href={p.settings()} pathname={pathname} label={t(($) => $.nav.settings)} />
+              <HelpLauncher />
+            </div>
           </div>
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
+  );
+}
+
+function AgentsActiveIndicator({
+  count,
+  suffix,
+  idleLabel,
+}: {
+  count: number;
+  suffix: string;
+  idleLabel: string;
+}) {
+  if (count === 0) {
+    return <span className="text-muted-foreground">{idleLabel}</span>;
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="relative inline-flex size-1.5">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+        <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+      </span>
+      <span>
+        {count} {suffix}
+      </span>
+    </span>
+  );
+}
+
+function SettingsLink({
+  href,
+  pathname,
+  label,
+}: {
+  href: string;
+  pathname: string;
+  label: string;
+}) {
+  const isActive = isNavActive(pathname, href);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<AppLink href={href} />}
+        aria-label={label}
+        className={cn(
+          "inline-flex size-7 items-center justify-center rounded-full transition-colors hover:bg-accent hover:text-foreground",
+          isActive ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        <Settings className="size-3.5" />
+      </TooltipTrigger>
+      <TooltipContent side="top" sideOffset={4}>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function PinnedInitiativesByStatus({
+  pins,
+  pathname,
+  wsId,
+  sensors,
+  onDragStart,
+  onDragEnd,
+  onUnpin,
+  featureHref,
+}: {
+  pins: PinnedItem[];
+  pathname: string;
+  wsId: string;
+  sensors: ReturnType<typeof useSensors>;
+  onDragStart: () => void;
+  onDragEnd: (event: DragEndEvent) => void;
+  onUnpin: (itemType: PinnedItem["item_type"], itemId: string) => void;
+  featureHref: (id: string) => string;
+}) {
+  const { t } = useT("layout");
+  const featureQueries = useQueries({
+    queries: pins.map((pin) => featureDetailOptions(wsId, pin.item_id)),
+  });
+  const statusKey = featureQueries.map((q) => q.data?.status ?? "?").join("|");
+
+  // Bucket pins by current feature status. Pins for which we don't yet have
+  // a cached feature land in "other" so they still render somewhere.
+  const groupedIds = useMemo(() => {
+    const byGroup = new Map<PinGroup["labelKey"], PinnedItem[]>();
+    for (const g of PIN_GROUPS) byGroup.set(g.labelKey, []);
+    pins.forEach((pin, idx) => {
+      const feature: Feature | undefined = featureQueries[idx]?.data;
+      const group = feature ? findPinGroup(feature.status) : PIN_GROUPS[2]!;
+      byGroup.get(group.labelKey)!.push(pin);
+    });
+    return byGroup;
+    // featureQueries identity churns every render; the joined status snapshot
+    // is the actual dependency that should retrigger this memo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pins, statusKey]);
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      <SortableContext items={pins.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+        {PIN_GROUPS.map((g) => {
+          const items = groupedIds.get(g.labelKey) ?? [];
+          if (items.length === 0) return null;
+          return (
+            <div key={g.labelKey} className="mb-1">
+              <SidebarGroupLabel className="text-[10px]">
+                {t(($) => $.sidebar[g.labelKey])}
+              </SidebarGroupLabel>
+              <SidebarMenu className="gap-0.5">
+                {items.map((pin) => (
+                  <FeaturePinRow
+                    key={pin.id}
+                    pin={pin}
+                    href={featureHref(pin.item_id)}
+                    pathname={pathname}
+                    onUnpin={() => onUnpin(pin.item_type, pin.item_id)}
+                    wsId={wsId}
+                  />
+                ))}
+              </SidebarMenu>
+            </div>
+          );
+        })}
+      </SortableContext>
+    </DndContext>
   );
 }

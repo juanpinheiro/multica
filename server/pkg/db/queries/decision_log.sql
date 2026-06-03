@@ -10,3 +10,11 @@ RETURNING *;
 SELECT * FROM decision_log
 WHERE feature_id = $1
 ORDER BY created_at DESC;
+
+-- name: ListDecisionLogByWorkspace :many
+-- Returns a workspace's recorded decisions across every Initiative, newest first.
+-- Backs the cross-Initiative Decisions view.
+SELECT * FROM decision_log
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
